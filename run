@@ -1,9 +1,0 @@
-# Test if Docker is running. If it's not, start it.
-FILE=/var/run/docker.pid
-if [ ! -f "$FILE" ]; then
-    echo "Docker does not appear to be running. Starting Docker."
-    sudo service docker start
-fi
-
-# Start Docker container useing the network from the host machine.
-docker run --net=host -it ros-docker:latest
