@@ -1,0 +1,47 @@
+#!/bin/bash
+# We use exe() to echo commands as we execute them.
+exe() { echo "\$ $@" ; "$@" ; }
+
+# Use 'set -e' so that if any of commands fail, the script will exit.
+set -e
+
+if [[ $# -ne 1 ]]; then
+    echo "Illegal number of parameters" >&2
+    echo "One input must be given, the name of the command to trace." >&2
+    exit 64 
+fi
+
+cmd_to_trace=$1
+echo "Tracing '$cmd_to_trace'"
+
+if [ "$(ls -A $TRACES_PATH)" ]; then
+     rm $TRACES_PATH/* -r
+fi
+
+echo Starting DynamaRIO
+exe drrun \
+        -root $DYNAMORIO_ROOT \
+        -t drcachesim \
+        -offline \
+        -outdir $TRACES_PATH \
+        -- \
+        $cmd_to_trace
+
+echo "Finished DynamaRIO. (Two superious warnings might be shown.)"
+echo
+
+# echo "  '... is this an incomplete installation?'"
+# echo "  '... does not appear to be a valid DynamoRIO root.'"
+# echo
+#echo "The output files are located $TRACES_PATH."
+#echo
+
+# Run run_portabilize_trace.sh in $TRACES_DIR."
+cd $TRACES_PATH
+
+# Posprocess the traces.
+echo "Starting run_portabilize_trace.sh"
+exe bash $SCARAB_ROOT/utils/memtrace/run_portabilize_trace.sh
+echo "Finished run_portabilize_trace.sh"
+
+

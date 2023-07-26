@@ -9,6 +9,7 @@ using std::placeholders::_1;
 
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/float64_multi_array.hpp"
+#include "/scarab/utils/scarab_markers.h"
 
 using namespace std::chrono_literals;
 
@@ -23,44 +24,40 @@ class MinimalReplier : public rclcpp::Node
     {
       subscription_ = this->create_subscription<std_msgs::msg::Float64MultiArray>("/f_input", 10, std::bind(&MinimalReplier::subscriber_callback, this, _1));
       publisher_ = this->create_publisher<std_msgs::msg::Float64MultiArray>("/f_output", 10);
-      // timer_ = this->create_wall_timer(500ms, std::bind(&MinimalReplier::reply_callback, this));
     }
 
   private:
     void subscriber_callback(const std_msgs::msg::Float64MultiArray::SharedPtr in_msg) const
     {
-      auto vec_in = in_msg->data;
+      std::vector<double> vec_in = in_msg->data;
       // string = std::string str(vec.begin(), vec.end())/*  */;
       std::string str(vec_in.begin(), vec_in.end());
 
-      RCLCPP_INFO(this->get_logger(), "I heard: '[%f, %f, %f]'", vec_in[1], vec_in[2], vec_in[3]);
+      RCLCPP_INFO(this->get_logger(), "I heard: '[%f, %f, %f]'", vec_in[0], vec_in[1], vec_in[2]);
 
       // Compute feedback.
-      // #SCARAB_START
-      std::vector<double> vec1 = { vec_in[1], 
-                                  -vec_in[2], 
-                                  -vec_in[3] };
-      // #SCARAB_END
+      scarab_roi_dump_begin();//SCARAB_START
+      std::vector<double> vec_out = { -vec_in[1], vec_in[0], -0.1*vec_in[2] };
+      scarab_roi_dump_end();//SCARAB_END
 
       // Publish feedback
       std_msgs::msg::Float64MultiArray msg;
 
       // set up dimensions
       msg.layout.dim.push_back(std_msgs::msg::MultiArrayDimension());
-      msg.layout.dim[0].size = vec1.size();
+      msg.layout.dim[0].size = vec_out.size();
       msg.layout.dim[0].stride = 1;
-      msg.layout.dim[0].label = "x"; // or whatever name you typically use to index vec1
+      msg.layout.dim[0].label = "x"; // or whatever name you typically use to index vec_out
 
       // copy in the data
       msg.data.clear();
-      msg.data.insert(msg.data.end(), vec1.begin(), vec1.end());
+      msg.data.insert(msg.data.end(), vec_out.begin(), vec_out.end());
       // message.data = "Hello, world! " + std::to_string(count_++);
       RCLCPP_INFO(this->get_logger(), 
-      "Publishing: '[%f, %f, %f]'", vec1[1], vec1[2], vec1[3]);
+      "Publishing this: '[%f, %f, %f]'", vec_out[0], vec_out[1], vec_out[2]);
 
       publisher_->publish(msg);
     }
-    rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr publisher_;
     rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr subscription_;
     size_t count_;
@@ -68,6 +65,7 @@ class MinimalReplier : public rclcpp::Node
 
 int main(int argc, char * argv[])
 {
+  cout < 'Starting replier.'
   rclcpp::init(argc, argv);
   rclcpp::spin(std::make_shared<MinimalReplier>());
   rclcpp::shutdown();

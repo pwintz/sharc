@@ -45,6 +45,27 @@
     "sstream": "cpp",
     "stdexcept": "cpp",
     "streambuf": "cpp",
-    "typeinfo": "cpp"
-  }
+    "typeinfo": "cpp",
+    "bitset": "cpp",
+    "regex": "cpp",
+    "strstream": "cpp",
+    "chrono": "cpp",
+    "cinttypes": "cpp",
+    "condition_variable": "cpp",
+    "csetjmp": "cpp",
+    "csignal": "cpp",
+    "list": "cpp",
+    "map": "cpp",
+    "set": "cpp",
+    "unordered_set": "cpp",
+    "ratio": "cpp",
+    "iomanip": "cpp",
+    "mutex": "cpp",
+    "shared_mutex": "cpp",
+    "thread": "cpp",
+    "cfenv": "cpp"
+  },
+  "ros.distro": "humble",
+  "cmake.configureOnOpen": false,
+  "cmake.sourceDirectory": "/workspaces/ros-docker/scarab/src/deps/dynamorio/clients/drcov"
 }
