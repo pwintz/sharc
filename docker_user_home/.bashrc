@@ -2,11 +2,11 @@
 source /opt/ros/foxy/setup.bash
 
 # Modify the bash prompt as follows:
-# * Show the name of the machine in green ("\e[32m") if last command succeeded, otherwise red ("\e[31m").
+# * Show the name of the machine in green if last command succeeded, otherwise red.
 # * Print the working directory relative to HOME
 # * Line break so that command can use full width of window.
 # PS1='\[\033]0;Love the unloved:$PWD\007\]' # set window title
-PS1="\[\`if [[ \$? = "0" ]]; then echo \e[32m; else echo \e[31m; fi\`\h (dev container)\e[0m"
+PS1="\[\`if [[ \$? = "0" ]]; then echo \e[32m\h\e[0m; else echo \e[31m\h\e[0m ; fi\`"
 PS1="$PS1:\w"                             # ":<current directory>"
 PS1="$PS1"'\n\$ '                         # new line and "$"
 
@@ -15,14 +15,6 @@ alias ...="cd ../.."
 alias ....="cd ../../.."
 alias .....="cd ../../../.."
 alias ......="cd ../../../../.."
-
-alias ..1=".."
-alias ..2="..."
-alias ..3="...."
-alias ..4="....."
-alias ..5="......"
-alias ..6="......."
-alias ..7="........"
 
 alias l="ls -lh"
 alias ll="ls -lah"

@@ -3,7 +3,7 @@
 #include <gsl/gsl_matrix.h>
 #include <gsl/gsl_odeiv2.h>
 
-int func(double t, const double y[], double f[],
+int flow_map(double t, const double y[], double f[],
          void *params)
 {
        (void)(t); /* avoid unused parameter warning */
@@ -32,7 +32,7 @@ int jac(double t, const double y[], double *dfdy,
 int main(void)
 {
        double mu = 10;
-       gsl_odeiv2_system sys = {func, jac, 2, &mu};
+       gsl_odeiv2_system sys = {flow_map, jac, 2, &mu};
 
        gsl_odeiv2_driver *d =
            gsl_odeiv2_driver_alloc_y_new(&sys, gsl_odeiv2_step_rkf45,

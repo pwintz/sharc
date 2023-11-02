@@ -63,7 +63,9 @@
     "mutex": "cpp",
     "shared_mutex": "cpp",
     "thread": "cpp",
-    "cfenv": "cpp"
+    "cfenv": "cpp",
+    "*.def": "c",
+    "stdlib.h": "c"
   },
   "ros.distro": "humble",
   "cmake.configureOnOpen": false,
