@@ -1,5 +1,4 @@
 #!/bin/bash
-source /opt/ros/foxy/setup.bash
 
 # Modify the bash prompt as follows:
 # * Show the name of the machine in green ("\e[32m") if last command succeeded, otherwise red ("\e[31m").
@@ -38,7 +37,6 @@ function mkcd() {
 # if hash git 2>/dev/null; then
 if command -v git &> /dev/null
 then
-
     alias tig="tig --all"
 
     alias f='git fetch --all';

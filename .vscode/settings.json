@@ -65,9 +65,28 @@
     "thread": "cpp",
     "cfenv": "cpp",
     "*.def": "c",
-    "stdlib.h": "c"
+    "stdlib.h": "c",
+    "complex": "cpp",
+    "typeindex": "cpp",
+    "variant": "cpp",
+    "libc_qsort.h": "c",
+    "any": "cpp",
+    "compare": "cpp",
+    "concepts": "cpp",
+    "forward_list": "cpp",
+    "numbers": "cpp",
+    "semaphore": "cpp",
+    "stop_token": "cpp"
   },
-  "ros.distro": "humble",
   "cmake.configureOnOpen": false,
-  "cmake.sourceDirectory": "/workspaces/ros-docker/scarab/src/deps/dynamorio/clients/drcov"
+  "cmake.sourceDirectory": "/workspaces/ros-docker/scarab/src/deps/dynamorio/clients/drcov",
+  "python.autoComplete.extraPaths": [
+    "/opt/ros/humble/lib/python3.10/site-packages",
+    "/opt/ros/humble/local/lib/python3.10/dist-packages"
+  ],
+  "python.analysis.extraPaths": [
+    "/opt/ros/humble/lib/python3.10/site-packages",
+    "/opt/ros/humble/local/lib/python3.10/dist-packages"
+  ],
+  "files.autoSave": "onFocusChange"
 }

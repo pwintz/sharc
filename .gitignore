@@ -99,4 +99,7 @@ qtcreator-*
 # Catkin custom files
 CATKIN_IGNORE
 
-# End of https://www.toptal.com/developers/gitignore/api/c++,ros
+# End of https://www.toptal.com/developers/gitignore/api/c++,rosid_rsa
+
+# Don't share private key!
+id_rsa
