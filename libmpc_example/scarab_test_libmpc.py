@@ -79,8 +79,8 @@ def run_scarab(cmd_to_simulate):
 def __main():
   global args
 
-  # cmd_to_simulate = 'test_libmpc';
-  cmd_to_simulate = 'pipewriter';
+  cmd_to_simulate = 'test_libmpc';
+  # cmd_to_simulate = 'pipewriter';
   parser = argparse.ArgumentParser(description=f'Test Scarab on {cmd_to_simulate}')
   parser.add_argument('sim_dir', nargs='?', help='Path to the simulation directory.', default="sim_dir")
   args = parser.parse_args()

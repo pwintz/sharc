@@ -9,28 +9,46 @@ LIBMPC_MAIN = test_libmpc
 LIBMPC_SRCS = test_libmpc.cpp
 LIBMPC_OBJS = $(LIBMPC_SRCS:.cpp=.o)
 
+# Eigen Test
+EIGEN_MAIN = test_eigen
+EIGEN_SRCS = test_eigen.cpp
+EIGEN_OBJS = $(EIGEN_SRCS:.cpp=.o)
+
 # Linker flags
 LDFLAGS = # -L/usr/local/mysql-connector-c++/lib64
 
 # The command "-lm" is from the NLopt documentation.
 LDLIBS = -lnlopt -lm -losqp
 
-.PHONY: clean simulate
+.PHONY: clean simulate run
+
+run: test_libmpc sim_dir sim_dir/x_c++_to_py sim_dir/u_c++_to_py sim_dir/x_py_to_c++
+	./test_libmpc
 
 # LIBMPC
 $(LIBMPC_MAIN): $(LIBMPC_OBJS)
 		$(CXX) -o $(LIBMPC_MAIN) $(LIBMPC_OBJS) $(LDFLAGS) $(LDLIBS)
 
+# Eigen
+$(EIGEN_MAIN): $(EIGEN_OBJS)
+		$(CXX) -o $(EIGEN_MAIN) $(EIGEN_OBJS) $(LDFLAGS) $(LDLIBS)
+
 # read_input: read_input.cpp ~/scarab/utils/scarab_markers.h 
 # 	$(CXX) -o read_input read_input.cpp -O2 -static -I ~/scarab/utils
 
-my_pipe: 
-	mkfifo my_pipe
+sim_dir/x_c++_to_py: sim_dir
+	mkfifo sim_dir/x_c++_to_py
+
+sim_dir/u_c++_to_py: sim_dir
+	mkfifo sim_dir/u_c++_to_py
+
+sim_dir/x_py_to_c++: sim_dir
+	mkfifo sim_dir/x_py_to_c++
 
 sim_dir:
 	mkdir sim_dir
 
-simulate: sim_dir my_pipe
+simulate: sim_dir sim_dir/x_c++_to_py sim_dir/u_c++_to_py sim_dir/x_py_to_c++
 	./scarab_test_libmpc.py sim_dir
 
 clean:
