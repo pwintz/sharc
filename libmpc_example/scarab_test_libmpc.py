@@ -51,42 +51,44 @@ example_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(scarab_root_path + '/bin')
 from scarab_globals import *
 
-def build_test_libmpc():
-  print('Building the test read_input static binary')
+def build_test_libmpc(cmd_to_make):
+  print(f'Building the {cmd_to_make} static binary')
   curr_dir = os.getcwd()
   # os.chdir(scarab_paths.sim_dir + '/utils/qsort')
-  subprocess.check_call(['make', 'test_libmpc'])
+  subprocess.check_call(['make', cmd_to_make])
   os.chdir(curr_dir)
 
 def switch_to_sim_dir():
   print ('Simulation Directory:', os.path.abspath(args.sim_dir))
   os.chdir(args.sim_dir)
 
-def run_scarab():
+def run_scarab(cmd_to_simulate):
   scarab_cmd_argv = [sys.executable,
                      scarab_paths.bin_dir + '/scarab_launch.py',
                      '--program',
-                     example_dir + '/test_libmpc',
+                     example_dir + '/' + cmd_to_simulate,
                      '--param',
                      example_dir + '/PARAMS.test_libmpc',
                      '--pintool_args',
                      '-fast_forward_to_start_inst 1',
                      '--scarab_args',
-                     '--inst_limit 5000000 --heartbeat_interval 1 --num_heartbeats 20']# --power_intf_on 1']
+                     '--inst_limit 150000000 --heartbeat_interval 1 --num_heartbeats 20']# --power_intf_on 1']
   print ('Scarab cmd:', ' '.join(scarab_cmd_argv))
   subprocess.check_call(scarab_cmd_argv)
 
 def __main():
   global args
 
-  parser = argparse.ArgumentParser(description='Test Scarab on test_libmpc')
+  # cmd_to_simulate = 'test_libmpc';
+  cmd_to_simulate = 'pipewriter';
+  parser = argparse.ArgumentParser(description=f'Test Scarab on {cmd_to_simulate}')
   parser.add_argument('sim_dir', nargs='?', help='Path to the simulation directory.', default="sim_dir")
   args = parser.parse_args()
 
   os.makedirs(args.sim_dir, exist_ok=True)
-  build_test_libmpc()
+  build_test_libmpc(cmd_to_simulate)
   switch_to_sim_dir()
-  run_scarab()
+  run_scarab(cmd_to_simulate)
 
 if __name__ == "__main__":
   __main()

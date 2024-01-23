@@ -258,3 +258,6 @@ RUN git clone https://github.com/catchorg/Catch2.git /tmp/Catch2 \
 RUN ldconfig
 
 USER $USERNAME
+
+# 
+COPY --chown=$USERNAME docker_user_home/.bashrc /home/$USERNAME/.bashrc

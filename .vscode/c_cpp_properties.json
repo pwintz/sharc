@@ -4,13 +4,18 @@
             "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/**",
-                "~/scarab/utils"
+                "~/scarab/utils",
+                "/usr/local/include",
+                "/usr/include/eigen3",
+                "/usr/local/include/osqp",
+                "/home/dcuser/libmpc-0.4.0/include/",
+                "/home/dcuser/scarab/utils"
             ],
             "defines": [],
-            "compilerPath": "/usr/bin/clang",
+            "compilerPath": "/usr/bin/g++-11",
             "cStandard": "c17",
             "cppStandard": "c++14",
-            "intelliSenseMode": "linux-clang-x64",
+            "intelliSenseMode": "linux-gcc-x64",
             "configurationProvider": "ms-vscode.makefile-tools"
         }
     ],

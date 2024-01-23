@@ -1,7 +1,7 @@
 CXX = g++-11
 CC = gcc-11
 CXXFLAGS = -std=c++20
-CPPFLAGS = -I/usr/local/include -I/usr/include/eigen3 -I/usr/local/include/osqp -I/home/dcuser/libmpc-0.4.0/include/
+CPPFLAGS = -I/usr/local/include -I/usr/include/eigen3 -I/usr/local/include/osqp -I/home/dcuser/libmpc-0.4.0/include/ -I/home/dcuser/scarab/utils
 CFLAGS = -I /usr/local/include/osqp
 
 # libmpc++ Test
@@ -24,13 +24,16 @@ $(LIBMPC_MAIN): $(LIBMPC_OBJS)
 # read_input: read_input.cpp ~/scarab/utils/scarab_markers.h 
 # 	$(CXX) -o read_input read_input.cpp -O2 -static -I ~/scarab/utils
 
+my_pipe: 
+	mkfifo my_pipe
+
 sim_dir:
 	mkdir sim_dir
 
-simulate: sim_dir
+simulate: sim_dir my_pipe
 	./scarab_test_libmpc.py sim_dir
 
 clean:
-	rm -f test_libmpc test_libmpc.o sim_dir/*
+	rm -f test_libmpc test_libmpc.o sim_dir/* my_pipe
 
 
