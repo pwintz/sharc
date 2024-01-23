@@ -57,7 +57,7 @@ int main()
         3 * n*n, 0,    0, 2*n,
         0,       0, -2*n,   0;
 
-  // Define matrix B
+  // Define matrix B_c
   Bc << 0, 0,
         0, 0,
         0, 1,

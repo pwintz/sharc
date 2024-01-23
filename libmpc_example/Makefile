@@ -25,7 +25,7 @@ LDLIBS = -lnlopt -lm -losqp
 run: test_libmpc sim_dir sim_dir/x_c++_to_py sim_dir/u_c++_to_py sim_dir/x_py_to_c++
 	./test_libmpc
 
-# LIBMPC
+# LIBMPC - Run test_libmpc without Scarab. 
 $(LIBMPC_MAIN): $(LIBMPC_OBJS)
 		$(CXX) -o $(LIBMPC_MAIN) $(LIBMPC_OBJS) $(LDFLAGS) $(LDLIBS)
 
@@ -36,18 +36,23 @@ $(EIGEN_MAIN): $(EIGEN_OBJS)
 # read_input: read_input.cpp ~/scarab/utils/scarab_markers.h 
 # 	$(CXX) -o read_input read_input.cpp -O2 -static -I ~/scarab/utils
 
+# Create in/out pipe files for communicating between C++ and Python.
 sim_dir/x_c++_to_py: sim_dir
 	mkfifo sim_dir/x_c++_to_py
 
+# Create in/out pipe files for communicating between C++ and Python.
 sim_dir/u_c++_to_py: sim_dir
 	mkfifo sim_dir/u_c++_to_py
 
+# Create in/out pipe files for communicating between C++ and Python.
 sim_dir/x_py_to_c++: sim_dir
 	mkfifo sim_dir/x_py_to_c++
 
+# Create the simulation directory where the stats from Scarab are generated and the in/out pipe files for communicating between C++ and Python are placed.
 sim_dir:
 	mkdir sim_dir
 
+# Simulate test_libmpc using Scarab while communicating with the Python ODE solver.
 simulate: sim_dir sim_dir/x_c++_to_py sim_dir/u_c++_to_py sim_dir/x_py_to_c++
 	./scarab_test_libmpc.py sim_dir
 
