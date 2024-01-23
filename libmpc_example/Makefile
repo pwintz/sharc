@@ -1,7 +1,7 @@
 CXX = g++-11
 CC = gcc-11
 CXXFLAGS = -std=c++20
-CPPFLAGS = -I/usr/local/include -I/usr/include/eigen3 -I/usr/local/include/osqp -I/home/dcuser/libmpc-0.4.0/include/ -I/home/dcuser/scarab/utils
+CPPFLAGS = -I/usr/local/include -I/usr/include/eigen3 -I/usr/local/include/osqp -I/home/dcuser/libmpc-0.4.0/include/ -I/home/dcuser/scarab/utils -Wno-deprecated-enum-enum-conversion
 CFLAGS = -I /usr/local/include/osqp
 
 # libmpc++ Test
