@@ -45,18 +45,66 @@ class ScarabData:
         self.cmd_stdout = cmd_stdout
         self.cmd_stderr = cmd_stderr
 
+class ScarabStatsReader:
+  def __init__(self, stats_dir_path):
+      self.stats_dir_path = stats_dir_path
+
+  def getStatsFilePath(self, k) -> os.PathLike:
+    file_name = f"core.stat.0.csv.roi.{k}"
+    file_path = os.path.join(self.stats_dir_path, file_name)
+    return file_path
+
+  def waitForStatsFile(self,k):
+    file_path = self.getStatsFilePath(k)
+    # if not file_path:
+    #    raise
+    while not os.path.exists(file_path):
+       pass
+
+  def readTime(self, k):  
+    with open(self.getStatsFilePath(k), 'r') as stats_file:
+       for line in stats_file:
+            if line.startswith("EXECUTION_TIME_count"):
+                parts = line.split(',')
+                try:
+                    time_in_femtosecs = float(parts[1].strip())
+                    time_in_secs = time_in_femtosecs * SECONDS_PER_FEMTOSECOND
+                    return time_in_secs
+                except (IndexError, ValueError) as e:
+                    # Handle the case where the value after comma is not a valid number
+                    print('Error when parsing Scarab statistics!')
+                    raise e
+       
+     
+
 class Scarab:
 
     def __init__(self, 
-                 traces_path=os.environ['TRACES_PATH'], 
-                 dynamorio_root=os.environ['DYNAMORIO_ROOT'], 
-                 scarab_root=os.environ['SCARAB_ROOT'], 
-                 scarab_out_path=os.environ['SCARAB_OUT_PATH'], 
+                 traces_path=None, 
+                 dynamorio_root=None, 
+                 scarab_root=None, 
+                 scarab_out_path=None, 
                  subprocess_run=run):
-        self.TRACES_PATH = traces_path
-        self.DYNAMORIO_ROOT = dynamorio_root
-        self.SCARAB_ROOT = scarab_root
-        self.SCARAB_OUT_PATH = scarab_out_path
+        if traces_path:
+          self.TRACES_PATH = traces_path
+        else:
+          self.TRACES_PATH = os.environ['TRACES_PATH']
+          
+        if dynamorio_root:
+          self.DYNAMORIO_ROOT = dynamorio_root
+        else:
+          self.DYNAMORIO_ROOT = os.environ['DYNAMORIO_ROOT']
+
+        if scarab_root:
+          self.SCARAB_ROOT = scarab_root
+        else:
+          self.SCARAB_ROOT = os.environ['SCARAB_ROOT']
+
+        if scarab_out_path:
+          self.SCARAB_OUT_PATH = scarab_out_path
+        else:
+          self.SCARAB_OUT_PATH = os.environ['SCARAB_OUT_PATH']
+            
         self.subprocess_run = subprocess_run
         self.verbose = False
 
@@ -170,14 +218,14 @@ class Scarab:
         return data
 
 
-if __name__ == "__main__":
-    scarab = Scarab();
-    # trace_dir = scarab.trace_cmd('touch', '~/mytestfile.txt')
-    # scarab.simulate_trace_with_scarab("/workspaces/ros-docker/drmemtrace.python3.8.122943.1703.dir")
-    print(os.getcwd())
-    data = scarab.simulate('./3x3_proportional_controller', ['1.43'])
-    print(os.getcwd())
-    data = scarab.simulate('./3x3_proportional_controller', ['1.43'])
-    print(f"time: {data.simulated_time_seconds:0.6} seconds ({data.simulated_time_microseconds:0.4} microseconds).")
-    print('Standard output:')
-    print(data.cmd_stdout)
+# if __name__ == "__main__":
+#     scarab = Scarab();
+#     # trace_dir = scarab.trace_cmd('touch', '~/mytestfile.txt')
+#     # scarab.simulate_trace_with_scarab("/workspaces/ros-docker/drmemtrace.python3.8.122943.1703.dir")
+#     print(os.getcwd())
+#     data = scarab.simulate('./3x3_proportional_controller', ['1.43'])
+#     print(os.getcwd())
+#     data = scarab.simulate('./3x3_proportional_controller', ['1.43'])
+#     print(f"time: {data.simulated_time_seconds:0.6} seconds ({data.simulated_time_microseconds:0.4} microseconds).")
+#     print('Standard output:')
+#     print(data.cmd_stdout)

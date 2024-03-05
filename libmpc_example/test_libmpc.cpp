@@ -15,7 +15,10 @@ int main()
 
   scarab_begin(); // this is needed for '--pintool_args -fast_forward_to_start_inst 1'
 
-  std::cout << "Successfully included mpc/LMPC.hpp" << std::endl;
+  // scarab_roi_dump_begin(); 
+  // scarab_roi_dump_end();
+
+//   // std::cout << "Successfully included mpc/LMPC.hpp" << std::endl;
   const int Tnx = 4; // State dimension
   const int Tnu = 2;  // Control dimension
   const int Tndu = 1; // Control disturbance dimension
@@ -23,8 +26,9 @@ int main()
   const int prediction_horizon = 2;
   const int control_horizon = 1;
 
+  std::cout << "Creating LMPC object..." << std::endl;
   LMPC<Tnx, Tnu, Tndu, Tny, prediction_horizon, control_horizon> lmpc;
-  std::cout << "Created LMPC object" << std::endl;
+  std::cout << "Finished creating LMPC object." << std::endl;
 
   LParameters params;
 
@@ -40,11 +44,14 @@ int main()
   params.adaptive_rho = true;
   params.polish = true;
 
+  std::cout << "Set parameters..." << std::endl;
   lmpc.setOptimizerParameters(params);
-  std::cout << "Set parameters" << std::endl;
+  std::cout << "Finshed setting parameters" << std::endl;
 
   lmpc.setLoggerLevel(Logger::log_level::NORMAL);
 
+
+  std::cout << "Creating Matrices" << std::endl;
   // Continuous-time Matrices for \dot{x} = Ax + bu. 
   // Model is the HCW equations for relative satellite motion.
   mat<Tnx, Tnx> Ac;
@@ -64,34 +71,41 @@ int main()
         1, 0;
 
   // Define the time variable t
-  double t = 2.0;
+  // double t = 2.0;
 
   // Compute the matrix exponential exp(A*t)
   mat<Tnx, Tnx> Ad;
   Ad << 1.0001, 0, 9.9998, 0.1000,
-          -0.0000, 1.0000, -0.1000, 9.9993,
-          0.0000, 0, 1.0000, 0.0200,
-          -0.0000, 0, -0.0200, 0.9998;
+       -0.0000, 1.0000, -0.1000, 9.9993,
+        0.0000, 0, 1.0000, 0.0200,
+       -0.0000, 0, -0.0200, 0.9998;
+
+  // // Print the Ad matrix
+  // std::cout << "Ad matrix:" << std::endl;
+  // std::cout << Ad.format(fmt) << std::endl << std::endl;
+
 
   mat<Tnx, Tnu> Bd;
   Bd << 49.9996, 0.3333,
         -0.3333, 49.9983,
         9.9998, 0.1000,
         -0.1000, 9.9993;
-      
-    // State to output matrix
-    mat<Tny, Tnx> Cd;
-    Cd.setIdentity();
+    
+  // State to output matrix
+  mat<Tny, Tnx> Cd;
+  Cd.setIdentity();
 
-    // Input to output matrix
-    mat<Tny, Tnu> Dd;
-    Dd.setZero();
+  // Input to output matrix
+  mat<Tny, Tnu> Dd;
+  Dd.setZero();
+  
+  std::cout << "Finished creating Matrices" << std::endl;
 
-    lmpc.setStateSpaceModel(Ad, Bd, Cd);
+  lmpc.setStateSpaceModel(Ad, Bd, Cd);
 
-    lmpc.setDisturbances(
-        mat<Tnx, Tndu>::Zero(),
-        mat<Tny, Tndu>::Zero());
+  lmpc.setDisturbances(
+      mat<Tnx, Tndu>::Zero(),
+      mat<Tny, Tndu>::Zero());
 
 // ======== Weights ========== //
 
@@ -157,64 +171,76 @@ int main()
   std::ifstream x_infile(x_in_filename);
   std::cout << "All files open." << std::endl;
 
-     mpc::cvec<Tnx> modelX, modeldX;
-     mpc::cvec<Tnu> last_u;
+  mpc::cvec<Tnx> modelX, modeldX;
+  modelX << 100, 100, 100, -100;
 
-     modelX << 100, 100, 100, -100;
-     last_u = cvec<Tnu>::Zero();
+  // Create a vector for storing the control input from the previous time step.
+  mpc::cvec<Tnu> last_u;
+  last_u = cvec<Tnu>::Zero();
 
-     for (int i = 0; i < 100; i++)
-     {
-          // Begin a batch of Scarab statistics
-          scarab_roi_dump_begin(); 
+  for (int i = 0; i < 100; i++)
+  {
+    std::cout << std::endl << "====== Starting loop #" << i << " ======" << std::endl;
+    // Begin a batch of Scarab statistics
+    scarab_roi_dump_begin(); 
 
-          // Compute a step of the MPC controller.
-          auto res = lmpc.step(modelX, last_u);
-          auto optseq = lmpc.getOptimalSequence();
+    // Compute a step of the MPC controller.
+    auto res = lmpc.step(modelX, last_u);
+    auto optseq = lmpc.getOptimalSequence();
 
-          // Save a batch of Scarab statistics
-          scarab_roi_dump_end();
+    // Save a batch of Scarab statistics
+    scarab_roi_dump_end();
 
-          // std::cout << "About to print to file." << std::endl;
-          //     scarab_roi_dump_begin(); 
-          // //     scarab_roi_dump_end();std::cout
-          // x_outfile << Ad.format(fmt) << std::endl << std::endl;
+    // std::cout << "About to print to file." << std::endl;
 
-          // std::cout << Ad.format(fmt) << std::endl << std::endl;
-          // std::cout << optseq.input.row(0) << std::endl;
-          auto u = optseq.input.row(0);
-          auto x = optseq.state.row(0);
-          std::cout << "x:" << x << std::endl;
+    // The output of u and x are row vectors.
+    auto u = optseq.input.row(0);
+    auto x_out = modelX.transpose(); // optseq.state.row(0);
+    // std::cout << "x_out: " << x_out << std::endl;
+    // std::cout << "u: " << u << std::endl;
 
-          x_outfile << x.row(0).format(fmt) << std::endl;
-          u_outfile << u.row(0).format(fmt) << std::endl;
+    std::cout << "optseq.state.row(0):" << optseq.state.row(0).format(fmt) << std::endl;
+    std::cout << "optseq.state.row(1):" << optseq.state.row(1).format(fmt) << std::endl;
+    // std::cout << "optseq.state.row(2):" << optseq.state.row(2).format(fmt) << std::endl;
 
-          // Read and print the contents of the file
-          std::string line_from_py;
-          std::cout << "Getting line from python: " << line_from_py << std::endl;
-          std::getline(x_infile, line_from_py);
-          std::cout << "Line from python: " << line_from_py << std::endl;
+    // Format the numerical arrays into strings (single lines) that we pass to Python.
+    auto x_out_str = x_out.format(fmt);
+    auto u_out_str = u.format(fmt);
 
-          // Create a stringstream to parse the string
-          std::stringstream ss(line_from_py);
+    // Pass the strings for x_out and u to the outfiles, 
+    // which are watched by Python.
+    std::cout << "x (send to Python): " << x_out_str << std::endl;
+    x_outfile << "Loop " << i << ": " << x_out_str << std::endl;
 
-          for (int j_entry = 0; j_entry < modelX.rows(); j_entry++) {
-               char comma; // to read and discard the comma
-               ss >> modelX(j_entry) >> comma;
-               // std::cout << "Value from stringstream:" << modelX(j_entry) << std::endl;
-               // modelX(j_entry) = value;
+    std::cout << "u (send to Python): " << u_out_str << std::endl;
+    u_outfile <<  "Loop " << i << ": " << u_out_str << std::endl;
 
-               // std::cout << "Finished printing to file." << std::endl;
-          }
-          std::cout << "x' from Python: " << modelX.transpose().format(fmt) << std::endl;
 
-          // Set the model state to the next value of x from the optimal sequence. 
-          modelX = x;
-          last_u = u;
-     }    
+    // Read and print the contents of the file from Python.
+    std::string line_from_py;
+    // std::cout << "Getting line from python: " << std::endl;
+    std::getline(x_infile, line_from_py);
+    std::cout << "Line from python: " << line_from_py << std::endl;
 
-     x_outfile.close();
-     x_infile.close();
+    // Create a stringstream to parse the string
+    std::stringstream ss(line_from_py);
 
-     return 0;
+    for (int j_entry = 0; j_entry < modelX.rows(); j_entry++) {
+      char comma; // to read and discard the comma
+      ss >> modelX(j_entry) >> comma;
+      // std::cout << "Value from stringstream:" << modelX(j_entry) << std::endl;
+      // modelX(j_entry) = value;
+    }
+    std::cout << "x (from Python): " << modelX.transpose().format(fmt) << std::endl;
+
+    // Set the model state to the next value of x from the optimal sequence. 
+    // modelX = x_out;
+    last_u = u;
+  }    
+
+  x_outfile.close();
+  x_infile.close();
+  u_outfile.close();
+
+  return 0;
 }
