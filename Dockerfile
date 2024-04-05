@@ -19,6 +19,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
     liblz4-dev \
     g++-9 \
     g++-9-multilib \
+    gdb \
     doxygen \
     libconfig++-dev \
     libboost-dev \

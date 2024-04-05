@@ -1,0 +1,19 @@
+{
+  "use_computational_delays": true,
+  "sample_time": 0.1,
+  "n_time_steps": 10,
+  "x0": [1, 1, 30],
+  "umin": -999999, 
+  "umax": 999999,
+  "xmin": [0, 0, 1], 
+  "xmax": [999999, 999999, 999999],
+  "enable_mpc_warm_start": false,
+  "osqp_time_limit": 0,
+  "osqp_verbose": false,
+  "===========NOT USED=========": "(comment)",
+  "state_dimension": 3,
+  "input_dimension": 1,
+  "A": [1, 2, 3],
+  "prediction_horizon": 10,
+  "control_horizon": 1
+}

@@ -62,24 +62,31 @@ def switch_to_sim_dir():
   print ('Simulation Directory:', os.path.abspath(args.sim_dir))
   os.chdir(args.sim_dir)
 
-def run_scarab(cmd_to_simulate):
+def run_scarab(cmd_to_simulate, no_scarab=False):
+  if no_scarab:
+      subprocess.check_call(example_dir + '/' + cmd_to_simulate)
+      return
+
   scarab_cmd_argv = [sys.executable,
                      scarab_paths.bin_dir + '/scarab_launch.py',
-                     '--program',
-                     example_dir + '/' + cmd_to_simulate,
-                     '--param',
-                     example_dir + '/PARAMS.test_libmpc',
+                     '--program', example_dir + '/' + cmd_to_simulate,
+                     '--param', example_dir + '/PARAMS.test_libmpc',
+                    #  '--simdir', 'sim_dir',
                      '--pintool_args',
                      '-fast_forward_to_start_inst 1',
                      '--scarab_args',
-                     '--inst_limit 150000000 --heartbeat_interval 1 --num_heartbeats 20']# --power_intf_on 1']
+                     '--inst_limit 1500000000'
+                    #  '--heartbeat_interval 1', 
+                    #  '--num_heartbeats 50'
+                     ]# --power_intf_on 1']
   print ('Scarab cmd:', ' '.join(scarab_cmd_argv))
   subprocess.check_call(scarab_cmd_argv)
 
 def __main():
   global args
 
-  cmd_to_simulate = 'test_libmpc';
+  # cmd_to_simulate = 'test_libmpc';
+  cmd_to_simulate = 'acc_controller';
   # cmd_to_simulate = 'pipewriter';
   parser = argparse.ArgumentParser(description=f'Test Scarab on {cmd_to_simulate}')
   parser.add_argument('sim_dir', nargs='?', help='Path to the simulation directory.', default="sim_dir")
@@ -88,7 +95,7 @@ def __main():
   os.makedirs(args.sim_dir, exist_ok=True)
   build_test_libmpc(cmd_to_simulate)
   switch_to_sim_dir()
-  run_scarab(cmd_to_simulate)
+  run_scarab(cmd_to_simulate, no_scarab=False)
 
 if __name__ == "__main__":
   __main()

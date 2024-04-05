@@ -78,21 +78,22 @@
     "semaphore": "cpp",
     "stop_token": "cpp",
     "core": "cpp",
-    "dense": "cpp"
+    "dense": "cpp",
+    "cerrno": "cpp",
+    "matrixfunctions": "cpp",
+    "eigenvalues": "cpp",
+    "codecvt": "cpp",
+    "ranges": "cpp",
+    "valarray": "cpp",
+    "charconv": "cpp",
+    "*.ipp": "cpp"
   },
-  "cmake.configureOnOpen": false,
-  "cmake.sourceDirectory": "/workspaces/ros-docker/scarab/src/deps/dynamorio/clients/drcov",
-  "python.autoComplete.extraPaths": [
-    "/opt/ros/humble/lib/python3.10/site-packages",
-    "/opt/ros/humble/local/lib/python3.10/dist-packages"
-  ],
-  "python.analysis.extraPaths": [
-    "/opt/ros/humble/lib/python3.10/site-packages",
-    "/opt/ros/humble/local/lib/python3.10/dist-packages"
-  ],
   "files.autoSave": "onFocusChange",
   "terminal.integrated.profiles.windows": {
-
+    "Git Bash": {
+      "source": "Git Bash",
+      "args": ["-l"]
+    },
     "PowerShell": {
       "source": "PowerShell",
       "icon": "terminal-powershell"
@@ -104,10 +105,6 @@
       ],
       "args": [],
       "icon": "terminal-cmd"
-    },
-    "Git Bash": {
-      "source": "Git Bash",
-      "args": ["-l"]
     }
   },
   "terminal.integrated.profiles.linux": {
@@ -132,5 +129,13 @@
       "icon": "terminal-powershell"
     }
   },
-  "editor.detectIndentation": false
+  "editor.detectIndentation": false,
+  "makefile.makeDirectory": "libmpc_example",
+  "makefile.launchConfigurations": [
+    {
+      "cwd": "/workspaces/ros-docker/libmpc_example",
+      "binaryPath": "/workspaces/ros-docker/libmpc_example/acc_controller",
+      "binaryArgs": []
+    }
+  ]
 }

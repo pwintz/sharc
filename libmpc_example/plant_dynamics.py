@@ -5,8 +5,6 @@ from scipy.integrate import ode
 import sys
 sys.path.append('/workspaces/ros-docker/')
 
-
-
 import os
 os.chdir('/workspaces/ros-docker/libmpc_example')
 # os.environ['TRACES_PATH'] = '/path/to/traces'
@@ -15,35 +13,44 @@ os.chdir('/workspaces/ros-docker/libmpc_example')
 # os.environ['SCARAB_OUT_PATH'] = '/path/to/scarab/out'
 import scarabizor
 
+import json
+
+# Read config.json.
+with open('config.json') as json_data:
+    config_data = json.load(json_data)
+
+# Read system_dynamics.json.
+with open('system_dynamics.json') as json_data:
+    system_dynamics_data = json.load(json_data)
+
 stats_reader = scarabizor.ScarabStatsReader('sim_dir')
 
 # Settings
 debug_level = 1
+use_scarab_delays = True
 
 #  File names for the pipes we use for communicating with C++.
 x_out_filename = 'sim_dir/x_py_to_c++'
 u_in_filename = 'sim_dir/u_c++_to_py'
 x_in_filename = 'sim_dir/x_c++_to_py'
+# File names for recording values, to use in plotting.
 x_data_filename = 'sim_dir/x_data.csv'
 u_data_filename = 'sim_dir/u_data.csv'
 t_data_filename = 'sim_dir/t_data.csv'
 
-n = 1e-3  # For low-Earth orbit.
+n_time_steps = config_data["n_time_steps"]
+sample_time = config_data["sample_time"] # Discrete sample period.
 
-# Define the dynamics of the system
-A = np.array([
-    [0,      0,      1,     0],
-    [0,      0,      0,     1],
-    [3*n**2, 0,      0, 2 * n],
-    [0,      0, -2 * n,     0]
-])
-# A = np.eye(4)
+# Read the state and input matrices from the JSON files, reshaping them according to the given 
+# values of m and n (they are stored as 1D vectors).
+n = system_dynamics_data["state_dimension"]
+m = system_dynamics_data["input_dimension"]
+A = np.array(system_dynamics_data["Ac_entries"]).reshape(n, n)
+B = np.array(system_dynamics_data["Bc_entries"]).reshape(n, m)
+# print(Ac)
+# print(Bc)
 
-# Define matrix B
-B = np.vstack([np.zeros((2, 2)), np.eye(2)])
-
-# Define 
-u_prev = np.zeros((2, 1))
+u_prev = np.zeros((m, 1)) 
 
 def convertStringToVector(v_str: str):
     v_str_list = v_str.split(',') #.strip().split("\t")
@@ -68,7 +75,7 @@ def system_derivative(t, x, u):
     x = x[:,None]
 
     # Compute the system dynamics.
-    xdot =  np.matmul(A, x) +  np.matmul(B, u);
+    xdot = np.matmul(A, x) +  np.matmul(B, u);
     # print(f"x={x}, u={u}, xdot={xdot}.")
     # current_position, current_velocity = x
     # return [current_velocity, u]
@@ -81,13 +88,14 @@ def system_derivative(t, x, u):
       print('xdot = ' + repr(xdot))
     return xdot
 
-
 def checkAndStripInputLoopNumber(expected_k, input_line):
   """ Check that an input line, formatted as "Loop <k>: <data>" 
   has the expected value of k (given by the argument "expected_k") """
 
   split_input_line = input_line.split(':')
-  print(f"Input loop number: {split_input_line[0]}")
+  # if debug_level >= 1:
+  #   print(f"Reading an input line for {split_input_line[0]}.")
+
   loop_input_str = split_input_line[0]
 
   # Check that the input line is in the expected format. 
@@ -128,42 +136,56 @@ with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile,     \
     x_datafile.write(x_str + "\n")
     u_datafile.write(u_str + "\n")
     t_datafile.write(t_str + "\n")
+    # END: snapshotState
 
-  k = 0
   t = 0.0
-  
-  while True:
+  for k in range(0,n_time_steps):
     print(f'(Loop {k})')
     t_start_of_loop = t
 
-    # Get the x input line.
+    # Get the 'x' input line from the file.
     x_input_line = x_infile.readline()
     while not x_input_line:
+      print('Trying again to read x_input_line.')
       x_input_line = x_infile.readline()
       continue
 
     x_input_line = checkAndStripInputLoopNumber(k, x_input_line)
+    if debug_level >= 1:
+      print('Recieved x_input_line:')
+      print(x_input_line)
     
-    # Get the u input line.
+    # Get the 'u' input line from the file.
     u_input_line = u_infile.readline()      
     while not u_input_line:
+      print('Trying again to read u_input_line.')
       u_input_line = u_infile.readline()
       continue
+    if debug_level >= 1:
+      print('Recieved u_input_line:')
+      print(u_input_line)
 
     u_input_line = checkAndStripInputLoopNumber(k, u_input_line)
 
     # Get the statistics input line.
-    stats_reader.waitForStatsFile(k)
-    simulated_time = stats_reader.readTime(k)
+    if use_scarab_delays: 
+      stats_reader.waitForStatsFile(k)
+      simulated_time = stats_reader.readTime(k)
+    else:
+      simulated_time = 0.8 * sample_time
     # print(f"(Loop {k}). Simulated computation time: {simulated_time} sec.")
-    # print(f"(Loop {k}). Current t: {t} sec.")
+    # print(f"(Loop {k}). Current t: {t} sec.") 
+    # simulated_time *= 300
+
+    if simulated_time > sample_time:
+      raise ValueError(f"The simulated time {simulated_time} is longer than the sample time {sample_time}.")
+
+    print(f"Delay time: {simulated_time:.3g} seconds ({100*simulated_time/sample_time:.3g}% of sample time).")
 
     if debug_level >= 1:
       print('Input strings:')
       print("x input line: " + repr(x_input_line))
       print("u input line: " + repr(u_input_line))
-
-
 
     x_entries = x_input_line.split(',')
     x = convertStringToVector(x_input_line)
@@ -192,7 +214,6 @@ with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile,     \
     solver.set_initial_value(x, t=0)
     solver.set_f_params(u_prev)
 
-    sample_time = 0.1
     delay_time = simulated_time
     solver.integrate(delay_time)
     x_after_delay = solver.y
@@ -251,5 +272,3 @@ with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile,     \
     x_outfile.write(x_out_string + "\n")# Write to pipe to C++
 
     print('\n=====\n')
-
-    k = k+1

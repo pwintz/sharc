@@ -178,7 +178,8 @@ int main()
   mpc::cvec<Tnu> last_u;
   last_u = cvec<Tnu>::Zero();
 
-  for (int i = 0; i < 100; i++)
+  int n_time_steps = 1000;
+  for (int i = 0; i < n_time_steps; i++)
   {
     std::cout << std::endl << "====== Starting loop #" << i << " ======" << std::endl;
     // Begin a batch of Scarab statistics

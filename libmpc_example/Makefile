@@ -1,12 +1,14 @@
 CXX = g++-11
 CC = gcc-11
 CXXFLAGS = -std=c++20
-CPPFLAGS = -I/usr/local/include -I/usr/include/eigen3 -I/usr/local/include/osqp -I/home/dcuser/libmpc-0.4.0/include/ -I/home/dcuser/scarab/utils -Wno-deprecated-enum-enum-conversion
+CPPFLAGS = -I/usr/local/include -I/usr/include/eigen3 -I/usr/local/include/osqp -I/home/dcuser/libmpc-0.4.0/include/ -I/home/dcuser/scarab/utils -Wno-deprecated-enum-enum-conversion  
+# -g <- Enable debugging.
 CFLAGS = -I /usr/local/include/osqp
 
 # libmpc++ Test
-LIBMPC_MAIN = test_libmpc
-LIBMPC_SRCS = test_libmpc.cpp
+LIBMPC_MAIN = acc_controller
+# LIBMPC_MAIN = test_libmpc
+LIBMPC_SRCS = ${LIBMPC_MAIN}.cpp
 LIBMPC_OBJS = $(LIBMPC_SRCS:.cpp=.o)
 
 # Eigen Test
@@ -20,13 +22,13 @@ LDFLAGS = # -L/usr/local/mysql-connector-c++/lib64
 # The command "-lm" is from the NLopt documentation.
 LDLIBS = -lnlopt -lm -losqp
 
-.PHONY: clean simulate run clean_statistics
+.PHONY: clean simulate run clean_statistics run_plant
 
-run: test_libmpc sim_dir sim_dir/x_c++_to_py sim_dir/u_c++_to_py sim_dir/x_py_to_c++
-	./test_libmpc
+run: ${LIBMPC_MAIN} sim_dir sim_dir/x_c++_to_py sim_dir/u_c++_to_py sim_dir/x_py_to_c++
+	./${LIBMPC_MAIN}
 
 run_plant: plant_dynamics.py
-	export PYTHONPATH="${PYTHONPATH}:.." && ./plant_dynamics.py
+	./plant_dynamics.py
 
 # LIBMPC - Run test_libmpc without Scarab. 
 $(LIBMPC_MAIN): $(LIBMPC_OBJS)
@@ -41,24 +43,18 @@ $(EIGEN_MAIN): $(EIGEN_OBJS)
 
 # Create in/out pipe files for communicating between C++ and Python.
 sim_dir/x_c++_to_py: sim_dir
-	rm sim_dir/x_c++_to_py
-	#  @if ! [ -e "sim_dir/x_c++_to_py" ] ; then\
-	mkfifo sim_dir/x_c++_to_py;\
-	# fi
+	rm sim_dir/x_c++_to_py -f
+	mkfifo sim_dir/x_c++_to_py
 
 # Create in/out pipe files for communicating between C++ and Python.
 sim_dir/u_c++_to_py: sim_dir
-	rm sim_dir/u_c++_to_py
-	#  @if ! [ -e "sim_dir/u_c++_to_py" ] ; then\
-	mkfifo sim_dir/u_c++_to_py;\
-	# fi
+	rm sim_dir/u_c++_to_py -f
+	mkfifo sim_dir/u_c++_to_py
 
 # Create in/out pipe files for communicating between C++ and Python.
 sim_dir/x_py_to_c++: sim_dir
-	rm sim_dir/x_py_to_c++
-	#  @if ! [ -e "sim_dir/x_py_to_c++" ] ; then\
-	mkfifo sim_dir/x_py_to_c++;\
-	# fi
+	rm sim_dir/x_py_to_c++ -f
+	mkfifo sim_dir/x_py_to_c++
 
 # Create the simulation directory where the stats from Scarab are generated and the in/out pipe files for communicating between C++ and Python are placed.
 sim_dir:
@@ -72,4 +68,4 @@ clean_statistics:
 	rm -f sim_dir/*.stat.* sim_dir/per_line_* sim_dir/per_branch* sim_dir/uop_queue* ramulator.stat.out
 
 clean:
-	rm -f test_libmpc test_libmpc.o sim_dir/* my_pipe
+	rm -f ${LIBMPC_MAIN} ${LIBMPC_MAIN}.o sim_dir/* 
