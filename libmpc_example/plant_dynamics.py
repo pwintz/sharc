@@ -2,6 +2,8 @@
 import numpy as np
 from scipy.integrate import ode
 
+import time
+
 import sys
 sys.path.append('/workspaces/ros-docker/')
 
@@ -16,18 +18,18 @@ import scarabizor
 import json
 
 # Read config.json.
-with open('config.json') as json_data:
-    config_data = json.load(json_data)
+with open('config.json') as json_data_file:
+    config_data = json.load(json_data_file)
 
 # Read system_dynamics.json.
-with open('system_dynamics.json') as json_data:
-    system_dynamics_data = json.load(json_data)
+with open('system_dynamics.json') as json_data_file:
+    system_dynamics_data = json.load(json_data_file)
 
 stats_reader = scarabizor.ScarabStatsReader('sim_dir')
 
 # Settings
 debug_level = 1
-use_scarab_delays = True
+use_scarab_delays = not config_data["use_fake_scarab_computation_times"]
 
 #  File names for the pipes we use for communicating with C++.
 x_out_filename = 'sim_dir/x_py_to_c++'
@@ -40,6 +42,7 @@ t_data_filename = 'sim_dir/t_data.csv'
 
 n_time_steps = config_data["n_time_steps"]
 sample_time = config_data["sample_time"] # Discrete sample period.
+computation_delay_scalar = config_data["computation_delay_scalar"]
 
 # Read the state and input matrices from the JSON files, reshaping them according to the given 
 # values of m and n (they are stored as 1D vectors).
@@ -112,10 +115,29 @@ def checkAndStripInputLoopNumber(expected_k, input_line):
   # Return the part of the input line that doesn't contain the loop info.
   return split_input_line[1]
 
+def waitForLineFromFile(file):
+  # max_loops = 
+  if debug_level >= 1:
+        print(f"Waiting for input_line from {file.name}.")
+  for i in range(0, 3):
+    input_line = file.readline()
+    print(f'input line read i:{i}, input_line:{input_line}')
+    # print()
+    if input_line:
+      if debug_level >= 1:
+        print(f"Recieved input_line from {file.name} on loop #{i}:")
+        print(input_line)
+      return input_line
+
+    # time.sleep(0.01) # Sleep for X seconds
+
+  raise Error(f"No input recieved from {file.name}.")
+
+
 LINE_BUFFERING = 1
-with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile,     \
-     open(u_in_filename, 'r', buffering= LINE_BUFFERING) as u_infile,     \
-     open(x_out_filename, 'w', buffering= LINE_BUFFERING) as x_outfile,   \
+with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile, \
+     open(u_in_filename, 'r', buffering= LINE_BUFFERING) as u_infile, \
+     open(x_out_filename, 'w', buffering= LINE_BUFFERING) as x_outfile, \
      open(x_data_filename, 'w', buffering= LINE_BUFFERING) as x_datafile, \
      open(u_data_filename, 'w', buffering= LINE_BUFFERING) as u_datafile, \
      open(t_data_filename, 'w', buffering= LINE_BUFFERING) as t_datafile :
@@ -123,7 +145,7 @@ with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile,     \
 
   def snapshotState(k, t, xarray, uarray, description):
     """ Define a function for printing the current state of the system to 
-    the console and saving the state to the data files."""
+    the console and saving the state to the data files. """
     x_str = numpyArrayToCsv(xarray)
     u_str = numpyArrayToCsv(uarray)
     t_str = str(t)
@@ -144,26 +166,12 @@ with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile,     \
     t_start_of_loop = t
 
     # Get the 'x' input line from the file.
-    x_input_line = x_infile.readline()
-    while not x_input_line:
-      print('Trying again to read x_input_line.')
-      x_input_line = x_infile.readline()
-      continue
+    x_input_line = waitForLineFromFile(x_infile)
 
     x_input_line = checkAndStripInputLoopNumber(k, x_input_line)
-    if debug_level >= 1:
-      print('Recieved x_input_line:')
-      print(x_input_line)
     
     # Get the 'u' input line from the file.
-    u_input_line = u_infile.readline()      
-    while not u_input_line:
-      print('Trying again to read u_input_line.')
-      u_input_line = u_infile.readline()
-      continue
-    if debug_level >= 1:
-      print('Recieved u_input_line:')
-      print(u_input_line)
+    u_input_line = waitForLineFromFile(u_infile)
 
     u_input_line = checkAndStripInputLoopNumber(k, u_input_line)
 
@@ -171,11 +179,13 @@ with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile,     \
     if use_scarab_delays: 
       stats_reader.waitForStatsFile(k)
       simulated_time = stats_reader.readTime(k)
+      simulated_time *= computation_delay_scalar
     else:
-      simulated_time = 0.8 * sample_time
+      simulated_time = 0.01 * sample_time
+      if computation_delay_scalar == 0:
+        simulated_time = 0
     # print(f"(Loop {k}). Simulated computation time: {simulated_time} sec.")
     # print(f"(Loop {k}). Current t: {t} sec.") 
-    # simulated_time *= 300
 
     if simulated_time > sample_time:
       raise ValueError(f"The simulated time {simulated_time} is longer than the sample time {sample_time}.")

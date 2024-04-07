@@ -58,29 +58,25 @@ int main()
   std::ifstream json_file("/workspaces/ros-docker/libmpc_example/config.json");
   json json_data = json::parse(json_file);
   json_file.close();
-  // std::cout << "State dimension:" <<  json_data["state_dimension"] << std::endl;
   
   int n_time_steps = json_data["n_time_steps"];
-  // std::cout << "A:" <<  json_data["A"] << std::endl;
-
-  // for (auto& element : json_data["A"]) {
-  //   std::cout << element << '\n';
-  // }
 
   // Vector sizes.
-  const int Tnx = 3;  // State dimension
+  const int Tnx = 5;  // State dimension
   const int Tnu = 1;  // Control dimension
-  const int Tndu = 1; // Control disturbance dimension
-  const int Tny = 3;  // Output dimension
+  const int Tndu = 1; // Exogenous control (disturbance) dimension
+  const int Tny = 2;  // Output dimension
 
   // MPC options.
-  const int prediction_horizon = 2;
+  const int prediction_horizon = 4;
   const int control_horizon = 1;
 
   // Discretization Options.
   double sample_time = json_data["sample_time"];
 
-  bool use_computational_delays = json_data["use_computational_delays"];
+  // Set whether the evolution of the dyanmics are computed extenally 
+  // (with Python) or are done within this process, using libmpc.
+  bool use_external_dyanmics_computation = json_data["use_external_dyanmics_computation"];
 
   std::cout << "Creating Matrices" << std::endl;
   // Continuous-time Matrices for \dot{x} = Ax + bu. 
@@ -88,23 +84,30 @@ int main()
   mat<Tnx, Tnx> Ac;
   mat<Tnx, Tnu> Bc;
   
-  // The time needed for the host vehicle to reach the 
-  //current position of the target vehicle (in seconds).
-  double T_headway = 4.5;
-  double T_engine = 0.1; //The time constant of acceleration for the engine
-  double K_engine = 2;
-  double C_f = 1.0;
-  double A_f = -1/T_engine;
-  double B_f = -K_engine / T_engine;
+  double tau = 0.5;
   // Define continuous-time state matrix A_c
-  Ac << 0,     1.0, -T_headway,
-        0,       0,         -1,
-        0,       0,        A_f;
+  Ac << 0,      1, 0,  0,      0, // v1
+        0, -1/tau, 0,  0,      0, // a1
+        1,      0, 0, -1,      0, // d2
+        0,      0, 0,  0,      1, // v2
+        0,      0, 0,  0, -1/tau; // a2
 
   // Define continuous-time input matrix B_c
-  Bc << 0,
-        0,
-      B_f;
+  Bc <<    0,
+           0,
+           0, 
+           0, 
+        -1/tau;
+
+  // State to output matrix
+  mat<Tny, Tnx> Cd;
+  Cd << 0, 0, 1, 0, 0, 
+        1, 0, 0,-1, 0;
+
+  // Set input disturbance matrix.
+  mat<Tnx, Tndu> Bc_disturbance;
+  mat<Tnx, Tndu> Bd_disturbance;
+  Bc_disturbance << 0, 1/tau, 0, 0, 0;
 
   json json_out_data;
   json_out_data["state_dimension"] = Tnx;
@@ -123,47 +126,11 @@ int main()
     << json_out_data 
     << std::endl;
 
-  // Eigen::EigenSolver<mat<Tnx, Tnx>> eig(Ac);     // [vec val] = eig(A)
-  // auto evals = eig.eigenvalues();                             // diag(val)
-  // auto evecs = eig.eigenvectors();                            // vec
-
-  // // Compute the matrix exponential exp(A*t)
-  // std::cout << "Ac eigenvalues vector:" << std::endl;
-  // std::cout << evals.format(fmt) << std::endl << std::endl;
-
   mat<Tnx, Tnx> Ad;
-  Ad = (sample_time*Ac).exp();
-
-  // std::cout << "Matrix exponential, A_d := exp(T_s * Ac):" << std::endl;
-  // std::cout << Ad.format(fmt) << std::endl << std::endl;
-
   mat<Tnx, Tnu> Bd;
-  // mat<Tnx, Tnx> expAt_integral_by_hand;
-  // double T = sample_time;
-  // double a = -T_headway;
-  // // double c = A_f;
+  // Compute the discretization of Ac and Bc, storing them in Ad and Bd.
+  discretization<Tnx, Tnu, Tndu>(Ac, Bc, Bc_disturbance, sample_time, Ad, Bd, Bd_disturbance);
 
-  // auto exp_Tc_minus_1 = exp(T*A_f) - 1;
-  // expAt_integral_by_hand << 
-  //          T, pow(T, 2) / 2, ((a - 1/A_f)/pow(A_f, 2))*(exp_Tc_minus_1 - A_f*T) + pow(T, 2)/(2*A_f),
-  //          0,       T, -(1/pow(A_f, 2))*(exp_Tc_minus_1 - A_f*T),
-  //          0,       0,  exp_Tc_minus_1/A_f;
-
-  // Bd = expAt_integral_by_hand*Bc;
-
-  // std::cout << "Input matrix B_d (calculated by hand):" << std::endl;
-  // std::cout << Bd.format(fmt) << std::endl << std::endl;
-
-  // Compute the discretization of A and B, storing them in Ad and Bd.
-  discretization<Tnx, Tnu>(Ac, Bc, sample_time, Ad, Bd);
-
-  // std::cout << "Input matrix B_d (auto calculated):" << std::endl;
-  // std::cout << Bd.format(fmt) << std::endl << std::endl;
-
-  // State to output matrix
-  mat<Tny, Tnx> Cd;
-  Cd.setIdentity();
-  
   std::cout << "Finished creating Matrices" << std::endl;
 
   std::cout << "Creating LMPC object..." << std::endl;
@@ -188,7 +155,7 @@ int main()
   std::cout << "Finshed setting parameters" << std::endl;
 
   lmpc.setStateSpaceModel(Ad, Bd, Cd);
-  lmpc.setDisturbances(mat<Tnx, Tndu>::Zero(), mat<Tny, Tndu>::Zero());
+  lmpc.setDisturbances(Bd_disturbance, mat<Tny, Tndu>::Zero());
 
   // ======== Weights ========== //
 
@@ -208,6 +175,11 @@ int main()
 
   lmpc.setObjectiveWeights(OutputW, InputW, DeltaInputW, {0, prediction_horizon});
 
+  // Set 
+  mat<Tndu, prediction_horizon> disturbance;
+  disturbance.setZero();
+  lmpc.setExogenuosInputs(disturbance);
+
   // ======== Constraints ========== //
 
   // State constraints.
@@ -222,7 +194,7 @@ int main()
   ymax.setOnes();
   ymax *= inf;
 
-  // Conrol constraints.
+  // Control constraints.
   cvec<Tnu> umin, umax;
   loadMatrixValuesFromJson(umin, json_data, "umin");
   loadMatrixValuesFromJson(umax, json_data, "umax");
@@ -244,7 +216,7 @@ int main()
   std::ofstream x_outfile;
   std::ofstream u_outfile;
   std::ifstream x_infile;
-  if (use_computational_delays) {
+  if (use_external_dyanmics_computation) {
     // Open the pipes to Python. Each time we open one of these streams, this process pauses until 
     // it is connected to the Python process (or another process). 
     // The order needs to match the order in the reader process.
@@ -265,7 +237,6 @@ int main()
   // Create a vector for storing the control input from the previous time step.
   mpc::cvec<Tnu> u;
   u = cvec<Tnu>::Zero();
-
 
   scarab_begin(); // Tell Scarab to stop "fast forwarding". This is needed for '--pintool_args -fast_forward_to_start_inst 1'
 
@@ -303,7 +274,7 @@ int main()
     // std::cout << "optseq.state.row(1):" << optseq.state.row(1).format(fmt) << std::endl;
     // std::cout << "optseq.state.row(2):" << optseq.state.row(2).format(fmt) << std::endl;
 
-    if (use_computational_delays) {
+    if (use_external_dyanmics_computation) {
       // Format the numerical arrays into strings (single lines) that we pass to Python.
       auto x_out = modelX.transpose(); // optseq.state.row(0);
       auto x_out_str = x_out.format(fmt);
@@ -349,7 +320,7 @@ int main()
     // u = u;
   } 
 
-  if (use_computational_delays)
+  if (use_external_dyanmics_computation)
   {
     x_outfile.close();
     x_infile.close();

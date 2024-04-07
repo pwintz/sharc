@@ -44,6 +44,12 @@ import sys
 
 # scarab_root_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import json
+
+# Read config.json.
+with open('config.json') as json_data:
+    config_data = json.load(json_data)
+
 scarab_root_path = "/home/dcuser/scarab"
 example_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -62,8 +68,8 @@ def switch_to_sim_dir():
   print ('Simulation Directory:', os.path.abspath(args.sim_dir))
   os.chdir(args.sim_dir)
 
-def run_scarab(cmd_to_simulate, no_scarab=False):
-  if no_scarab:
+def run_scarab(cmd_to_simulate, use_fake_scarab_computation_times=False):
+  if use_fake_scarab_computation_times:
       subprocess.check_call(example_dir + '/' + cmd_to_simulate)
       return
 
@@ -76,8 +82,8 @@ def run_scarab(cmd_to_simulate, no_scarab=False):
                      '-fast_forward_to_start_inst 1',
                      '--scarab_args',
                      '--inst_limit 1500000000'
-                    #  '--heartbeat_interval 1', 
-                    #  '--num_heartbeats 50'
+                     '--heartbeat_interval 1', 
+                     '--num_heartbeats 1'
                      ]# --power_intf_on 1']
   print ('Scarab cmd:', ' '.join(scarab_cmd_argv))
   subprocess.check_call(scarab_cmd_argv)
@@ -95,7 +101,7 @@ def __main():
   os.makedirs(args.sim_dir, exist_ok=True)
   build_test_libmpc(cmd_to_simulate)
   switch_to_sim_dir()
-  run_scarab(cmd_to_simulate, no_scarab=False)
+  run_scarab(cmd_to_simulate, use_fake_scarab_computation_times=config_data["use_fake_scarab_computation_times"])
 
 if __name__ == "__main__":
   __main()
