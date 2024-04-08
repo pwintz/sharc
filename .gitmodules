@@ -1,0 +1,3 @@
+[submodule "libmpc"]
+	path = libmpc
+	url = git@github.com:pwintz/libmpc.git

@@ -184,10 +184,10 @@ ENV XDG_RUNTIME_DIR=/home/$USERNAME/.xdg_runtime_dir
 # libMPC++
 ##############################
 # Downloads and unzips lipmpc into the home directory.
-USER $USERNAME
-RUN cd ~ && wget https://github.com/nicolapiccinelli/libmpc/archive/refs/tags/0.4.0.tar.gz \
-    && tar -xzvf 0.4.0.tar.gz \
-    && rm 0.4.0.tar.gz
+# USER $USERNAME
+# RUN cd ~ && wget https://github.com/nicolapiccinelli/libmpc/archive/refs/tags/0.4.0.tar.gz \
+#     && tar -xzvf 0.4.0.tar.gz \
+#     && rm 0.4.0.tar.gz
 
 USER root
 

@@ -1,7 +1,7 @@
 CXX = g++-11
 CC = gcc-11
 CXXFLAGS = -std=c++20
-CPPFLAGS = -I/usr/local/include -I/usr/include/eigen3 -I/usr/local/include/osqp -I/home/dcuser/libmpc-0.4.0/include/ -I/home/dcuser/scarab/utils -Wno-deprecated-enum-enum-conversion  
+CPPFLAGS = -I/usr/local/include -I/usr/include/eigen3 -I/usr/local/include/osqp -I../libmpc/include/ -I/home/dcuser/scarab/utils -Wno-deprecated-enum-enum-conversion  
 # -g <- Enable debugging.
 CFLAGS = -I /usr/local/include/osqp
 
@@ -31,7 +31,7 @@ run_plant: plant_dynamics.py
 	./plant_dynamics.py
 
 # LIBMPC - Run test_libmpc without Scarab. 
-$(LIBMPC_MAIN): $(LIBMPC_OBJS)
+$(LIBMPC_MAIN): $(LIBMPC_OBJS) $(shell find ../libmpc/includes -type f)
 		$(CXX) -o $(LIBMPC_MAIN) $(LIBMPC_OBJS) $(LDFLAGS) $(LDLIBS)
 
 # Eigen
