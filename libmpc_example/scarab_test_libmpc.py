@@ -76,15 +76,16 @@ def run_scarab(cmd_to_simulate, use_fake_scarab_computation_times=False):
   scarab_cmd_argv = [sys.executable,
                      scarab_paths.bin_dir + '/scarab_launch.py',
                      '--program', example_dir + '/' + cmd_to_simulate,
-                     '--param', example_dir + '/PARAMS.test_libmpc',
+                     '--param', example_dir + '/PARAMS.generated',
                     #  '--simdir', 'sim_dir',
                      '--pintool_args',
                      '-fast_forward_to_start_inst 1',
                      '--scarab_args',
-                     '--inst_limit 1500000000'
-                     '--heartbeat_interval 1', 
-                     '--num_heartbeats 1'
-                     ]# --power_intf_on 1']
+                     '--inst_limit 15000000000'
+                     '--heartbeat_interval 50', 
+                     # '--num_heartbeats 1'
+                     # '--power_intf_on 1']
+                     ]
   print ('Scarab cmd:', ' '.join(scarab_cmd_argv))
   subprocess.check_call(scarab_cmd_argv)
 

@@ -1,0 +1,105 @@
+{
+  "Cache Sizes": [
+    {
+      "l1_size": 1048576,
+      "icache_size": 32768,
+      "dcache_size": 32768
+    },
+    {
+      "l1_size": 1048576,
+      "icache_size": 32768,
+      "dcache_size": 32768
+    }
+  ], 
+  "Clock speed": [
+    
+    {
+      "chip_cycle_time": 100000000,
+      "label": "5 MHz",
+      "fake_computation_delay_times": 0.4
+    },
+    {
+      "chip_cycle_time": 100000000,
+      "label": "10 MHz",
+      "fake_computation_delay_times": 0.2
+    },
+    {
+      "chip_cycle_time": 10000000,
+      "label": "100 MHz",
+      "fake_computation_delay_times": 0.01
+    },
+    {
+      "chip_cycle_time": 1000000,
+      "label": "1 GHz",
+      "fake_computation_delay_times": 0.001
+    },
+    {
+      "chip_cycle_time": 313000,
+      "label": "3.2 GHz",
+      "fake_computation_delay_times": 0.001
+    }
+  ],
+  "Clock speed - ALL": [
+    {
+      "chip_cycle_time": 100000000,
+      "label": "5 MHz",
+      "fake_computation_delay_times": 0.4
+    },
+    {
+      "chip_cycle_time": 100000000,
+      "label": "10 MHz",
+      "fake_computation_delay_times": 0.2
+    },
+    {
+      "chip_cycle_time": 10000000,
+      "label": "100 MHz",
+      "fake_computation_delay_times": 0.01
+    },
+    {
+      "chip_cycle_time": 1000000,
+      "label": "1 GHz",
+      "fake_computation_delay_times": 0.001
+    },
+    {
+      "chip_cycle_time": 313000,
+      "label": "3.2 GHz",
+      "fake_computation_delay_times": 0.001
+    }
+  ],
+  "Warm Start": [
+    {
+      "enable_mpc_warm_start": false, 
+      "osqp_maximum_iteration": 100,
+      "label": "Warm Start - 100 Iter Max"
+    }, 
+    {
+      "enable_mpc_warm_start": false, 
+      "osqp_maximum_iteration": 1000,
+      "label": "Warm Start - 1000 Iter Max"
+    }, 
+    {
+      "enable_mpc_warm_start": true, 
+      "osqp_maximum_iteration": 100,
+      "label": "No Warm Start - 100 Iter Max"
+    },
+    {
+      "enable_mpc_warm_start": true, 
+      "osqp_maximum_iteration": 1000,
+      "label": "No Warm Start - 1000 Iter Max"
+    }
+  ],
+  "Prediction Horizon": [
+    {
+      "prediction_horizon": 2
+    },
+    {
+      "prediction_horizon": 5
+    },
+    {
+      "prediction_horizon": 5
+    },
+    {
+      "prediction_horizon": 5
+    }
+  ]
+}

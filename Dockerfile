@@ -95,7 +95,7 @@ USER $USERNAME
 
 # Clone the Scarab repository
 # Comment out if you don't use scarab at all and don't have ssh key permitted to clone 'scarab_hlitz'
-RUN cd /home/$USERNAME && git clone -b decoupled_fe git@github.com:hlitz/scarab_hlitz.git scarab
+RUN cd /home/$USERNAME && git clone git@github.com:Litz-Lab/scarab.git scarab
 
 # Install Scarab dependencies
 RUN pip3 install -r /home/$USERNAME/scarab/bin/requirements.txt

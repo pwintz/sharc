@@ -13,7 +13,7 @@
 ## Core Parameters
 
 # Femptoseconds, 3.2GHz, used for energy estimates.
---chip_cycle_time               312500
+--chip_cycle_time               100000000
 
 
 ### Fetch Stage
@@ -28,7 +28,7 @@
 
 
 #### ICache
---icache_size                   32768
+--icache_size                   32768 <- T
 --icache_assoc                  4
 --icache_line_size              64
 
@@ -67,8 +67,8 @@
 --tc_entries                    4096
 --tc_assoc                      4
 
-### Decode Stage
---decode_cycles                 5
+### Decode Stage - Latencies
+--decode_cycles                 5 <- 
 
 
 ### Map Stage
@@ -89,11 +89,11 @@
 ### Exec Stage
 
 ### DCache
---dcache_size 	 	        32768
+--dcache_size 	 	          32768 # <- This one?
 --dcache_read_ports             2
 --dcache_write_ports            1
 --dcache_banks                  1
---dcache_assoc		        4
+--dcache_assoc		              4
 --dcache_line_size              64
 
 ### Reorder/Retire Stage
@@ -116,10 +116,10 @@
 # Enable use of a midlevel cache between i/d and L1
 --mlc_present                   0
 
-### LLC
---l1_size                       1048576
+### LLC (Last level cache)
+--l1_size                       1048576 <- L3 Cache
 --l1_banks                      1
---l1_cycles		        18
+--l1_cycles		                  18
 --l1_assoc                      8
 --l1_line_size                  64
 --l1_interleave_factor          64
@@ -135,7 +135,7 @@
 --stream_length                 64
 --stream_prefetch_n             4
 --stream_start_dis              1
---stream_train_num 		4	
+--stream_train_num 		          4	
 --stream_create_on_dc_miss      0
 --stream_create_on_l1_miss      1
 

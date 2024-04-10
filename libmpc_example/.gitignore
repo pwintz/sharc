@@ -1,3 +1,8 @@
 sim_dir
 test_eigen
 test_libmpc
+acc_controller
+data_out.json
+system_dynamics.json
+PARAMS.in
+PARAMS.generated

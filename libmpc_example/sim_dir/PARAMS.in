@@ -13,8 +13,7 @@
 ## Core Parameters
 
 # Femptoseconds, 3.2GHz, used for energy estimates.
---chip_cycle_time               312500
-
+--chip_cycle_time	10000000
 
 ### Fetch Stage
 --fetch_off_path_ops            1

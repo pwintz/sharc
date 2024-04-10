@@ -2,6 +2,7 @@ import os
 import subprocess
 import re
 import shutil
+import time
 
 params_in_dir = 'docker_user_home'
 log_dir_regex = re.compile(r"\nLog directory is (.*?)\n")
@@ -15,7 +16,7 @@ SECONDS_PER_FEMTOSECOND = 10**(-15)
 SECONDS_PER_MICROSECOND = 10**(6)
 MICROSECONDS_PER_FEMTOSECOND = 10**(6-15)
 MICROSECONDS_PER_SECOND = 10**(-15)
-
+    
 def run(cmd, args=[], cwd='.'):
     verbose = False
     # If a single string is given for "args", convert it to a list.
@@ -46,8 +47,10 @@ class ScarabData:
         self.cmd_stderr = cmd_stderr
 
 class ScarabStatsReader:
+  
   def __init__(self, stats_dir_path):
       self.stats_dir_path = stats_dir_path
+      self.stat_regex = re.compile(r"\s*(?P<key>[\w|\_| ]+),\s*(?P<value>\d+\.?\d*).*")
 
   def getStatsFilePath(self, k) -> os.PathLike:
     file_name = f"core.stat.0.csv.roi.{k}"
@@ -59,23 +62,31 @@ class ScarabStatsReader:
     # if not file_path:
     #    raise
     while not os.path.exists(file_path):
-       pass
+      time.sleep(0.01)
 
-  def readTime(self, k):  
+  def readStatistic(self, k: int, stat_key: str): 
     with open(self.getStatsFilePath(k), 'r') as stats_file:
-       for line in stats_file:
-            if line.startswith("EXECUTION_TIME_count"):
-                parts = line.split(',')
-                try:
-                    time_in_femtosecs = float(parts[1].strip())
-                    time_in_secs = time_in_femtosecs * SECONDS_PER_FEMTOSECOND
-                    return time_in_secs
-                except (IndexError, ValueError) as e:
-                    # Handle the case where the value after comma is not a valid number
-                    print('Error when parsing Scarab statistics!')
-                    raise e
-       
-     
+        for line in stats_file:
+          regex_match = self.stat_regex.match(line)
+          if regex_match and stat_key == regex_match.groupdict()['key']:
+            value = regex_match.groupdict()['value']
+            try: 
+              return int(value)
+            except ValueError:
+              pass
+            return float
+        raise ValueError(f"key: \"{stat_key}\" was not found in stats file.")
+              
+  def readCyclesCount(self, k: int):  
+    return self.readStatistic(k, "NODE_CYCLE_count")
+
+  def readInstructionCount(self, k: int):  
+    return self.readStatistic(k, "NODE_INST_COUNT_count")
+
+  def readTime(self, k: int):  
+    time_in_femtosecs = self.readStatistic(k, "EXECUTION_TIME_count")
+    time_in_secs = float(time_in_femtosecs) * SECONDS_PER_FEMTOSECOND
+    return time_in_secs
 
 class Scarab:
 
@@ -137,14 +148,12 @@ class Scarab:
                         # Increase the verbosity so that the trace file 
                         # path is printed, allowing us to parse it. 
                         "-verbose", "4", \
-                        # Tell Dyanmrio which command to trace
+                        # Tell DynamoRIO which command to trace
                         "--", cmd]
         result, stdout, stderr = self.subprocess_run(dyanmrio_cmd, args)
         if result.returncode: # is not 0
             # print("result:" + str(result))
             raise ValueError("Subprocess failed. stderr=\n" + stderr)
-        # print("==== Stdout ==== \n" + stdout)
-        # print("==== Stderr ==== \n" + stderr)
         
         log_dir_regex_result = re.search(log_dir_regex, stderr);
         if not log_dir_regex_result:

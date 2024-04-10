@@ -1,9 +1,23 @@
+
+# Set PREDICTION_HORIZON and CONTROL_HORIZON 
+# in case it is not set as a command line argument.
+PREDICTION_HORIZON = 7
+CONTROL_HORIZON = 4
+
 CXX = g++-11
 CC = gcc-11
 CXXFLAGS = -std=c++20
-CPPFLAGS = -I/usr/local/include -I/usr/include/eigen3 -I/usr/local/include/osqp -I../libmpc/include/ -I/home/dcuser/scarab/utils -Wno-deprecated-enum-enum-conversion  
+CPPFLAGS = -I/usr/local/include \
+	-I/usr/include/eigen3 \
+	-I/usr/local/include/osqp \
+	-I../libmpc/include/ \
+	-I/home/dcuser/scarab/utils \
+	-Wno-deprecated-enum-enum-conversion \
+	-DEIGEN_STACK_ALLOCATION_LIMIT=0
+# -D PREDICTION_HORIZON=${PREDICTION_HORIZON} \
+# -D CONTROL_HORIZON=$(shell cat control_horizon.txt)
 # -g <- Enable debugging.
-CFLAGS = -I /usr/local/include/osqp
+CFLAGS = -I /usr/local/include/osqp 
 
 # libmpc++ Test
 LIBMPC_MAIN = acc_controller
@@ -31,15 +45,12 @@ run_plant: plant_dynamics.py
 	./plant_dynamics.py
 
 # LIBMPC - Run test_libmpc without Scarab. 
-$(LIBMPC_MAIN): $(LIBMPC_OBJS) $(shell find ../libmpc/includes -type f)
+$(LIBMPC_MAIN): $(LIBMPC_OBJS) $(shell find ../libmpc/include -type f)
 		$(CXX) -o $(LIBMPC_MAIN) $(LIBMPC_OBJS) $(LDFLAGS) $(LDLIBS)
 
 # Eigen
-$(EIGEN_MAIN): $(EIGEN_OBJS)
-		$(CXX) -o $(EIGEN_MAIN) $(EIGEN_OBJS) $(LDFLAGS) $(LDLIBS)
-
-# read_input: read_input.cpp ~/scarab/utils/scarab_markers.h 
-# 	$(CXX) -o read_input read_input.cpp -O2 -static -I ~/scarab/utils
+# $(EIGEN_MAIN): $(EIGEN_OBJS)
+# 		$(CXX) -o $(EIGEN_MAIN) $(EIGEN_OBJS) $(LDFLAGS) $(LDLIBS)
 
 # Create in/out pipe files for communicating between C++ and Python.
 sim_dir/x_c++_to_py: sim_dir
@@ -65,7 +76,7 @@ simulate: clean_statistics sim_dir sim_dir/x_c++_to_py sim_dir/u_c++_to_py sim_d
 	./scarab_test_libmpc.py sim_dir
 
 clean_statistics:
-	rm -f sim_dir/*.stat.* sim_dir/per_line_* sim_dir/per_branch* sim_dir/uop_queue* ramulator.stat.out
+	rm -f sim_dir/*.stat.* sim_dir/per_line_* sim_dir/per_branch* sim_dir/uop_queue* ramulator.stat.out 
 
 clean:
-	rm -f ${LIBMPC_MAIN} ${LIBMPC_MAIN}.o sim_dir/* 
+	rm -f ${LIBMPC_MAIN} ${LIBMPC_MAIN}.o sim_dir/* data_out.json
