@@ -323,7 +323,6 @@ int main()
     
     if (debug_optimizer_stats >= 1) 
     {
-      PRINT("Optimizer exit reason: " << res.status_string)
       PRINT("return code: " << res.retcode)
       PRINT("Result status: " << res.status)
       PRINT("Number of iterations: " << res.num_iterations)
