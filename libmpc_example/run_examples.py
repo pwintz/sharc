@@ -73,7 +73,8 @@ def main():
         # If the regex matches, then we replace the line.
         PARAM_file_lines[index] = param_str_fmt.format(key, value)
         return
-      raise ValueError(f"Key \"{key}\" was not found.")
+    # After looping through all of the lines, we didn't find the key.
+    raise ValueError(f"Key \"{key}\" was not found in PARAM file {PARAMS_base_filename}.")
     
     def changeCompilationOption(key, value):
       pass
