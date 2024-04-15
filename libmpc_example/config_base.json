@@ -4,6 +4,7 @@
   "use_fake_scarab_computation_times": false,
   "fake_computation_delay_times": 0.4,
   "record_data_out": true,
+  "backup_previous_data": true,
   "sample_time": 0.5,
   "n_time_steps": 70,
   "convergence_termination_tol": 0.05,

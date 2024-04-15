@@ -15,7 +15,7 @@ CPPFLAGS = -I/usr/local/include \
 	-Wno-deprecated-enum-enum-conversion \
 	-DEIGEN_STACK_ALLOCATION_LIMIT=0
 # -D PREDICTION_HORIZON=${PREDICTION_HORIZON} \
-# -D CONTROL_HORIZON=$(shell cat control_horizon.txt)
+# -D CONTROL_HORIZON=$(shell cat control_horizon.txt) \
 # -g <- Enable debugging.
 CFLAGS = -I /usr/local/include/osqp 
 
