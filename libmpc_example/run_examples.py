@@ -56,11 +56,9 @@ def main():
 
   param_regex_pattern = re.compile(r"--(?P<param_name>[\w|\_]+)\s*(?P<param_value>\d+).*")
   param_str_fmt = "--{}\t{}"
-  with open('PARAMS.base') as params_out_file:
+  PARAMS_base_filename = 'PARAMS.base'
+  with open(PARAMS_base_filename) as params_out_file:
     PARAM_file_lines = params_out_file.readlines()
-
-  # print(PARAM_file_lines[0])
-  # print(param_str_fmt.format("hello", 0))
 
   def changeParamsValue(key, value):
     for index, line in enumerate(PARAM_file_lines):

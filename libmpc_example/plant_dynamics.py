@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import numpy as np
 from scipy.integrate import ode
+import scipy.signal
+import numpy.linalg as linalg
 
 import time
 import datetime
@@ -31,18 +33,27 @@ with open('system_dynamics.json') as json_data_file:
 
 stats_reader = scarabizor.ScarabStatsReader('sim_dir')
 
+# Debugging levels
+debug_interfile_communication_level = config_data["==== Debgugging Levels ===="]["debug_interfile_communication_level"]
+debug_dynamics_level = config_data["==== Debgugging Levels ===="]["debug_dynamics_level"]
+
 # Settings
-debug_level = 1
 use_scarab_delays = not config_data["use_fake_scarab_computation_times"]
 
+sim_dir = "sim_dir/"
+
 #  File names for the pipes we use for communicating with C++.
-x_out_filename = 'sim_dir/x_py_to_c++'
-u_in_filename = 'sim_dir/u_c++_to_py'
-x_in_filename = 'sim_dir/x_c++_to_py'
+u_in_filename = sim_dir + 'u_c++_to_py'
+x_in_filename = sim_dir + 'x_c++_to_py'
+x_predict_in_filename = sim_dir + 'x_predict_c++_to_py'
+t_predict_in_filename = sim_dir + 't_predict_c++_to_py'
+x_out_filename = sim_dir + 'x_py_to_c++'
+t_delay_out_filename = sim_dir + 't_delay_py_to_c++'
+
 # File names for recording values, to use in plotting.
-x_data_filename = 'sim_dir/x_data.csv'
-u_data_filename = 'sim_dir/u_data.csv'
-t_data_filename = 'sim_dir/t_data.csv'
+x_data_filename = sim_dir + 'x_data.csv'
+u_data_filename = sim_dir + 'u_data.csv'
+t_data_filename = sim_dir + 't_data.csv'
 
 n_time_steps = config_data["n_time_steps"]
 sample_time = config_data["sample_time"] # Discrete sample period.
@@ -54,12 +65,29 @@ n = system_dynamics_data["state_dimension"]
 m = system_dynamics_data["input_dimension"]
 A = np.array(system_dynamics_data["Ac_entries"]).reshape(n, n)
 B = np.array(system_dynamics_data["Bc_entries"]).reshape(n, m)
-# print(Ac)
-# print(Bc)
+B_dist = np.array(system_dynamics_data["Bc_disturbances_entries"]).reshape(n, m)
+
+C = np.identity(5, float)
+D = np.zeros([5, 1], float)
+(A_to_delay, B_to_delay, C_to_delay, D_to_delay, dt) = scipy.signal.cont2discrete((A, B, C, D), fake_computation_delay_times)
+(A_delay_to_sample, B_delay_to_sample, C_delay_to_sample, D_delay_to_sample, dt) = scipy.signal.cont2discrete((A, B, C, D), sample_time - fake_computation_delay_times)
+
+print("A_to_delay")
+print(A_to_delay)
+print("A_delay_to_sample")
+print(A_delay_to_sample)
+
+if debug_dynamics_level >= 2 or debug_interfile_communication_level >= 2:
+  print("A from C++:")
+  print(A)
+  print("B from C++:")
+  print(B)
 
 x_cumul = []
 u_cumul = []
 t_cumul = []
+x_prediction_cumul = []
+t_prediction_cumul = []
 simulated_computation_time_cumul = []
 instruction_count_cumul = []
 cycles_count_cumul = []
@@ -67,69 +95,108 @@ walltime_cumul = []
 
 u_prev = np.zeros((m, 1)) 
 
-def convertStringToVector(v_str: str):
-    v_str_list = v_str.split(',') #.strip().split("\t")
+def printIndented(string_to_print:str, indent: int=1):
+  indent_str = '\t' * indent
+  indented_line_break = "\n" + indent_str
+  string_to_print = string_to_print.replace('\n', indented_line_break)
+  print(indent_str + string_to_print)
+
+
+def convertStringToVector(vector_str: str):
+    vector_str_list = vector_str.split(',') #.strip().split("\t")
 
     # Convert the list of strings to a list of floats.
-    v = np.array([[np.float64(x),] for x in v_str_list])
+    chars_to_strip = ' []\n'
+    v = np.array([[np.float64(x.strip(chars_to_strip)),] for x in vector_str_list])
     
     # Make into a column vector;
     # v.transpose()
    
-    if debug_level >= 3:
-      print('\tv: ' + repr(v))
+    if debug_interfile_communication_level >= 3:
+      print('convertStringToVector():')
+      printIndented('vector_str:', 1)
+      printIndented(repr(vector_str), 1)
+      printIndented('v:', 1)
+      printIndented(repr(v), 1)
+      # print('\tvector_str:\n' + repr(vector_str).replace('\n','\n\t'), end='\n\t')
+      # print('\t    v:\n' + repr(v).replace('\n','\n\t'))
 
     return v
 
 def numpyArrayToCsv(array: np.array) -> str:
-  return ', '.join(map(str, array.flatten()));
+  string = ', '.join(map(str, array.flatten()))
+  # print("In numpyArrayToCsv")
+  # printIndented("array", 1)
+  # printIndented(repr(array), 2)
+  # printIndented('String: ' + string, 1)
+  return string
   # ','.join(map(str, x.flatten())_
 
-def system_derivative(t, x, u):
+def system_derivative(t, x, params):
     # Convert x into a 2D (nx1) array instead of 1D array (length n).
     x = x[:,None]
+    u = params["u"]
+    w = params["w"]
+
+    if debug_dynamics_level >= 3:
+      print('Values when calculating system xdot:')
+      printIndented('x = ' + str(x), 1)
+      printIndented('u = ' + str(u), 1)
+      printIndented('w = ' + str(w), 1)
 
     # Compute the system dynamics.
-    xdot = np.matmul(A, x) +  np.matmul(B, u);
-    # print(f"x={x}, u={u}, xdot={xdot}.")
-    # current_position, current_velocity = x
-    # return [current_velocity, u]
-    if debug_level >= 3:
+    xdot = np.matmul(A, x) +  np.matmul(B, u) + B_dist * w;
+
+    if debug_dynamics_level >= 3:
       print('Values when calculating system xdot:')
-      print('x = ' + repr(x))
-      print('u = ' + repr(u))
-      print('Ax = ' + repr( np.dot(A, x)))
-      print('Bu = ' + repr( np.dot(B, u)))
-      print('xdot = ' + repr(xdot))
+      printIndented('  A*x = ' + str( np.matmul(A, x)), 1)
+      printIndented('  B*u = ' + str( np.matmul(B, u)), 1)
+      printIndented('B_d*w = ' + str((B_dist * w)), 1)
+      printIndented(' xdot = ' + str(xdot), 1)
     return xdot
 
 solver = ode(system_derivative).set_integrator('vode', method='bdf')
 def evolveState(t0, x0, u, tf):
+  Ad, Bd = scipy.signal.cont2discrete((A, B, C, D), tf - t0)[0:2]
+
+  print(f"== evolveState(t=[{t0:.2}, {tf:.2}]) ==")
+  print("x0': " + str(x0.transpose()))
+  print(" u': " + str(u))
+  print("Ad")
+  printIndented(str(Ad), 1)
+  print("Bd")
+  printIndented(str(Bd), 1)
+
   # Create an ODE solver
+  params = {"u": u, "w": 0}
   solver.set_initial_value(x0, t=t0)
-  solver.set_f_params(u)
+  solver.set_f_params(params)
   # Simulate the system until the computation ends, using the previous control value.
   solver.integrate(tf)
-  x = solver.y
+  xf = solver.y
 
-  if debug_level >= 2:
-    print(f'ODE solver run over interval t=[{t0}, {tf}] with x0={x0}, u={u}')
-  if debug_level >= 3:
+  xf_alt = np.matmul(Ad, x) + np.matmul(Bd, u)
+  print(f"    xf={xf.transpose()}.")
+  print(f"xf_alt={xf_alt.transpose()}.")
+  norm_diff_between_methods = linalg.norm(xf - xf_alt)
+  if norm_diff_between_methods > 1e-2:
+    raise ValueError(f"|xf - xf_alt| = {linalg.norm(xf - xf_alt)} is larger than tolerance")
+  xf = xf_alt
+
+  if debug_dynamics_level >= 2:
+    print(f'ODE solver run over interval t=[{t0}, {tf}] with x0={x0.transpose().tolist()[0]}, u={u}')
+  if debug_dynamics_level >= 3:
     print('Solver values at end of delay.')
     print(f"\tsolver.u = {repr(solver.f_params)}")
     print(f"\tsolver.y = {repr(solver.y)}")
     print(f"\tsolver.t = {repr(solver.t)}")
-    # print(f"x = {y}")
-  return x
+  return (tf, xf)
 
 def checkAndStripInputLoopNumber(expected_k, input_line):
   """ Check that an input line, formatted as "Loop <k>: <data>" 
   has the expected value of k (given by the argument "expected_k") """
 
   split_input_line = input_line.split(':')
-  # if debug_level >= 1:
-  #   print(f"Reading an input line for {split_input_line[0]}.")
-
   loop_input_str = split_input_line[0]
 
   # Check that the input line is in the expected format. 
@@ -148,14 +215,14 @@ def checkAndStripInputLoopNumber(expected_k, input_line):
 
 def waitForLineFromFile(file):
   # max_loops = 
-  if debug_level >= 1:
+  if debug_interfile_communication_level >= 1:
         print(f"Waiting for input_line from {file.name}.")
   for i in range(0, 10):
     input_line = file.readline()
     # print(f'input line read i:{i}, input_line:{input_line}')
     # print()
     if input_line:
-      if debug_level >= 1:
+      if debug_interfile_communication_level >= 1:
         print(f"Recieved input_line from {file.name} on loop #{i}:")
         print(input_line)
       return input_line
@@ -170,6 +237,8 @@ def generateDataOut():
   data_out_json["datetime_of_run"] = datetime.datetime.now().isoformat()
   data_out_json["cause_of_termination"] = cause_of_termination
   data_out_json["x"] = x_cumul;
+  data_out_json["x_prediction"] = x_prediction_cumul;
+  data_out_json["t_prediction"] = t_prediction_cumul;
   data_out_json["u"] = u_cumul;
   data_out_json["t"] = t_cumul;
   data_out_json["computation_delays"] = simulated_computation_time_cumul;
@@ -188,7 +257,7 @@ def generateDataOut():
     # Save Scarab parameters from PARAMS.out into the data_out JSON object. 
     param_keys_to_save_in_data_out = ["chip_cycle_time", "l1_size", "dcache_size", "icache_size", "decode_cycles"]
     param_regex_pattern = re.compile(r"--(?P<param_name>[\w|\_]+)\s*(?P<param_value>\d+).*")
-    with open('sim_dir/PARAMS.out') as params_out_file:
+    with open(sim_dir + 'PARAMS.out') as params_out_file:
       f_lines = params_out_file.readlines()
       for line in f_lines: 
         regex_match = param_regex_pattern.match(line)
@@ -199,7 +268,7 @@ def generateDataOut():
             data_out_json[param_name] = int(param_value)
       
   # Read optimizer info.
-  with open('sim_dir/optimizer_info.csv', newline='') as csvfile:
+  with open(sim_dir + 'optimizer_info.csv', newline='') as csvfile:
     csv_reader = csv.reader(csvfile, delimiter=',', quotechar='|')
     
     num_iterations_cumul = []
@@ -240,7 +309,10 @@ def generateDataOut():
 LINE_BUFFERING = 1
 with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile, \
      open(u_in_filename, 'r', buffering= LINE_BUFFERING) as u_infile, \
+     open(x_predict_in_filename, 'r', buffering= LINE_BUFFERING) as x_predict_infile, \
+     open(t_predict_in_filename, 'r', buffering= LINE_BUFFERING) as t_predict_infile, \
      open(x_out_filename, 'w', buffering= LINE_BUFFERING) as x_outfile, \
+     open(t_delay_out_filename, 'w', buffering= LINE_BUFFERING) as t_delay_outfile, \
      open(x_data_filename, 'w', buffering= LINE_BUFFERING) as x_datafile, \
      open(u_data_filename, 'w', buffering= LINE_BUFFERING) as u_datafile, \
      open(t_data_filename, 'w', buffering= LINE_BUFFERING) as t_datafile :
@@ -253,10 +325,11 @@ with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile, \
     u_str = numpyArrayToCsv(uarray)
     t_str = str(t)
 
-    print(f't = {t_str} ({description})')
-    print(f'\t x: {x_str}')
-    print(f'\t u: {u_str}')
-    print(f'\t t: {t_str}')
+    if debug_interfile_communication_level >= 1:
+      print(f'Snapshotting State: t = {t_str} ({description})')
+      printIndented(f'x: {x_str}', 1)
+      printIndented(f'u: {u_str}', 1)
+      printIndented(f't: {t_str}', 1)
 
     x_datafile.write(x_str + "\n")
     u_datafile.write(u_str + "\n")
@@ -269,6 +342,28 @@ with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile, \
     x_cumul.append(xarray.transpose().tolist()[0])
     u_cumul.append(uarray.transpose().tolist()[0])
     t_cumul.append(t)
+
+    
+  def snapshotPrediction(t_prediction: float, x_prediction_array: np.ndarray, description: str):
+    """ Define a function for printing the prediction to 
+    the console and saving the state to the data files. """
+    x_predict_str = numpyArrayToCsv(x_prediction_array)
+    t_predict_str = str(t_prediction)
+
+    if debug_interfile_communication_level >= 1:
+      print(f'Snapshotting Prediction ({description})')
+      printIndented(f'x prediction: {x_predict_str}', 1)
+      printIndented(f't prediction: {t_predict_str}', 1)
+
+    x_datafile.write(x_predict_str + "\n")
+    t_datafile.write(t_predict_str + "\n")
+
+    # Add xarray and uarray to the cumulative lists. 
+    # We want xarray to be stored as a single list of numbers, but the 
+    # tolist() function creates a nested lists, with the outter list containing
+    # a single list. Thus, we use "[0]" to reference the inner list. 
+    x_prediction_cumul.append(x_prediction_array.transpose().tolist()[0])
+    t_prediction_cumul.append(t_prediction)
 
   t = 0.0
   cause_of_termination = "In progress"
@@ -287,9 +382,20 @@ with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile, \
         break
 
       u_input_line = waitForLineFromFile(u_infile)
+      x_predict_input_line = waitForLineFromFile(x_predict_infile)
+      t_predict_input_line = waitForLineFromFile(t_predict_infile)
         
       x_input_line = checkAndStripInputLoopNumber(k, x_input_line)
       u_input_line = checkAndStripInputLoopNumber(k, u_input_line)
+      x_predict_input_line = checkAndStripInputLoopNumber(k, x_predict_input_line)
+      t_predict_input_line = checkAndStripInputLoopNumber(k, t_predict_input_line)
+
+      if debug_interfile_communication_level >= 1:
+        print('Input strings from C++:')
+        print("\t           x input line: " + x_input_line.strip())
+        print("\t           u input line: " + u_input_line.strip())
+        print("\tx prediction input line: " + x_predict_input_line.strip())
+        print("\tt prediction input line: " + t_predict_input_line.strip())
 
       # Get the statistics input line.
       if use_scarab_delays: 
@@ -308,49 +414,52 @@ with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile, \
       
       print(f"Delay time: {simulated_computation_time:.3g} seconds ({100*simulated_computation_time/sample_time:.3g}% of sample time).")
 
-      # if debug_level >= 1:
-      #   print('Input strings:')
-      #   print("x input line: " + repr(x_input_line))
-      #   print("u input line: " + repr(u_input_line))
-
       x = convertStringToVector(x_input_line)
       u = convertStringToVector(u_input_line)
+      x_prediction = convertStringToVector(x_predict_input_line)
+      t_prediction = t_start_of_loop + float(t_predict_input_line)
 
       # Write the data for the first time step to the CSV files.
       if k == 0:
         snapshotState(k, t, x, u_prev, 'Initial condition')
 
+      print("t_predict_input_line: " + t_predict_input_line)
+      snapshotPrediction(t_prediction, x_prediction, "Prediction")
       # If the controller computed the update in less than the sample time, then 
       # we compute the remainder of the sample time period using the new control value. 
       # If it was not computed in time, then u_prev will not be updated, so the previous 
       # value will be used again in the next interval. 
       if simulated_computation_time >= sample_time:
-        print(f"simulated_computation_time={simulated_computation_time:.2f} >= sample_time={sample_time:.2f} . Control not being updated.")
-        x = evolveState(t, x, u_prev, t + sample_time)
-        t = t_start_of_loop + sample_time
+        if debug_dynamics_level >= 1:
+          print(f"simulated_computation_time={simulated_computation_time:.2f} >= sample_time={sample_time:.2f}. Control not being updated.")
+
+        # Evolve x over the entire sample period.
+        (t, x) = evolveState(t, x, u_prev, t + sample_time)
 
         # Save values. We use 'u' instead of 'u_prev' because this is the point where we update the input.
         snapshotState(k, t, x, u_prev, "After full sample interval - No control update.")
       else:
-        print(f"simulated_computation_time={simulated_computation_time:.2f} < sample_time={sample_time:.2f}. Control to be updated.")
-        x = evolveState(t, x, u_prev, t + simulated_computation_time)
-        t = t_start_of_loop + simulated_computation_time
+        if debug_dynamics_level >= 1:
+          print(f"simulated_computation_time={simulated_computation_time:.2f} < sample_time={sample_time:.2f}. Control to be updated.")
+
+        # Evolve x until the computation finishes.
+        (t, x) = evolveState(t, x, u_prev, t + simulated_computation_time)
 
         # Save values. We use 'u' instead of 'u_prev' because this is the point where we update the input.
         snapshotState(k, t, x, u_prev, "After delay - Previous control")
-
         snapshotState(k, t, x, u, "After delay - New control")
 
-        x = evolveState(t, x, u, t_start_of_loop+sample_time)
-        t = t_start_of_loop + sample_time
+        (t, x) = evolveState(t, x, u, t_start_of_loop+sample_time)
         u_prev = u
 
         snapshotState(k, t, x, u, "End of sample")
 
       # Pass the string back to C++.
       x_out_string = numpyArrayToCsv(x)
-      print("x output line:" + repr(x_out_string))
+      if debug_interfile_communication_level >= 1:
+        print("x output line:" + repr(x_out_string))
       x_outfile.write(x_out_string + "\n")# Write to pipe to C++
+      t_delay_outfile.write(str(simulated_computation_time) + "\n")
       walltime_cumul.append(time.time() - walltime_start_of_loop)
       
       data_out_list = generateDataOut()

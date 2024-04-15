@@ -28,6 +28,19 @@ using json = nlohmann::json;
  
 using namespace mpc;
 
+Eigen::IOFormat fmt(4, // precision
+                    0, // flags
+                    ", ", // coefficient separator
+                    "\n", // row prefix
+                    "[", // matrix prefix
+                    "]"); // matrix suffix.
+Eigen::IOFormat fmt_high_precision(20, // precision
+                    0, // flags
+                    ", ", // coefficient separator
+                    "\n", // row prefix
+                    "[", // matrix prefix
+                    "]"); // matrix suffix.
+
 template<typename ... Args>
 std::string string_format( const std::string& format, Args ... args )
 {
@@ -60,13 +73,11 @@ void loadMatrixValuesFromJson(mat<rows, cols>& mat_out, json json_data, std::str
 
 template<int n>
 void printVector(std::string description, cvec<n>& vec_to_print){
-  Eigen::IOFormat fmt(4, 0, ", ", "\n", "", "");
   std::cout << description << ":" << std::endl << vec_to_print.transpose().format(fmt) << std::endl;
 }
 
 template<int rows, int cols>
 void printMat(std::string description, mat<rows, cols>& mat_to_print){
-  Eigen::IOFormat fmt(4, 0, ", ", "\n", "", "");
   std::cout << description << ": " << std::endl << mat_to_print.format(fmt) << std::endl;
 }
 
@@ -83,18 +94,47 @@ std::vector<double> matToStdVector(mat<rows,cols>& matrix){
   return matrix_entries;
 }
 
-int debug_interfile_communication = 0;
-int debug_optimizer_stats = 0;
-Eigen::IOFormat fmt(4, 0, ", ", "\n", "", "");
+int debug_interfile_communication_level;
+int debug_optimizer_stats_level;
+int debug_dynamics_level;
+// Eigen::IOFormat fmt(4, 0, ", ", "\n", "", "");
 
 // File names for the pipes we use for communicating with Python.
-std::string x_out_filename = "/workspaces/ros-docker/libmpc_example/sim_dir/x_c++_to_py";
-std::string u_out_filename = "/workspaces/ros-docker/libmpc_example/sim_dir/u_c++_to_py";
-std::string x_in_filename = "/workspaces/ros-docker/libmpc_example/sim_dir/x_py_to_c++";
-std::string optimizer_info_out_filename = "/workspaces/ros-docker/libmpc_example/sim_dir/optimizer_info.csv";
+std::string sim_dir_path = "/workspaces/ros-docker/libmpc_example/sim_dir/";
+std::string x_out_filename = sim_dir_path + "x_c++_to_py";
+std::string x_predict_out_filename = sim_dir_path + "x_predict_c++_to_py";
+std::string t_predict_out_filename = sim_dir_path + "t_predict_c++_to_py";
+std::string u_out_filename = sim_dir_path + "u_c++_to_py";
+std::string x_in_filename = sim_dir_path + "x_py_to_c++";
+std::string t_delays_in_filename = sim_dir_path + "t_delay_py_to_c++";
+std::string optimizer_info_out_filename = sim_dir_path + "optimizer_info.csv";
+
+template<int rows>
+void sendCVec(std::string label, int i_loop, mpc::cvec<rows> x, std::ofstream& outfile) 
+{
+  auto out_str = x.transpose().format(fmt_high_precision);
+  if (debug_interfile_communication_level >= 1) 
+  {
+    PRINT(label << " (send to Python): " << out_str);
+  } 
+  outfile << "Loop " << i_loop << ": " << out_str << std::endl;
+}
+
+void sendDouble(std::string label, int i_loop, double x, std::ofstream& outfile) 
+{
+  if (debug_interfile_communication_level >= 1) 
+  {
+    PRINT(label << " (send to Python): " << x);
+  } 
+  outfile << "Loop " << i_loop << ": " << x << std::endl;
+}
 
 int main()
 {
+  // PRINT("PREDICTION_HORIZON" << PREDICTION_HORIZON)
+  // PRINT("CONTROL_HORIZON" << CONTROL_HORIZON)
+  // return 0;
+
   std::ifstream config_json_file("/workspaces/ros-docker/libmpc_example/config.json");
   json json_data = json::parse(config_json_file);
   config_json_file.close();
@@ -110,6 +150,13 @@ int main()
   
   int n_time_steps = json_data["n_time_steps"];
 
+  auto debug_config = json_data["==== Debgugging Levels ===="];
+  debug_interfile_communication_level = debug_config["debug_interfile_communication_level"];
+  debug_optimizer_stats_level = debug_config["debug_optimizer_stats_level"];
+  debug_dynamics_level = debug_config["debug_dynamics_level"];
+
+  bool use_state_after_delay_prediction = json_data["use_state_after_delay_prediction"];
+
   // Vector sizes.
   const int Tnx = 5;  // State dimension
   const int Tnu = 1;  // Control dimension
@@ -119,6 +166,9 @@ int main()
   // MPC options.
   const int prediction_horizon = PREDICTION_HORIZON;
   const int control_horizon = CONTROL_HORIZON;
+  
+  // Convergence termination tolerance: How close to the reference do we need to be stop?
+  double convergence_termination_tol = json_data["convergence_termination_tol"];
 
   // Discretization Options.
   double sample_time = json_data["sample_time"];
@@ -132,7 +182,8 @@ int main()
   // Model is the HCW equations for relative satellite motion.
   mat<Tnx, Tnx> Ac;
   mat<Tnx, Tnu> Bc;
-  mat<Tny, Tnx> Cd;
+  mat<Tny, Tnx> C;
+  mat<Tnx, Tndu> Bc_disturbance;
   
   double lead_car_input = json_data["lead_car_input"];
   double tau = json_data["tau"];
@@ -151,12 +202,10 @@ int main()
         -1/tau;
 
   // State to output matrix
-  Cd << 0, 0, 1, 0, 0, 
-        1, 0, 0,-1, 0;
+  C << 0, 0, 1, 0, 0, 
+       1, 0, 0,-1, 0;
 
   // Set input disturbance matrix.
-  mat<Tnx, Tndu> Bc_disturbance;
-  mat<Tnx, Tndu> Bd_disturbance;
   Bc_disturbance << 0, 1/tau, 0, 0, 0;
 
   json json_out_data;
@@ -164,8 +213,10 @@ int main()
   json_out_data["input_dimension"] = Tnu;
   std::vector<double> Ac_entries = matToStdVector(Ac);
   std::vector<double> Bc_entries = matToStdVector(Bc);
+  std::vector<double> Bc_disturbances_entries = matToStdVector(Bc);
   json_out_data["Ac_entries"] = Ac_entries;
   json_out_data["Bc_entries"] = Bc_entries;
+  json_out_data["Bc_disturbances_entries"] = Bc_disturbances_entries;
   json_out_data["prediction_horizon"] = prediction_horizon;
   json_out_data["control_horizon"] = control_horizon;
   
@@ -181,8 +232,25 @@ int main()
 
   mat<Tnx, Tnx> Ad;
   mat<Tnx, Tnu> Bd;
+  mat<Tnx, Tndu> Bd_disturbance;
   // Compute the discretization of Ac and Bc, storing them in Ad and Bd.
   discretization<Tnx, Tnu, Tndu>(Ac, Bc, Bc_disturbance, sample_time, Ad, Bd, Bd_disturbance);
+
+  if (debug_dynamics_level >= 1)
+  {
+    PRINT("=== Discretization Output ===")
+    PRINT("Ad:")
+    PRINT(Ad)
+    PRINT("Bd:")
+    PRINT(Bd)
+    PRINT("Bd_disturbance:")
+    PRINT(Bd_disturbance)
+  }
+  
+
+  mat<Tnx, Tnx> Ad_predictive;
+  mat<Tnx, Tnu> Bd_predictive;
+  mat<Tnx, Tndu> Bd_disturbance_predictive;
 
   PRINT("Finished creating Matrices");
 
@@ -215,20 +283,30 @@ int main()
   lmpc.setOptimizerParameters(params);
   PRINT("Finshed setting parameters");
 
-  lmpc.setStateSpaceModel(Ad, Bd, Cd);
+  lmpc.setStateSpaceModel(Ad, Bd, C);
   lmpc.setDisturbances(Bd_disturbance, mat<Tny, Tndu>::Zero());
 
   // ======== Weights ========== //
 
+  double outputWeight = json_data["output_cost_weight"];
+  double inputWeight = json_data["input_cost_weight"];
+
   // Output Weights
   cvec<Tny> OutputW;
   OutputW.setOnes();
-  OutputW *= json_data["output_cost_weight"];
+  OutputW *= outputWeight;
 
   // Input Weights
   cvec<Tnu> InputW;
   InputW.setOnes();
-  InputW *= json_data["input_cost_weight"];
+  InputW *= inputWeight;
+
+  if ( outputWeight < 0 )
+  {
+    throw std::invalid_argument( "The output weight was negative." );
+  }
+  
+  
 
   // Input change weights
   cvec<Tnu> DeltaInputW;
@@ -275,25 +353,39 @@ int main()
   // I/O Setup
 
   std::ofstream x_outfile;
+  std::ofstream x_predict_outfile;
+  std::ofstream t_predict_outfile;
   std::ofstream u_outfile;
   std::ifstream x_infile;
+  std::ifstream t_delays_infile;
   if (use_external_dynamics_computation) {
-    // Open the pipes to Python. Each time we open one of these streams, this process pauses until 
+    // Open the pipes to Python. Each time we open one of these streams, 
+    // this process pauses until 
     // it is connected to the Python process (or another process). 
     // The order needs to match the order in the reader process.
     PRINT("About to open x_outfile output stream. Waiting for reader.");
     x_outfile.open(x_out_filename,std::ofstream::out);
     PRINT("About to open u_outfile output stream. Waiting for reader.");
     u_outfile.open(u_out_filename,std::ofstream::out);
-    PRINT("About to open x_infile output stream. Waiting for reader.");
+    PRINT("About to open x_predict_outfile output stream. Waiting for reader.");
+    x_predict_outfile.open(x_predict_out_filename,std::ofstream::out);
+    PRINT("About to open t_predict_outfile output stream. Waiting for reader.");
+    t_predict_outfile.open(t_predict_out_filename,std::ofstream::out);
+    PRINT("About to open x_infile input stream. Waiting for reader.");
     x_infile.open(x_in_filename,std::ofstream::in);
+    PRINT("About to open t_delays_infile input stream. Waiting for reader.");
+    t_delays_infile.open(t_delays_in_filename,std::ofstream::in);
     PRINT("All files open.");
   }
 
   // State vector state.
   mpc::cvec<Tnx> modelX, modeldX;
+  mpc::cvec<Tnx> x_predict;
   // Set the initial value.
   loadMatrixValuesFromJson(modelX, json_data, "x0");
+  
+  // Predicted time of finishing computation.
+  double t_predict;
 
   // Output vector.
   mpc::cvec<Tny> y;
@@ -302,6 +394,9 @@ int main()
   mpc::cvec<Tnu> u;
   u = cvec<Tnu>::Zero();
 
+  // Store the delay time required to compute the previous controller value.
+  double t_delay_prev = 0;
+
   scarab_begin(); // Tell Scarab to stop "fast forwarding". This is needed for '--pintool_args -fast_forward_to_start_inst 1'
 
   for (int i = 0; i < n_time_steps; i++)
@@ -309,29 +404,77 @@ int main()
     PRINT(std::endl << "====== Starting loop #" << i << " ======");
     PRINT("At x=" << modelX.transpose().format(fmt));
 
+
     // Begin a batch of Scarab statistics
     scarab_roi_dump_begin(); 
 
+      if (use_state_after_delay_prediction)
+      {
+        t_predict = t_delay_prev;
+        discretization<Tnx, Tnu, Tndu>(Ac, Bc, Bc_disturbance, t_predict, Ad_predictive, Bd_predictive, Bd_disturbance_predictive);
+        
+        x_predict = Ad_predictive * modelX + Bd_predictive * u + Bd_disturbance_predictive*lead_car_input;
+        
+        if (debug_dynamics_level >= 1)
+        {
+          PRINT("====== Ad_predictive: ")
+          PRINT(Ad_predictive)
+          PRINT("====== Bd_predictive: ")
+          PRINT(Bd_predictive)
+          PRINT("====== Bd_disturbance_predictive: ")
+          PRINT(Bd_disturbance_predictive)
+        }
+        // int n_time_step_division = 1000;
+        // double delta_t = t_delay_prev / double(n_time_step_division);
+        // x_predict = modelX;
+        // for (int i = 0; i < n_time_step_division; i++)
+        // {
+        //   // Do Euler's forward method for computing predicted state.
+        //   x_predict += delta_t * (Ac * modelX + Bc * u + Bc_disturbance*lead_car_input);
+        //   t_predict += delta_t;
+        //   PRINT("t_predict: " << t_predict << ", after i=" << i << " Euler Forward steps. (delta_t=" << delta_t <<")")
+        // }
+        // x_predict = modelX + t_predict * (Ac * modelX + Bc * u);
+      } else {
+        x_predict = modelX;
+        t_predict = 0;
+      }
+      if (debug_dynamics_level >= 1) 
+      {
+        PRINT("====== t_delay_prev: " << t_delay_prev);
+        PRINT("====== t_predict: " << t_predict);
+        PRINT("====== x_predict: " << x_predict.transpose());
+      }
+
       // Compute a step of the MPC controller. This does NOT change the value of modelX.
-      Result res = lmpc.step(modelX, u);
+      Result res = lmpc.step(x_predict, u);
 
     // Save a batch of Scarab statistics
-    scarab_roi_dump_end();
+    scarab_roi_dump_end();  
 
-    auto u = res.cmd;
-    // printVector("u  from res.cmd", u );
+    u = res.cmd;
     
-    if (debug_optimizer_stats >= 1) 
+    if (debug_optimizer_stats_level >= 1) 
     {
-      PRINT("return code: " << res.retcode)
-      PRINT("Result status: " << res.status)
+      PRINT("Optimizer Info")
+      PRINT("         Return code: " << res.retcode)
+      PRINT("       Result status: " << res.status)
       PRINT("Number of iterations: " << res.num_iterations)
-      PRINT("Cost: " << res.cost)
-      PRINT("Constraint error: " << res.primal_residual)
-      PRINT("Dual error: " << res.dual_residual)
+      PRINT("                Cost: " << res.cost)
+      PRINT("    Constraint error: " << res.primal_residual)
+      PRINT("          Dual error: " << res.dual_residual)
     }
 
     optimizer_info_out_file << res.num_iterations << "," << res.cost << "," << res.primal_residual << "," << res.dual_residual << std::endl;  
+
+    // if ( res.num_iterations == 0 )
+    // {
+    //   throw std::range_error( "Number of iterations was zero." );
+    // }
+    // if ( res.cost < 0)
+    // {
+    //   throw std::range_error( "The cost was negative." );
+    // }
 
     // OptSequence has three properties: state, input, and output. 
     // Each predicted time step is stored in one row.
@@ -339,48 +482,43 @@ int main()
     OptSequence optseq = lmpc.getOptimalSequence();
 
     if (use_external_dynamics_computation) {
-      // Format the numerical arrays into strings (single lines) that we pass to Python.
-      auto x_out = modelX.transpose();
-      auto x_out_str = x_out.format(fmt);
-      auto u_out_str = u.format(fmt);
+      // Format the numerical arrays into strings (single lines) that we pass to Python.     
 
-      // Pass the strings for x_out and u to the json_outfiles, 
-      // which are watched by Python.
-      if (debug_interfile_communication >= 1) 
-      {
-        PRINT("x (send to Python): " << x_out_str);
-      } 
-      x_outfile << "Loop " << i << ": " << x_out_str << std::endl;
-
-      if (debug_interfile_communication >= 1) 
-      {
-        PRINT("u (send to Python): " << u_out_str);
-      } 
-      u_outfile << "Loop " << i << ": " << u_out_str << std::endl;
+      sendCVec("x", i, modelX, x_outfile);
+      sendCVec("x prediction", i, x_predict, x_predict_outfile);
+      sendDouble("t prediction ", i, t_predict, t_predict_outfile);
+      sendCVec("u", i, u, u_outfile);
 
       // Read and print the contents of the file from Python.
-      std::string line_from_py;
+      std::string x_in_line_from_py;
+      std::string t_delay_in_line_from_py;
       
-      if (debug_interfile_communication >= 2)
+      if (debug_interfile_communication_level >= 2)
       {
         PRINT("Getting line from python: ");
       }
-      std::getline(x_infile, line_from_py);
-      if (debug_interfile_communication >= 2)
+      std::getline(x_infile, x_in_line_from_py);
+      std::getline(t_delays_infile, t_delay_in_line_from_py);
+      if (debug_interfile_communication_level >= 2)
       {
-        PRINT("Line from python: " << line_from_py);
+        PRINT("Lines received from Python:")
+        PRINT("\t      x: " << x_in_line_from_py);
+        PRINT("\tt_delay: " << t_delay_in_line_from_py);
       }
 
       // Create a stringstream to parse the string
-      std::stringstream ss(line_from_py);
-
+      std::stringstream x_ss(x_in_line_from_py);
+      std::stringstream t_delay_ss(t_delay_in_line_from_py);
+      
       for (int j_entry = 0; j_entry < modelX.rows(); j_entry++) {
         char comma; // to read and discard the comma
-        ss >> modelX(j_entry) >> comma;
+        x_ss >> modelX(j_entry) >> comma;
+        t_delay_ss >> t_delay_prev;
       }
-      if (debug_interfile_communication >= 1) 
+      if (debug_interfile_communication_level >= 1) 
       {
-        PRINT("x (from Python): " << modelX.transpose().format(fmt));
+        PRINT("x (from Python): " << modelX.transpose().format(fmt_high_precision));
+        PRINT("t_delay_prev (from Python): " << t_delay_prev);
       }
     } else {
       printVector("modelX", modelX);
@@ -390,15 +528,15 @@ int main()
     }
     
     // Set the model state to the next value of x from the optimal sequence. 
-    y = Cd * modelX;
-    if ((y-yRef).norm() < 1e-2)
+    y = C * modelX;
+    if ((y-yRef).norm() < convergence_termination_tol)
     {
       PRINT("Converged to the origin after " << i << " steps.");
       break;
     }
     
   } 
-  printVector("y", y);
+  // printVector("y", y);
 
   if (use_external_dynamics_computation)
   {
