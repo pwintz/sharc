@@ -12,9 +12,11 @@
 
 ## Core Parameters
 
-# Femptoseconds, 3.2GHz, used for energy estimates.
+# Length of each chip cycle in femtosecond (10^-15 sec).
 --chip_cycle_time               100000000
 
+## This line is suppposed to prevent some crashes, according to Mingsheng.
+--fdip_enable                     0
 
 ### Fetch Stage
 --fetch_off_path_ops            1
@@ -27,8 +29,8 @@
 --fetch_taken_bubble_cycles     0
 
 
-#### ICache
---icache_size                   32768 <- T
+#### ICache - Instruction cache.
+--icache_size                   32768
 --icache_assoc                  4
 --icache_line_size              64
 
@@ -67,8 +69,8 @@
 --tc_entries                    4096
 --tc_assoc                      4
 
-### Decode Stage - Latencies
---decode_cycles                 5 <- 
+### Decode Stage - Pipeline Latencies 
+--decode_cycles                 5 
 
 
 ### Map Stage
@@ -88,8 +90,8 @@
 
 ### Exec Stage
 
-### DCache
---dcache_size 	 	          32768 # <- This one?
+### DCache - Data cache
+--dcache_size 	 	          32768
 --dcache_read_ports             2
 --dcache_write_ports            1
 --dcache_banks                  1
@@ -116,8 +118,8 @@
 # Enable use of a midlevel cache between i/d and L1
 --mlc_present                   0
 
-### LLC (Last level cache)
---l1_size                       1048576 <- L3 Cache
+### LLC (Last level cache) (This is actually the L3 cache size?)
+--l1_size                       1048576
 --l1_banks                      1
 --l1_cycles		                  18
 --l1_assoc                      8
