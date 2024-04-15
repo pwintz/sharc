@@ -59,7 +59,7 @@ def main():
       pass
 
   param_regex_pattern = re.compile(r"--(?P<param_name>[\w|\_]+)\s*(?P<param_value>\d+).*")
-  param_str_fmt = "--{}\t{}"
+  param_str_fmt = "--{}\t{}\n"
   PARAMS_base_filename = 'PARAMS.base'
   with open(PARAMS_base_filename) as params_out_file:
     PARAM_file_lines = params_out_file.readlines()
