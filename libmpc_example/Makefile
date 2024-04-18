@@ -43,7 +43,11 @@ PIPE_FILES = sim_dir/x_c++_to_py sim_dir/x_predict_c++_to_py sim_dir/t_predict_c
 run: ${LIBMPC_MAIN} sim_dir config.json ${PIPE_FILES}
 	./${LIBMPC_MAIN}
 
-run_plant: plant_dynamics.py
+# Simulate test_libmpc using Scarab while communicating with the Python ODE solver.
+simulate: ${LIBMPC_MAIN} clean_statistics ${PIPE_FILES} config.json
+	./scarab_test_libmpc.py ${LIBMPC_MAIN}
+
+run_plant: plant_dynamics.py config.json ${PIPE_FILES} 
 	./plant_dynamics.py
 
 # If config_base.json updates, automatically update config.json to reflect the changes.
@@ -63,40 +67,9 @@ $(PIPE_FILES):
 	rm $@ -f
 	mkfifo $@
 
-# # Create in/out pipe files for communicating between C++ and Python.
-# sim_dir/x_c++_to_py: sim_dir
-# 	rm sim_dir/x_c++_to_py -f
-# 	mkfifo sim_dir/x_c++_to_py
-
-	
-# # Create pipe files for communicating from C++ to Python.
-# sim_dir/x_predict_c++_to_py: sim_dir
-# 	rm sim_dir/x_predict_c++_to_py -f
-# 	mkfifo sim_dir/x_predict_c++_to_py
-
-# # Create in/out pipe files for communicating between C++ and Python.
-# sim_dir/u_c++_to_py: sim_dir
-# 	rm sim_dir/u_c++_to_py -f
-# 	mkfifo sim_dir/u_c++_to_py
-
-# # Create in/out pipe files for communicating between C++ and Python.
-# sim_dir/x_py_to_c++: sim_dir
-# 	rm sim_dir/x_py_to_c++ -f
-# 	mkfifo sim_dir/x_py_to_c++
-
-# # Create a pipe file for passing the computational delays back to C++.
-# sim_dir/t_delay_py_to_c++: sim_dir
-# 	rm sim_dir/t_delay_py_to_c -f
-# 	mkfifo sim_dir/t_delay_py_to_c
-
-
 # Create the simulation directory where the stats from Scarab are generated and the in/out pipe files for communicating between C++ and Python are placed.
 sim_dir:
 	mkdir sim_dir
-
-# Simulate test_libmpc using Scarab while communicating with the Python ODE solver.
-simulate: ${LIBMPC_MAIN} clean_statistics ${PIPE_FILES} config.json
-	./scarab_test_libmpc.py sim_dir
 
 clean_statistics:
 	rm -f sim_dir/*.stat.* sim_dir/per_line_* sim_dir/per_branch* sim_dir/uop_queue* ramulator.stat.out 
