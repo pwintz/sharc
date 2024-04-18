@@ -104,6 +104,7 @@ std::string sim_dir_path = "/workspaces/ros-docker/libmpc_example/sim_dir/";
 std::string x_out_filename = sim_dir_path + "x_c++_to_py";
 std::string x_predict_out_filename = sim_dir_path + "x_predict_c++_to_py";
 std::string t_predict_out_filename = sim_dir_path + "t_predict_c++_to_py";
+std::string iterations_out_filename = sim_dir_path + "iterations_c++_to_py";
 std::string u_out_filename = sim_dir_path + "u_c++_to_py";
 std::string x_in_filename = sim_dir_path + "x_py_to_c++";
 std::string t_delays_in_filename = sim_dir_path + "t_delay_py_to_c++";
@@ -355,6 +356,7 @@ int main()
   std::ofstream x_outfile;
   std::ofstream x_predict_outfile;
   std::ofstream t_predict_outfile;
+  std::ofstream iterations_outfile;
   std::ofstream u_outfile;
   std::ifstream x_infile;
   std::ifstream t_delays_infile;
@@ -371,6 +373,10 @@ int main()
     x_predict_outfile.open(x_predict_out_filename,std::ofstream::out);
     PRINT("About to open t_predict_outfile output stream. Waiting for reader.");
     t_predict_outfile.open(t_predict_out_filename,std::ofstream::out);
+    PRINT("About to open iterations_outfile output stream. Waiting for reader.");
+    iterations_outfile.open(iterations_out_filename,std::ofstream::out);
+
+    // In files.
     PRINT("About to open x_infile input stream. Waiting for reader.");
     x_infile.open(x_in_filename,std::ofstream::in);
     PRINT("About to open t_delays_infile input stream. Waiting for reader.");
@@ -487,6 +493,7 @@ int main()
       sendCVec("x", i, modelX, x_outfile);
       sendCVec("x prediction", i, x_predict, x_predict_outfile);
       sendDouble("t prediction ", i, t_predict, t_predict_outfile);
+      sendDouble("iterations ", i, res.num_iterations, iterations_outfile);
       sendCVec("u", i, u, u_outfile);
 
       // Read and print the contents of the file from Python.
@@ -513,8 +520,8 @@ int main()
       for (int j_entry = 0; j_entry < modelX.rows(); j_entry++) {
         char comma; // to read and discard the comma
         x_ss >> modelX(j_entry) >> comma;
-        t_delay_ss >> t_delay_prev;
       }
+      t_delay_ss >> t_delay_prev;
       if (debug_interfile_communication_level >= 1) 
       {
         PRINT("x (from Python): " << modelX.transpose().format(fmt_high_precision));
@@ -541,10 +548,13 @@ int main()
   if (use_external_dynamics_computation)
   {
     x_outfile << "Done" << std::endl;
-    // u_outfile << "Done" << std::endl;
     x_outfile.close();
-    x_infile.close();
     u_outfile.close();
+    t_predict_outfile.close();
+    x_predict_outfile.close();
+    iterations_outfile.close();
+    x_infile.close();
+    t_delays_infile.close();
   }
 
   optimizer_info_out_file.close();

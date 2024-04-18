@@ -1,18 +1,22 @@
 {
   "==== Settings ====": "",
+  "example_set_name": "Predictions",
   "use_external_dynamics_computation": true,
   "use_fake_scarab_computation_times": false,
   "fake_computation_delay_times": 0.4,
+  "computation_delay_slope": 0.000401,
+  "computation_delay_y-intercept": 0.147,
   "record_data_out": true,
   "backup_previous_data": true,
   "sample_time": 0.5,
-  "n_time_steps": 70,
+  "n_time_steps": 50,
   "convergence_termination_tol": 0.05,
   "label": "",
   "==== Debgugging Levels ====": {
     "debug_interfile_communication_level": 0,
     "debug_optimizer_stats_level": 0,
-    "debug_dynamics_level": 0
+    "debug_dynamics_level": 0,
+    "debug_configuration_level": 0
   },
   "==== Model Parameters ====": "",
   "lead_car_input": 0,
@@ -36,6 +40,8 @@
   "==== MPC Options ====": "",
   "enable_mpc_warm_start": true,
   "use_state_after_delay_prediction": false,
+  "prediction_horizon": 5,
+  "control_horizon": 2,
   "==== OSQP Parameters ====": "",
   "osqp_abs_tolerance": 1e-3,
   "osqp_rel_tolerance": 1e-3,
@@ -43,5 +49,8 @@
   "osqp_primal_infeasibility_tolerance": 1e-3,
   "osqp_maximum_iteration": 800,
   "osqp_time_limit": 0,
-  "osqp_verbose": false 
+  "osqp_verbose": false, 
+  "==== Hardware Configuration ===": "",
+  "PARAMS_base_file":  "PARAMS.base"
+
 }

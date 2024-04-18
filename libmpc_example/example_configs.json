@@ -1,33 +1,109 @@
 {
+  "Default": [
+    {
+      "label": "Default Settings"
+    }
+  ],
+  "Overnight run": [
+    {
+      "PARAMS_base_file": "PARAMS.cortex_a76",
+      "label": "Cortex A76", 
+      "skip": true
+    },
+    {
+      "PARAMS_base_file": "PARAMS.cortex_m55",
+      "label": "Cortex M55"
+    },
+    {
+      "chip_cycle_time": 100000000,
+      "enable_mpc_warm_start": true, 
+      "osqp_maximum_iteration": 100,
+      "label": "Warm Start - 100 Max"
+    },
+    {
+      "chip_cycle_time": 100000000,
+      "enable_mpc_warm_start": true, 
+      "osqp_maximum_iteration": 800,
+      "label": "Warm Start - 800 Max"
+    },
+    {
+      "chip_cycle_time": 100000000,
+      "enable_mpc_warm_start": false, 
+      "osqp_maximum_iteration": 100,
+      "label": "Cold Start - 100 Max", 
+      "skip": false
+    }, 
+    {
+      "chip_cycle_time": 100000000,
+      "enable_mpc_warm_start": false, 
+      "osqp_maximum_iteration": 800,
+      "label": "Cold Start - 800 Max",
+      "skip": false
+    }
+  ],
   "Cache Sizes": [
+    {
+      "l1_size": 16777216,
+      "icache_size": 524288,
+      "dcache_size": 524288,
+      "label": "16 MiB",
+      "skip": true
+    },
     {
       "l1_size": 1048576,
       "icache_size": 32768,
       "dcache_size": 32768,
-      "label": "1 MiB"
+      "label": "1 MiB",
+      "skip": true
     },
     {
       "l1_size": 524288,
       "icache_size": 16384,
       "dcache_size": 16384,
-      "label": "524.3 kB"
+      "label": "524.3 kiB",
+      "skip": true
+    },
+    {
+      "l1_size": 262144,
+      "icache_size": 8192,
+      "dcache_size": 8192,
+      "label": "262 kiB"
+    },
+    {
+      "l1_size": 65536,
+      "icache_size": 2048,
+      "dcache_size": 2048,
+      "label": "65 kB"
+    },
+    {
+      "l1_size": 32768,
+      "icache_size": 1024,
+      "dcache_size": 1024,
+      "label": "32 kB"
     }
   ], 
   "Predictions": [
     {
       "use_state_after_delay_prediction": false,
       "fake_computation_delay_times": 0,
+      "computation_delay_slope": false,
+      "computation_delay_y-intercept": false,
       "label": "No Delays",
       "skip": true
     }, 
     {
-      "use_state_after_delay_prediction": true,
-      "label": "Predictions",
-      "skip": false
+      "use_state_after_delay_prediction": false,
+      "computation_delay_slope": 0.0004,
+      "computation_delay_y-intercept": 0.13,
+      "label": "No Predictions",
+      "skip": true
     }, 
     {
-      "use_state_after_delay_prediction": false,
-      "label": "No Predictions"
+      "use_state_after_delay_prediction": true,
+      "computation_delay_slope": 0.00040101,
+      "computation_delay_y-intercept": 0.131415,
+      "label": "Predictions",
+      "skip": false
     }
   ],
   "Clock speed": [
@@ -60,40 +136,55 @@
       "chip_cycle_time": 100000000,
       "enable_mpc_warm_start": false, 
       "osqp_maximum_iteration": 100,
-      "label": "Warm Start - 100 Max", 
-      "skip": false
+      "label": "Cold Start - 100 Max", 
+      "skip": true
     }, 
     {
       "chip_cycle_time": 100000000,
       "enable_mpc_warm_start": false, 
-      "osqp_maximum_iteration": 1000,
-      "label": "Warm Start - 1000 Max"
+      "osqp_maximum_iteration": 800,
+      "label": "Cold Start - 800 Max",
+      "skip": true
     }, 
     {
       "chip_cycle_time": 100000000,
       "enable_mpc_warm_start": true, 
       "osqp_maximum_iteration": 100,
-      "label": "Cold Start - 100 Max"
+      "label": "Warm Start - 100 Max"
     },
     {
       "chip_cycle_time": 100000000,
       "enable_mpc_warm_start": true, 
-      "osqp_maximum_iteration": 1000,
-      "label": "Cold Start - 1000 Max"
+      "osqp_maximum_iteration": 800,
+      "label": "Warm Start - 800 Max"
     }
   ],
   "Prediction Horizon": [
     {
-      "prediction_horizon": 2
+      "prediction_horizon": 2, 
+      "label": "2"
     },
     {
-      "prediction_horizon": 5
+      "prediction_horizon": 5, 
+      "label": "5"
     },
     {
-      "prediction_horizon": 5
+      "prediction_horizon": 10, 
+      "label": "10"
     },
     {
-      "prediction_horizon": 5
+      "prediction_horizon": 15, 
+      "label": "15"
+    }
+  ],
+  "Real Platforms": [
+    {
+      "PARAMS_base_file": "PARAMS.cortex_a76",
+      "label": "Cortex A77"
+    },
+    {
+      "PARAMS_base_file": "PARAMS.cortex_m55",
+      "label": "Cortex M55"
     }
   ]
 }

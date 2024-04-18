@@ -93,12 +93,14 @@ def __main():
   global args
 
   # cmd_to_simulate = 'test_libmpc';
-  cmd_to_simulate = 'acc_controller';
+  # cmd_to_simulate = 'acc_controller';
   # cmd_to_simulate = 'pipewriter';
-  parser = argparse.ArgumentParser(description=f'Test Scarab on {cmd_to_simulate}')
-  parser.add_argument('sim_dir', nargs='?', help='Path to the simulation directory.', default="sim_dir")
+  parser = argparse.ArgumentParser(description=f'Run a command using Scarab.')
+  parser.add_argument('cmd', nargs=1, help='Command to build with Make (if needed) and then simulate with Scarab.')
+  parser.add_argument('--sim_dir', nargs='?', help='Path to the simulation directory.', default="sim_dir")
   args = parser.parse_args()
 
+  cmd_to_simulate = args.cmd[0]
   os.makedirs(args.sim_dir, exist_ok=True)
   build_test_libmpc(cmd_to_simulate)
   switch_to_sim_dir()

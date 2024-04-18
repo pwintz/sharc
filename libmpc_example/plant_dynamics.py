@@ -47,6 +47,7 @@ u_in_filename = sim_dir + 'u_c++_to_py'
 x_in_filename = sim_dir + 'x_c++_to_py'
 x_predict_in_filename = sim_dir + 'x_predict_c++_to_py'
 t_predict_in_filename = sim_dir + 't_predict_c++_to_py'
+iterations_in_filename = sim_dir + 'iterations_c++_to_py'
 x_out_filename = sim_dir + 'x_py_to_c++'
 t_delay_out_filename = sim_dir + 't_delay_py_to_c++'
 
@@ -87,13 +88,15 @@ x_cumul = []
 u_cumul = []
 t_cumul = []
 x_prediction_cumul = []
-t_prediction_cumul = []
+t_prediction_cumul = [] # Absolute time
+t_delay_cumul = [] # Relative time interval
 simulated_computation_time_cumul = []
 instruction_count_cumul = []
 cycles_count_cumul = []
 walltime_cumul = []
 
 u_prev = np.zeros((m, 1)) 
+
 
 def printIndented(string_to_print:str, indent: int=1):
   indent_str = '\t' * indent
@@ -130,7 +133,6 @@ def numpyArrayToCsv(array: np.array) -> str:
   # printIndented(repr(array), 2)
   # printIndented('String: ' + string, 1)
   return string
-  # ','.join(map(str, x.flatten())_
 
 def system_derivative(t, x, params):
     # Convert x into a 2D (nx1) array instead of 1D array (length n).
@@ -239,6 +241,7 @@ def generateDataOut():
   data_out_json["x"] = x_cumul;
   data_out_json["x_prediction"] = x_prediction_cumul;
   data_out_json["t_prediction"] = t_prediction_cumul;
+  data_out_json["t_delay"] = t_delay_cumul;
   data_out_json["u"] = u_cumul;
   data_out_json["t"] = t_cumul;
   data_out_json["computation_delays"] = simulated_computation_time_cumul;
@@ -307,10 +310,13 @@ def generateDataOut():
   return data_out_list
 
 LINE_BUFFERING = 1
+if debug_interfile_communication_level >= 1:
+  print("About to open files for interprocess communication. Will wait for readers...")
 with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile, \
      open(u_in_filename, 'r', buffering= LINE_BUFFERING) as u_infile, \
      open(x_predict_in_filename, 'r', buffering= LINE_BUFFERING) as x_predict_infile, \
      open(t_predict_in_filename, 'r', buffering= LINE_BUFFERING) as t_predict_infile, \
+     open(iterations_in_filename, 'r', buffering= LINE_BUFFERING) as iterations_infile, \
      open(x_out_filename, 'w', buffering= LINE_BUFFERING) as x_outfile, \
      open(t_delay_out_filename, 'w', buffering= LINE_BUFFERING) as t_delay_outfile, \
      open(x_data_filename, 'w', buffering= LINE_BUFFERING) as x_datafile, \
@@ -348,7 +354,7 @@ with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile, \
     """ Define a function for printing the prediction to 
     the console and saving the state to the data files. """
     x_predict_str = numpyArrayToCsv(x_prediction_array)
-    t_predict_str = str(t_prediction)
+    t_predict_str = f"{t_prediction:.8}"
 
     if debug_interfile_communication_level >= 1:
       print(f'Snapshotting Prediction ({description})')
@@ -384,18 +390,28 @@ with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile, \
       u_input_line = waitForLineFromFile(u_infile)
       x_predict_input_line = waitForLineFromFile(x_predict_infile)
       t_predict_input_line = waitForLineFromFile(t_predict_infile)
+      iterations_input_line = waitForLineFromFile(iterations_infile)
         
       x_input_line = checkAndStripInputLoopNumber(k, x_input_line)
       u_input_line = checkAndStripInputLoopNumber(k, u_input_line)
       x_predict_input_line = checkAndStripInputLoopNumber(k, x_predict_input_line)
       t_predict_input_line = checkAndStripInputLoopNumber(k, t_predict_input_line)
+      iterations_input_line = checkAndStripInputLoopNumber(k, iterations_input_line) 
 
       if debug_interfile_communication_level >= 1:
         print('Input strings from C++:')
-        print("\t           x input line: " + x_input_line.strip())
-        print("\t           u input line: " + u_input_line.strip())
-        print("\tx prediction input line: " + x_predict_input_line.strip())
-        print("\tt prediction input line: " + t_predict_input_line.strip())
+        printIndented("           x input line: " + x_input_line.strip(), 1)
+        printIndented("           u input line: " + u_input_line.strip(), 1)
+        printIndented("x prediction input line: " + x_predict_input_line.strip(), 1)
+        printIndented("t prediction input line: " + t_predict_input_line.strip(), 1)
+        printIndented("  iterations input line: " + iterations_input_line.strip(), 1)
+
+      
+      x = convertStringToVector(x_input_line)
+      u = convertStringToVector(u_input_line)
+      x_prediction = convertStringToVector(x_predict_input_line)
+      t_prediction = t_start_of_loop + float(t_predict_input_line)
+      iterations = float(iterations_input_line)
 
       # Get the statistics input line.
       if use_scarab_delays: 
@@ -404,7 +420,16 @@ with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile, \
         instruction_count = stats_reader.readInstructionCount(k)
         cycles_count = stats_reader.readCyclesCount(k)
       else:
-        simulated_computation_time = fake_computation_delay_times
+        delay_model_slope = config_data["computation_delay_slope"]
+        delay_model_y_intercept = config_data["computation_delay_y-intercept"]
+        if delay_model_slope:
+          if not delay_model_y_intercept:
+            raise ValueError(f"delay_model_slope was set but delay_model_y_intercept was not.")
+          simulated_computation_time = delay_model_slope * iterations + delay_model_y_intercept
+          print(f"simulated_computation_time = {simulated_computation_time:.8g} = {delay_model_slope:.8g} * {iterations:.8g} + {delay_model_y_intercept:.8g}")
+        else:
+          print('Using constant delay times.')
+          simulated_computation_time = fake_computation_delay_times
         instruction_count = 0
         cycles_count = 0
 
@@ -412,12 +437,8 @@ with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile, \
       instruction_count_cumul.append(instruction_count)
       cycles_count_cumul.append(cycles_count)
       
-      print(f"Delay time: {simulated_computation_time:.3g} seconds ({100*simulated_computation_time/sample_time:.3g}% of sample time).")
-
-      x = convertStringToVector(x_input_line)
-      u = convertStringToVector(u_input_line)
-      x_prediction = convertStringToVector(x_predict_input_line)
-      t_prediction = t_start_of_loop + float(t_predict_input_line)
+      simulated_computation_time_str = f"{simulated_computation_time:.8g}"
+      print(f"Delay time: {simulated_computation_time_str} seconds ({100*simulated_computation_time/sample_time:.3g}% of sample time).")
 
       # Write the data for the first time step to the CSV files.
       if k == 0:
@@ -431,7 +452,7 @@ with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile, \
       # value will be used again in the next interval. 
       if simulated_computation_time >= sample_time:
         if debug_dynamics_level >= 1:
-          print(f"simulated_computation_time={simulated_computation_time:.2f} >= sample_time={sample_time:.2f}. Control not being updated.")
+          print(f"simulated_computation_time={simulated_computation_time_str} >= sample_time={sample_time:.2f}. Control not being updated.")
 
         # Evolve x over the entire sample period.
         (t, x) = evolveState(t, x, u_prev, t + sample_time)
@@ -459,8 +480,9 @@ with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile, \
       if debug_interfile_communication_level >= 1:
         print("x output line:" + repr(x_out_string))
       x_outfile.write(x_out_string + "\n")# Write to pipe to C++
-      t_delay_outfile.write(str(simulated_computation_time) + "\n")
+      t_delay_outfile.write(f"{simulated_computation_time_str} \n")
       walltime_cumul.append(time.time() - walltime_start_of_loop)
+      t_delay_cumul.append(simulated_computation_time)
       
       data_out_list = generateDataOut()
       with open('data_out_intermediate.json', 'w') as json_data_file:

@@ -13,16 +13,17 @@ CPPFLAGS = -I/usr/local/include \
 	-I../libmpc/include/ \
 	-I/home/dcuser/scarab/utils \
 	-Wno-deprecated-enum-enum-conversion \
-	-DEIGEN_STACK_ALLOCATION_LIMIT=0
-# -D PREDICTION_HORIZON=${PREDICTION_HORIZON} \
-# -D CONTROL_HORIZON=$(shell cat control_horizon.txt) \
+	-DEIGEN_STACK_ALLOCATION_LIMIT=0 \
+	-D PREDICTION_HORIZON=${PREDICTION_HORIZON} \
+	-D CONTROL_HORIZON=${CONTROL_HORIZON} 
 # -g <- Enable debugging.
 CFLAGS = -I /usr/local/include/osqp 
 
 # libmpc++ Test
-LIBMPC_MAIN = acc_controller
-# LIBMPC_MAIN = test_libmpc
-LIBMPC_SRCS = ${LIBMPC_MAIN}.cpp
+# LIBMPC_MAIN = acc_controller_7_4
+LIBMPC_MAIN = acc_controller_${PREDICTION_HORIZON}_${CONTROL_HORIZON}
+# LIBMPC_SRCS = ${LIBMPC_MAIN}.cpp
+LIBMPC_SRCS = acc_controller.cpp
 LIBMPC_OBJS = $(LIBMPC_SRCS:.cpp=.o)
 
 # Eigen Test
@@ -36,7 +37,7 @@ LDFLAGS = # -L/usr/local/mysql-connector-c++/lib64
 # The command "-lm" is from the NLopt documentation.
 LDLIBS = -lnlopt -lm -losqp
 
-PIPE_FILES = sim_dir/x_c++_to_py sim_dir/x_predict_c++_to_py sim_dir/t_predict_c++_to_py  sim_dir/u_c++_to_py sim_dir/x_py_to_c++
+PIPE_FILES = sim_dir/x_c++_to_py sim_dir/x_predict_c++_to_py sim_dir/t_predict_c++_to_py  sim_dir/u_c++_to_py sim_dir/x_py_to_c++ sim_dir/iterations_c++_to_py 
 
 .PHONY: clean simulate run clean_statistics run_plant
 
@@ -54,9 +55,12 @@ run_plant: plant_dynamics.py config.json ${PIPE_FILES}
 config.json: config_base.json
 	cp config_base.json config.json
 
-# LIBMPC - Run test_libmpc without Scarab. 
-$(LIBMPC_MAIN): $(LIBMPC_OBJS) $(shell find ../libmpc/include -type f)  $(PIPE_FILES) 
+# Compile main script. 
+$(LIBMPC_MAIN): $(LIBMPC_OBJS)  $(PIPE_FILES) 
 	$(CXX) -o $(LIBMPC_MAIN) $(LIBMPC_OBJS) $(LDFLAGS) $(LDLIBS)
+
+$(LIBMPC_OBJS): $(LIBMPC_SRCS)  $(shell find ../libmpc/include -type f)
+	$(CXX) -c $(LIBMPC_SRCS)
 
 # Eigen
 # $(EIGEN_MAIN): $(EIGEN_OBJS)
