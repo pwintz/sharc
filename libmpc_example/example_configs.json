@@ -46,40 +46,40 @@
       "l1_size": 16777216,
       "icache_size": 524288,
       "dcache_size": 524288,
-      "label": "16 MiB",
+      "label": "16 MB",
       "skip": true
     },
     {
       "l1_size": 1048576,
       "icache_size": 32768,
       "dcache_size": 32768,
-      "label": "1 MiB",
+      "label": "1 MB",
       "skip": true
     },
     {
       "l1_size": 524288,
       "icache_size": 16384,
       "dcache_size": 16384,
-      "label": "524.3 kiB",
+      "label": "524.3 KB",
       "skip": true
     },
     {
       "l1_size": 262144,
       "icache_size": 8192,
       "dcache_size": 8192,
-      "label": "262 kiB"
+      "label": "262 KB"
     },
     {
       "l1_size": 65536,
       "icache_size": 2048,
       "dcache_size": 2048,
-      "label": "65 kB"
+      "label": "65 KB"
     },
     {
       "l1_size": 32768,
       "icache_size": 1024,
       "dcache_size": 1024,
-      "label": "32 kB"
+      "label": "32 KB"
     }
   ], 
   "Predictions": [
