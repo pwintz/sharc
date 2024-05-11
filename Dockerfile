@@ -8,6 +8,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
     python3-pip \
     python2 \
     git \
+    tig \
     sudo \
     wget \
     cmake \
@@ -261,4 +262,4 @@ RUN ldconfig
 USER $USERNAME
 
 # 
-COPY --chown=$USERNAME docker_user_home/.bashrc /home/$USERNAME/.bashrc
+COPY --chown=$USERNAME .profile /home/$USERNAME/.bashrc

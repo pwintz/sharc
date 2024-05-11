@@ -11,3 +11,4 @@ data_out_backups/*
 controller.log
 plant_dynamics.log
 acc_controller_*_*
+data_out_backups

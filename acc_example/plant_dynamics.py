@@ -4,6 +4,7 @@ from scipy.integrate import ode
 import scipy.signal
 import numpy.linalg as linalg
 
+import math
 import time
 import datetime
 import traceback # Provides pretty printing of exceptions (https://stackoverflow.com/a/1483494/6651650)
@@ -446,6 +447,8 @@ with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile, \
 
       print("t_predict_input_line: " + t_predict_input_line)
       snapshotPrediction(t_prediction, x_prediction, "Prediction")
+
+      n_samples_until_next_sample_after_computation_finishes = math.floor(simulated_computation_time/sample_time) + 1
       # If the controller computed the update in less than the sample time, then 
       # we compute the remainder of the sample time period using the new control value. 
       # If it was not computed in time, then u_prev will not be updated, so the previous 
