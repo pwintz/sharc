@@ -40,7 +40,7 @@ LDFLAGS = # -L/usr/local/mysql-connector-c++/lib64
 # The command "-lm" is from the NLopt documentation.
 LDLIBS = -lnlopt -lm -losqp
 
-PIPE_FILES = sim_dir/x_c++_to_py sim_dir/x_predict_c++_to_py sim_dir/t_predict_c++_to_py  sim_dir/u_c++_to_py sim_dir/x_py_to_c++ sim_dir/iterations_c++_to_py 
+PIPE_FILES = sim_dir/x_c++_to_py sim_dir/x_predict_c++_to_py sim_dir/t_predict_c++_to_py  sim_dir/u_c++_to_py sim_dir/x_py_to_c++ sim_dir/iterations_c++_to_py sim_dir/t_delay_py_to_c++
 
 .PHONY: clean simulate run clean_statistics run_plant $(PIPE_FILES)
 
