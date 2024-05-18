@@ -13,7 +13,7 @@
   "convergence_termination_tol": 0.05,
   "label": "",
   "==== Debgugging Levels ====": {
-    "debug_interfile_communication_level": 0,
+    "debug_interfile_communication_level": 2,
     "debug_optimizer_stats_level": 0,
     "debug_dynamics_level": 0,
     "debug_configuration_level": 0

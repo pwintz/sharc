@@ -42,20 +42,19 @@ import shutil
 import subprocess
 import sys
 
-# scarab_root_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 import json
 
 # Read config.json.
 with open('config.json') as json_data:
     config_data = json.load(json_data)
 
-scarab_root_path = "/home/dcuser/scarab"
+scarab_root_path = os.environ["SCARAB_ROOT"]
 example_dir = os.path.dirname(os.path.abspath(__file__))
 
 # Add <scarab path>/bin to the Python search pth.
 sys.path.append(scarab_root_path + '/bin')
 from scarab_globals import *
+
 
 def build_test_libmpc(cmd_to_make):
   print(f'Building the {cmd_to_make} static binary')
@@ -64,11 +63,8 @@ def build_test_libmpc(cmd_to_make):
   subprocess.check_call(['make', cmd_to_make])
   os.chdir(curr_dir)
 
-def switch_to_sim_dir():
-  print ('Simulation Directory:', os.path.abspath(args.sim_dir))
-  os.chdir(args.sim_dir)
 
-def run_scarab(cmd_to_simulate, use_fake_scarab_computation_times=False):
+def run_scarab(cmd_to_simulate, use_fake_scarab_computation_times=False, sim_dir="sim_dir"):
   if use_fake_scarab_computation_times:
       subprocess.check_call(example_dir + '/' + cmd_to_simulate)
       return
@@ -77,7 +73,7 @@ def run_scarab(cmd_to_simulate, use_fake_scarab_computation_times=False):
                      scarab_paths.bin_dir + '/scarab_launch.py',
                      '--program', example_dir + '/' + cmd_to_simulate,
                      '--param', example_dir + '/PARAMS.generated',
-                    #  '--simdir', 'sim_dir',
+                     '--simdir', sim_dir, # Changes the working directory.
                      '--pintool_args',
                      '-fast_forward_to_start_inst 1',
                      '--scarab_args',
@@ -89,12 +85,10 @@ def run_scarab(cmd_to_simulate, use_fake_scarab_computation_times=False):
   print ('Scarab cmd:', ' '.join(scarab_cmd_argv))
   subprocess.check_call(scarab_cmd_argv)
 
+
 def __main():
   global args
 
-  # cmd_to_simulate = 'test_libmpc';
-  # cmd_to_simulate = 'acc_controller';
-  # cmd_to_simulate = 'pipewriter';
   parser = argparse.ArgumentParser(description=f'Run a command using Scarab.')
   parser.add_argument('cmd', nargs=1, help='Command to build with Make (if needed) and then simulate with Scarab.')
   parser.add_argument('--sim_dir', nargs='?', help='Path to the simulation directory.', default="sim_dir")
@@ -103,8 +97,12 @@ def __main():
   cmd_to_simulate = args.cmd[0]
   os.makedirs(args.sim_dir, exist_ok=True)
   build_test_libmpc(cmd_to_simulate)
-  switch_to_sim_dir()
-  run_scarab(cmd_to_simulate, use_fake_scarab_computation_times=config_data["use_fake_scarab_computation_times"])
+  run_scarab(
+    cmd_to_simulate, 
+    use_fake_scarab_computation_times=config_data["use_fake_scarab_computation_times"],
+    sim_dir=args.sim_dir
+  )
+
 
 if __name__ == "__main__":
   __main()

@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+""" 
+This script computes the evolution of a system (plant) using control imputs received 
+from a controller executable. The communication is done via pipe files contained in the simdir directory.
+Instead of running this script directly, use "make run_plant" in the example directory.
+"""
 import numpy as np
 from scipy.integrate import ode
 import scipy.signal
@@ -11,10 +16,11 @@ import traceback # Provides pretty printing of exceptions (https://stackoverflow
 
 
 import sys
+# Add the folder that contains the "scarabizor" module.
 sys.path.append('/workspaces/ros-docker/')
 
 import os
-os.chdir('/workspaces/ros-docker/libmpc_example')
+# os.chdir('/workspaces/ros-docker/libmpc_example')
 import scarabizor
 
 import json
@@ -44,8 +50,8 @@ use_scarab_delays = not config_data["use_fake_scarab_computation_times"]
 sim_dir = "sim_dir/"
 
 #  File names for the pipes we use for communicating with C++.
-u_in_filename = sim_dir + 'u_c++_to_py'
 x_in_filename = sim_dir + 'x_c++_to_py'
+u_in_filename = sim_dir + 'u_c++_to_py'
 x_predict_in_filename = sim_dir + 'x_predict_c++_to_py'
 t_predict_in_filename = sim_dir + 't_predict_c++_to_py'
 iterations_in_filename = sim_dir + 'iterations_c++_to_py'
@@ -375,7 +381,7 @@ with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile, \
   t = 0.0
   cause_of_termination = "In progress"
   try:
-    for k in range(0,n_time_steps+1):
+    for k in range(0, n_time_steps+1):
       print(f'(Loop {k})')
       t_start_of_loop = t
       walltime_start_of_loop = time.time()
@@ -416,6 +422,8 @@ with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile, \
 
       # Get the statistics input line.
       if use_scarab_delays: 
+        if debug_interfile_communication_level >= 2:
+          print('Waiting for staistics from Scarab.')
         stats_reader.waitForStatsFile(k)
         simulated_computation_time = stats_reader.readTime(k)
         instruction_count = stats_reader.readInstructionCount(k)

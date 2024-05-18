@@ -7,6 +7,7 @@ Using the simulated computation time, we simulate the evolution of the control s
 2. Install Visual Studio Code
     1.  Install recommended extensions, most notably the Dev Containers extension and (if running on a Windows machine) the WSL extensions.
 3. Clone this repository.
+  3.1 Run `git submodule update --init --recursive` to initialize Git submodules (`scarab` and `libmpc`)
 4. Currently, it is necessary to manually download the pin file into the `pins/` directory.'
 5. Open the repository folder in VS Code and use Dev Containers to build and run the Docker file (via CTRL+SHIFT+P followed by "Dev containers: Build and Open Container"). This will change your VS Code enviroment to running within the Docker container, where Scarab and LibMPC are configured.
 

@@ -36,7 +36,6 @@ RUN apt-get update -qq \
     && apt-get install -y --no-install-recommends \
         sudo \
         gosu
-        #  \
     # && rm -rf /var/lib/apt/lists/* \
 
 # Create a new user '$USERNAME' with password '$USERNAME'
@@ -47,17 +46,6 @@ RUN useradd --create-home --home-dir /home/$USERNAME --shell /bin/bash --user-gr
 RUN mkdir -p /home/$USERNAME/.ssh && \
     chown -R $USERNAME:root /home/$USERNAME/.ssh && \
     chmod 700 /home/$USERNAME/.ssh
-
-COPY id_rsa /home/$USERNAME/.ssh/id_rsa
-
-# Add the key and set permission
-# RUN echo "$ssh_prv_key" > /home/$USERNAME/.ssh/id_rsa && \
-RUN chown -R $USERNAME:root /home/$USERNAME/.ssh/id_rsa && \
-    chmod 700 /home/$USERNAME/.ssh/id_rsa
-RUN touch /home/$USERNAME/.ssh/known_hosts && \
-    chown -R $USERNAME:root /home/$USERNAME/.ssh/known_hosts && \
-    chmod 700 /home/$USERNAME/.ssh/known_hosts
-RUN ssh-keyscan github.com >> /home/$USERNAME/.ssh/known_hosts
 
 # Set the working directory
 WORKDIR /home/$USERNAME
@@ -94,24 +82,38 @@ USER $USERNAME
 # COPY --chown=$USERNAME run_scarab_mode_4.sh /home/$USERNAME/run_scarab_mode_4.sh
 # COPY --chown=$USERNAME gather_cluster_results.py /home/$USERNAME/gather_cluster_results.py
 
-# Clone the Scarab repository
-# Comment out if you don't use scarab at all and don't have ssh key permitted to clone 'scarab_hlitz'
-RUN cd /home/$USERNAME && git clone git@github.com:Litz-Lab/scarab.git scarab
-
-# Install Scarab dependencies
-RUN pip3 install -r /home/$USERNAME/scarab/bin/requirements.txt
-RUN wget https://software.intel.com/sites/landingpage/pintool/downloads/pin-3.15-98253-gb56e429b1-gcc-linux.tar.gz && tar -xzvf pin-3.15-98253-gb56e429b1-gcc-linux.tar.gz
-
-# Build Scarab
+######################
+#### Setup Scarab ####
+######################
 ENV PIN_ROOT /home/$USERNAME/pin-3.15-98253-gb56e429b1-gcc-linux
 ENV SCARAB_ENABLE_PT_MEMTRACE 1
 ENV LD_LIBRARY_PATH /home/$USERNAME/pin-3.15-98253-gb56e429b1-gcc-linux/extras/xed-intel64/lib
 ENV LD_LIBRARY_PATH /home/$USERNAME/pin-3.15-98253-gb56e429b1-gcc-linux/intel64/runtime/pincrt:$LD_LIBRARY_PATH
+ENV SCARAB_ROOT=/home/$USERNAME/scarab
 
-# The root of the Scarab repository, as used by scarab_paths.py (found in scarab/bin/scarab_globals) 
-ENV SIMDIR /home/$USERNAME/scarab
+# The root of the Scarab repository, as used by scarab_paths.py (found in scarab/bin/scarab_globals).
+ENV SIMDIR=$SCARAB_ROOT
 
-RUN cd /home/$USERNAME/scarab/src && \
+# Copy scarab from the local directory into the image. 
+# You must initialize the Git Submodule before this happens!
+COPY --chown=$USERNAME scarab $SCARAB_ROOT
+
+# Check that all of the Git submodules are correctly initialized.
+RUN test -e $SCARAB_ROOT/src/deps/mbuild 
+RUN test -e $SCARAB_ROOT/src/deps/xed
+RUN test -e $SCARAB_ROOT/src/deps/dynamorio
+
+# Remove the .git file, which indicates that the scarab folder is a submodule. 
+# Then, reinitialize the directory as a git repo. 
+# Not sure why this is needed, but without it building Scarab fails.
+RUN rm $SCARAB_ROOT/.git && cd $SCARAB_ROOT && git init
+
+# Install Scarab Python dependencies
+RUN pip3 install -r $SCARAB_ROOT/bin/requirements.txt
+# Download and unzip the Pin file.
+RUN wget https://software.intel.com/sites/landingpage/pintool/downloads/pin-3.15-98253-gb56e429b1-gcc-linux.tar.gz && tar -xzvf pin-3.15-98253-gb56e429b1-gcc-linux.tar.gz
+
+RUN cd $SCARAB_ROOT/src && \
     make
 RUN mkdir /home/$USERNAME/exp
 RUN mkdir -p /home/$USERNAME/traces
@@ -128,10 +130,6 @@ RUN mkdir -p /home/$USERNAME/traces
 
 ENV DOCKER_BUILDKIT 1
 ENV COMPOSE_DOCKER_CLI_BUILD 1
-
-# Security issue! Do not comment out unless you want to expose your private key on the Docker image.
-RUN rm /home/$USERNAME/.ssh/id_rsa && rm /home/$USERNAME/.ssh/known_hosts
-
 
 ########################
 ##### SETUP LIBMPC #####

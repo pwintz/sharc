@@ -6,6 +6,7 @@
 #include "scarab_markers.h"
 #include <Eigen/Eigenvalues>
 #include <unsupported/Eigen/MatrixFunctions>
+#include <boost/algorithm/string/predicate.hpp>
 
 // Define a macro to print a value 
 #define PRINT(x) std::cout << x << std::endl;
@@ -40,6 +41,18 @@ Eigen::IOFormat fmt_high_precision(20, // precision
                     "\n", // row prefix
                     "[", // matrix prefix
                     "]"); // matrix suffix.
+
+inline void assert_file_exists(const std::string& name) {
+  // Check that a file exists.
+  std::cout << "Checking if \"" + name + "\" exists." << std::endl;
+  // std::ifstream f(name.c_str());
+  // if (f.good()) {
+  if (std::filesystem::exists(name)){
+    return;
+  } else {
+    throw std::runtime_error("The file \"" + name + "\" does not exist. The current working directory is \"" + std::filesystem::current_path().string() + "\"."); 
+  }
+}
 
 template<typename ... Args>
 std::string string_format( const std::string& format, Args ... args )
@@ -99,16 +112,7 @@ int debug_optimizer_stats_level;
 int debug_dynamics_level;
 // Eigen::IOFormat fmt(4, 0, ", ", "\n", "", "");
 
-// File names for the pipes we use for communicating with Python.
-std::string sim_dir_path = "/workspaces/ros-docker/libmpc_example/sim_dir/";
-std::string x_out_filename = sim_dir_path + "x_c++_to_py";
-std::string x_predict_out_filename = sim_dir_path + "x_predict_c++_to_py";
-std::string t_predict_out_filename = sim_dir_path + "t_predict_c++_to_py";
-std::string iterations_out_filename = sim_dir_path + "iterations_c++_to_py";
-std::string u_out_filename = sim_dir_path + "u_c++_to_py";
-std::string x_in_filename = sim_dir_path + "x_py_to_c++";
-std::string t_delays_in_filename = sim_dir_path + "t_delay_py_to_c++";
-std::string optimizer_info_out_filename = sim_dir_path + "optimizer_info.csv";
+std::string example_path;
 
 template<int rows>
 void sendCVec(std::string label, int i_loop, mpc::cvec<rows> x, std::ofstream& outfile) 
@@ -135,20 +139,37 @@ int main()
   // PRINT("PREDICTION_HORIZON" << PREDICTION_HORIZON)
   // PRINT("CONTROL_HORIZON" << CONTROL_HORIZON)
   // return 0;
+  auto cwd = std::filesystem::current_path();
+  if ( boost::algorithm::ends_with(cwd.string(), "sim_dir") )
+  {
+      example_path = cwd.parent_path().string() + "/";
+  } else
+  {
+    example_path = cwd.string() + "/";
+  }
+  PRINT("Example path: " << example_path)
 
-  std::ifstream config_json_file("/workspaces/ros-docker/libmpc_example/config.json");
+  // File names for the pipes we use for communicating with Python.
+  std::string config_file_path = example_path + "config.json";
+  // std::string data_out_file_path = "data_out.json";
+
+  std::string sim_dir_path = example_path + "sim_dir/";
+  std::string x_out_filename = sim_dir_path + "x_c++_to_py";
+  std::string x_predict_out_filename = sim_dir_path + "x_predict_c++_to_py";
+  std::string t_predict_out_filename = sim_dir_path + "t_predict_c++_to_py";
+  std::string iterations_out_filename = sim_dir_path + "iterations_c++_to_py";
+  std::string u_out_filename = sim_dir_path + "u_c++_to_py";
+  std::string x_in_filename = sim_dir_path + "x_py_to_c++";
+  std::string t_delays_in_filename = sim_dir_path + "t_delay_py_to_c++";
+  std::string optimizer_info_out_filename = sim_dir_path + "optimizer_info.csv";
+
+  std::string system_dynamics_filename = sim_dir_path + "system_dynamics.json";
+
+  assert_file_exists(config_file_path);
+  std::ifstream config_json_file(config_file_path);
   json json_data = json::parse(config_json_file);
   config_json_file.close();
 
-  json out_data;
-  std::string out_data_file_name = "/workspaces/ros-docker/libmpc_example/data_out.json";
-  std::ifstream data_out_json_file(out_data_file_name);
-  if (data_out_json_file.good()) 
-  {
-    out_data = json::parse(data_out_json_file);
-  } 
-  data_out_json_file.close();
-  
   int n_time_steps = json_data["n_time_steps"];
 
   auto debug_config = json_data["==== Debgugging Levels ===="];
@@ -225,7 +246,7 @@ int main()
   optimizer_info_out_file << "num_iterations,cost,primal_residual,dual_residual" << std::endl;
 
   // write prettified JSON to another file
-  std::ofstream json_outfile("/workspaces/ros-docker/libmpc_example/system_dynamics.json");
+  std::ofstream json_outfile(system_dynamics_filename);
   json_outfile 
     << std::setw(4) // Makes the JSON file better formatted.
     << json_out_data 
@@ -247,7 +268,6 @@ int main()
     PRINT("Bd_disturbance:")
     PRINT(Bd_disturbance)
   }
-  
 
   mat<Tnx, Tnx> Ad_predictive;
   mat<Tnx, Tnu> Bd_predictive;
@@ -282,7 +302,7 @@ int main()
 
   PRINT("Set parameters...");
   lmpc.setOptimizerParameters(params);
-  PRINT("Finshed setting parameters");
+  PRINT("Finished setting optimizer parameters");
 
   lmpc.setStateSpaceModel(Ad, Bd, C);
   lmpc.setDisturbances(Bd_disturbance, mat<Tny, Tndu>::Zero());
@@ -306,8 +326,6 @@ int main()
   {
     throw std::invalid_argument( "The output weight was negative." );
   }
-  
-  
 
   // Input change weights
   cvec<Tnu> DeltaInputW;
@@ -315,16 +333,17 @@ int main()
 
   lmpc.setObjectiveWeights(OutputW, InputW, DeltaInputW, {0, prediction_horizon});
 
-  // Set 
+  PRINT("Finished setting weights.");
+
+  // Set disturbances
   mat<Tndu, prediction_horizon> disturbance_input;
   disturbance_input.setOnes();
   disturbance_input *= lead_car_input;
   lmpc.setExogenuosInputs(disturbance_input);
-  // printMat("Disturbance input", disturbance_input);
-  // printMat("Disturbance matirx", Bd_disturbance);
   auto disturbance_vec = Bd_disturbance;
   disturbance_vec *= disturbance_input(0);
-  // printMat("Disturbance vector", disturbance_vec);
+
+  PRINT("Finished setting disturbances.");
 
   // ======== Constraints ========== //
 
@@ -345,14 +364,17 @@ int main()
 
   lmpc.setConstraints(xmin, umin, ymin, xmax, umax, ymax, {0, prediction_horizon});
 
+  PRINT("Finished setting constraints.");
+
   // Output reference point
   cvec<Tny> yRef;
   loadMatrixValuesFromJson(yRef, json_data, "yref");
 
   lmpc.setReferences(yRef, cvec<Tnu>::Zero(), cvec<Tnu>::Zero(), {0, prediction_horizon});
 
-  // I/O Setup
+  PRINT("Finished setting references.");
 
+  // I/O Setup
   std::ofstream x_outfile;
   std::ofstream x_predict_outfile;
   std::ofstream t_predict_outfile;
@@ -365,22 +387,37 @@ int main()
     // this process pauses until 
     // it is connected to the Python process (or another process). 
     // The order needs to match the order in the reader process.
+    
+    PRINT("Starting IO setup.");
+
+    assert_file_exists(x_out_filename);
     PRINT("About to open x_outfile output stream. Waiting for reader.");
-    x_outfile.open(x_out_filename,std::ofstream::out);
+    x_outfile.open(x_out_filename, std::ofstream::out);
+
+    assert_file_exists(u_out_filename);
     PRINT("About to open u_outfile output stream. Waiting for reader.");
-    u_outfile.open(u_out_filename,std::ofstream::out);
+    u_outfile.open(u_out_filename, std::ofstream::out);
+
+    assert_file_exists(x_predict_out_filename);
     PRINT("About to open x_predict_outfile output stream. Waiting for reader.");
-    x_predict_outfile.open(x_predict_out_filename,std::ofstream::out);
+    x_predict_outfile.open(x_predict_out_filename, std::ofstream::out);
+
+    assert_file_exists(t_predict_out_filename);
     PRINT("About to open t_predict_outfile output stream. Waiting for reader.");
-    t_predict_outfile.open(t_predict_out_filename,std::ofstream::out);
+    t_predict_outfile.open(t_predict_out_filename, std::ofstream::out);
+
+    assert_file_exists(iterations_out_filename);
     PRINT("About to open iterations_outfile output stream. Waiting for reader.");
-    iterations_outfile.open(iterations_out_filename,std::ofstream::out);
+    iterations_outfile.open(iterations_out_filename, std::ofstream::out);
 
     // In files.
+    assert_file_exists(x_in_filename);
     PRINT("About to open x_infile input stream. Waiting for reader.");
-    x_infile.open(x_in_filename,std::ofstream::in);
+    x_infile.open(x_in_filename, std::ofstream::in);
+
+    assert_file_exists(t_delays_in_filename);
     PRINT("About to open t_delays_infile input stream. Waiting for reader.");
-    t_delays_infile.open(t_delays_in_filename,std::ofstream::in);
+    t_delays_infile.open(t_delays_in_filename, std::ofstream::in);
     PRINT("All files open.");
   }
 
@@ -502,9 +539,13 @@ int main()
       
       if (debug_interfile_communication_level >= 2)
       {
-        PRINT("Getting line from python: ");
+        PRINT("Getting 'x' line from Python: ");
       }
       std::getline(x_infile, x_in_line_from_py);
+      if (debug_interfile_communication_level >= 2)
+      {
+        PRINT("Getting 't_delays' line from Python: ");
+      }
       std::getline(t_delays_infile, t_delay_in_line_from_py);
       if (debug_interfile_communication_level >= 2)
       {

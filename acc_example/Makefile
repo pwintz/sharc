@@ -6,7 +6,9 @@ CONTROL_HORIZON = 4
 
 CXX = g++-11
 CC = gcc-11
+# C++ flags
 CXXFLAGS = -std=c++20
+# C Preprocessor flags.
 CPPFLAGS = -I/usr/local/include \
 	-I/usr/include/eigen3 \
 	-I/usr/local/include/osqp \
@@ -17,6 +19,7 @@ CPPFLAGS = -I/usr/local/include \
 	-D PREDICTION_HORIZON=${PREDICTION_HORIZON} \
 	-D CONTROL_HORIZON=${CONTROL_HORIZON} 
 # -g <- Enable debugging.
+
 CFLAGS = -I /usr/local/include/osqp 
 
 # libmpc++ Test
@@ -39,13 +42,13 @@ LDLIBS = -lnlopt -lm -losqp
 
 PIPE_FILES = sim_dir/x_c++_to_py sim_dir/x_predict_c++_to_py sim_dir/t_predict_c++_to_py  sim_dir/u_c++_to_py sim_dir/x_py_to_c++ sim_dir/iterations_c++_to_py 
 
-.PHONY: clean simulate run clean_statistics run_plant
+.PHONY: clean simulate run clean_statistics run_plant $(PIPE_FILES)
 
-run: ${LIBMPC_MAIN} sim_dir config.json ${PIPE_FILES}
+run: ${LIBMPC_MAIN} sim_dir config.json ${PIPE_FILES} PARAMS.generated
 	./${LIBMPC_MAIN}
 
 # Simulate test_libmpc using Scarab while communicating with the Python ODE solver.
-simulate: ${LIBMPC_MAIN} clean_statistics ${PIPE_FILES} config.json
+simulate: ${LIBMPC_MAIN} clean_statistics ${PIPE_FILES} config.json PARAMS.generated
 	./scarab_test_libmpc.py ${LIBMPC_MAIN}
 
 run_plant: plant_dynamics.py config.json ${PIPE_FILES} 
@@ -55,21 +58,30 @@ run_plant: plant_dynamics.py config.json ${PIPE_FILES}
 config.json: config_base.json
 	cp config_base.json config.json
 
-# Compile main script. 
-$(LIBMPC_MAIN): $(LIBMPC_OBJS)  $(PIPE_FILES) 
+# Make the generated PARAMS file as just the basic PARAMS file if it doesn't exist. 
+# In run_examples.py, modifications are made to PARAMS.generated that typically overwrite
+# the one generated here.
+PARAMS.generated: PARAMS.base
+	cp PARAMS.base PARAMS.generated
+
+# Link the main script using built-in implicit Make rules: 
+# https://www.gnu.org/software/make/manual/html_node/Catalogue-of-Rules.html#Catalogue-of-Rules
+$(LIBMPC_MAIN): $(LIBMPC_OBJS)
 	$(CXX) -o $(LIBMPC_MAIN) $(LIBMPC_OBJS) $(LDFLAGS) $(LDLIBS)
 
-$(LIBMPC_OBJS): $(LIBMPC_SRCS)  $(shell find ../libmpc/include -type f)
-	$(CXX) -c $(LIBMPC_SRCS)
+# Compile the object file using built-in implicit Make rules: 
+# https://www.gnu.org/software/make/manual/html_node/Catalogue-of-Rules.html#Catalogue-of-Rules
+$(LIBMPC_OBJS): $(LIBMPC_SRCS) $(shell find ../libmpc/include -type f)
 
-# Eigen
-# $(EIGEN_MAIN): $(EIGEN_OBJS)
-# 		$(CXX) -o $(EIGEN_MAIN) $(EIGEN_OBJS) $(LDFLAGS) $(LDLIBS)
+$(PIPE_FILES): sim_dir
+	# If the pipe file exists but is not pipe file, then delete it.
+	if [ -e $@ -a ! -p $@ ]; then rm $@ & echo "Deleted $@"; fi;
 
-$(PIPE_FILES):
-	@echo $@
-	rm $@ -f
-	mkfifo $@
+	# If the pipe file does not exist, create it.
+	if [ ! -e $@ ]; then mkfifo $@; fi;
+
+	# Check that the file is actually a pipe.
+	test -p $@
 
 # Create the simulation directory where the stats from Scarab are generated and the in/out pipe files for communicating between C++ and Python are placed.
 sim_dir:
@@ -79,4 +91,4 @@ clean_statistics:
 	rm -f sim_dir/*.stat.* sim_dir/per_line_* sim_dir/per_branch* sim_dir/uop_queue* ramulator.stat.out 
 
 clean:
-	rm -f ${LIBMPC_MAIN} ${LIBMPC_MAIN}.o sim_dir/* data_out.json config.json
+	rm -f ${LIBMPC_MAIN} $(LIBMPC_OBJS) sim_dir/* data_out.json config.json PARAMS.generated
