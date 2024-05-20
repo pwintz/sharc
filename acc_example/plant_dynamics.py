@@ -17,7 +17,7 @@ import traceback # Provides pretty printing of exceptions (https://stackoverflow
 
 import sys
 # Add the folder that contains the "scarabizor" module.
-sys.path.append('/workspaces/ros-docker/')
+sys.path.append('..')
 
 import os
 # os.chdir('/workspaces/ros-docker/libmpc_example')
@@ -35,7 +35,7 @@ with open('config.json') as json_data_file:
     config_data = json.load(json_data_file)
 
 # Read system_dynamics.json.
-with open('system_dynamics.json') as json_data_file:
+with open('sim_dir/system_dynamics.json') as json_data_file:
     system_dynamics_data = json.load(json_data_file)
 
 stats_reader = scarabizor.ScarabStatsReader('sim_dir')
