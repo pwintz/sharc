@@ -31,6 +31,9 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
 RUN update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 1
 
 RUN pip3 install gdown
+RUN pip3 install numpy
+RUN pip3 install scipy
+RUN pip3 install pandas
 
 RUN apt-get update -qq \
     && apt-get install -y --no-install-recommends \
