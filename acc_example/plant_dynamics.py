@@ -464,35 +464,55 @@ with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile, \
       print("t_predict_input_line: " + t_predict_input_line)
       snapshotPrediction(t_prediction, x_prediction, "Prediction")
 
-      n_samples_until_next_sample_after_computation_finishes = math.floor(simulated_computation_time/sample_time) + 1
+      n_samples_without_finishing_computation = math.floor(simulated_computation_time/sample_time)
+      n_samples_until_next_sample_after_computation_finishes = n_samples_without_finishing_computation + 1
       # If the controller computed the update in less than the sample time, then 
       # we compute the remainder of the sample time period using the new control value. 
       # If it was not computed in time, then u_prev will not be updated, so the previous 
       # value will be used again in the next interval. 
       if simulated_computation_time >= sample_time:
         if debug_dynamics_level >= 1:
-          print(f"simulated_computation_time={simulated_computation_time_str} >= sample_time={sample_time:.2f}. Control not being updated.")
+          print(f"simulated_computation_time={simulated_computation_time_str} >= sample_time={sample_time:.2f}.")
 
-        # Evolve x over the entire sample period.
-        (t, x) = evolveState(t, x, u_prev, t + sample_time)
+        t_start = t
+        t_computation_update = t + simulated_computation_time
+        t_end = t + (n_samples_without_finishing_computation + 1)*sample_time
 
-        # Save values. We use 'u' instead of 'u_prev' because this is the point where we update the input.
+        # Evolve x over the one or more sample periods where the control is not updated.
+        (t, x) = evolveState(t_start, x, u_prev, t_computation_update)
+        snapshotState(k, t, x, u_prev, "After missing {n_samples_without_finishing_computation} samples without updating controller.")
+
+        (t, x) = evolveState(t_computation_update, x, u, t_computation_update)
+
+        # Save values. We use 'u' instead of 'u_prev' because this is the point where we would update the input if it were to update this time-step.
         snapshotState(k, t, x, u_prev, "After full sample interval - No control update.")
+      el
+      if use_parallelizable_delays:
+        t_start = t
+        t_computation_update = t
+        t_end = t + (n_samples_without_finishing_computation+1)*sample_time
+        # TODO: This model of the delay is designed to match the one used by Yasin's parallelized scheme, 
+        # TODO: but we should actually use u_prev here, until the computation ends.
+        (t, x) = evolveState(t_start, x, u, t_end)
+        snapshotState(k, t, x, u_prev, f"After full sample interval with {n_samples_without_finishing_computation} missed computation updates.")
       else:
         if debug_dynamics_level >= 1:
           print(f"simulated_computation_time={simulated_computation_time:.2f} < sample_time={sample_time:.2f}. Control to be updated.")
 
+        t_start = t
+        t_computation_update = t + simulated_computation_time
+        t_end = t + (n_samples_without_finishing_computation + 1)*sample_time
+
         # Evolve x until the computation finishes.
-        (t, x) = evolveState(t, x, u_prev, t + simulated_computation_time)
+        (t, x) = evolveState(t_start, x, u_prev, t_computation_update)
 
         # Save values. We use 'u' instead of 'u_prev' because this is the point where we update the input.
         snapshotState(k, t, x, u_prev, "After delay - Previous control")
         snapshotState(k, t, x, u, "After delay - New control")
 
-        (t, x) = evolveState(t, x, u, t_start_of_loop+sample_time)
-        u_prev = u
-
+        (t, x) = evolveState(t_computation_update, x, u, t_end)
         snapshotState(k, t, x, u, "End of sample")
+        u_prev = u
 
       # Pass the string back to C++.
       x_out_string = numpyArrayToCsv(x)
