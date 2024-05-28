@@ -41,11 +41,13 @@ with open('sim_dir/system_dynamics.json') as json_data_file:
 stats_reader = scarabizor.ScarabStatsReader('sim_dir')
 
 # Debugging levels
-debug_interfile_communication_level = config_data["==== Debgugging Levels ===="]["debug_interfile_communication_level"]
-debug_dynamics_level = config_data["==== Debgugging Levels ===="]["debug_dynamics_level"]
+debug_config = config_data["==== Debgugging Levels ===="]
+debug_interfile_communication_level = debug_config["debug_interfile_communication_level"]
+debug_dynamics_level = debug_config["debug_dynamics_level"]
 
 # Settings
 use_scarab_delays = not config_data["use_fake_scarab_computation_times"]
+use_parallelizable_delays = config_data["use_parallelizable_delays"]
 
 sim_dir = "sim_dir/"
 
@@ -80,10 +82,11 @@ D = np.zeros([5, 1], float)
 (A_to_delay, B_to_delay, C_to_delay, D_to_delay, dt) = scipy.signal.cont2discrete((A, B, C, D), fake_computation_delay_times)
 (A_delay_to_sample, B_delay_to_sample, C_delay_to_sample, D_delay_to_sample, dt) = scipy.signal.cont2discrete((A, B, C, D), sample_time - fake_computation_delay_times)
 
-print("A_to_delay")
-print(A_to_delay)
-print("A_delay_to_sample")
-print(A_delay_to_sample)
+if debug_dynamics_level >= 1:
+  print("A_to_delay")
+  print(A_to_delay)
+  print("A_delay_to_sample")
+  print(A_delay_to_sample)
 
 if debug_dynamics_level >= 2 or debug_interfile_communication_level >= 2:
   print("A from C++:")
@@ -91,16 +94,16 @@ if debug_dynamics_level >= 2 or debug_interfile_communication_level >= 2:
   print("B from C++:")
   print(B)
 
-x_cumul = []
-u_cumul = []
-t_cumul = []
-x_prediction_cumul = []
-t_prediction_cumul = [] # Absolute time
-t_delay_cumul = [] # Relative time interval
-simulated_computation_time_cumul = []
-instruction_count_cumul = []
-cycles_count_cumul = []
-walltime_cumul = []
+xs_list = []
+us_list = []
+ts_list = []
+x_predictions_list = []
+t_predictions_list = [] # Absolute time
+t_delays_list = [] # Relative time interval
+simulated_computation_times_list = []
+instruction_counts_list = []
+cycles_counts_list = []
+walltimes_list = []
 
 u_prev = np.zeros((m, 1)) 
 
@@ -142,6 +145,7 @@ def numpyArrayToCsv(array: np.array) -> str:
   return string
 
 def system_derivative(t, x, params):
+    """ Give the value of f(x) for the system \dot{x} = f(x). """
     # Convert x into a 2D (nx1) array instead of 1D array (length n).
     x = x[:,None]
     u = params["u"]
@@ -166,27 +170,31 @@ def system_derivative(t, x, params):
 
 solver = ode(system_derivative).set_integrator('vode', method='bdf')
 def evolveState(t0, x0, u, tf):
-  Ad, Bd = scipy.signal.cont2discrete((A, B, C, D), tf - t0)[0:2]
 
-  print(f"== evolveState(t=[{t0:.2}, {tf:.2}]) ==")
-  print("x0': " + str(x0.transpose()))
-  print(" u': " + str(u))
-  print("Ad")
-  printIndented(str(Ad), 1)
-  print("Bd")
-  printIndented(str(Bd), 1)
+  if debug_dynamics_level >= 1:
+    print(f"== evolveState(t=[{t0:.2}, {tf:.2}]) ==")
+    print("x0': " + str(x0.transpose()))
+    print(" u': " + str(u))
 
   # Create an ODE solver
   params = {"u": u, "w": 0}
-  solver.set_initial_value(x0, t=t0)
   solver.set_f_params(params)
+  solver.set_initial_value(x0, t=t0)
   # Simulate the system until the computation ends, using the previous control value.
   solver.integrate(tf)
   xf = solver.y
 
+  # As an alternative method to compute the evolution of the state, use the discretized dynamics.
+  Ad, Bd = scipy.signal.cont2discrete((A, B, C, D), tf - t0)[0:2]
   xf_alt = np.matmul(Ad, x) + np.matmul(Bd, u)
-  print(f"    xf={xf.transpose()}.")
-  print(f"xf_alt={xf_alt.transpose()}.")
+  
+  if debug_dynamics_level >= 2:
+    print("Ad")
+    printIndented(str(Ad), 1)
+    print("Bd")
+    printIndented(str(Bd), 1)
+    print(f"    xf={xf.transpose()}.")
+    print(f"xf_alt={xf_alt.transpose()}.")
   norm_diff_between_methods = linalg.norm(xf - xf_alt)
   if norm_diff_between_methods > 1e-2:
     raise ValueError(f"|xf - xf_alt| = {linalg.norm(xf - xf_alt)} is larger than tolerance")
@@ -245,16 +253,16 @@ def generateDataOut():
   data_out_json = config_data;
   data_out_json["datetime_of_run"] = datetime.datetime.now().isoformat()
   data_out_json["cause_of_termination"] = cause_of_termination
-  data_out_json["x"] = x_cumul;
-  data_out_json["x_prediction"] = x_prediction_cumul;
-  data_out_json["t_prediction"] = t_prediction_cumul;
-  data_out_json["t_delay"] = t_delay_cumul;
-  data_out_json["u"] = u_cumul;
-  data_out_json["t"] = t_cumul;
-  data_out_json["computation_delays"] = simulated_computation_time_cumul;
-  data_out_json["instruction_counts"] = instruction_count_cumul;
-  data_out_json["cycles_counts"] = cycles_count_cumul
-  data_out_json["execution_walltime"] = walltime_cumul
+  data_out_json["x"] = xs_list;
+  data_out_json["x_prediction"] = x_predictions_list;
+  data_out_json["t_prediction"] = t_predictions_list;
+  data_out_json["t_delay"] = t_delays_list;
+  data_out_json["u"] = us_list;
+  data_out_json["t"] = ts_list;
+  data_out_json["computation_delays"] = simulated_computation_times_list;
+  data_out_json["instruction_counts"] = instruction_counts_list;
+  data_out_json["cycles_counts"] = cycles_counts_list
+  data_out_json["execution_walltime"] = walltimes_list
   data_out_json["prediction_horizon"] = system_dynamics_data["prediction_horizon"]
   data_out_json["control_horizon"] = system_dynamics_data["control_horizon"]
 
@@ -281,10 +289,10 @@ def generateDataOut():
   with open(sim_dir + 'optimizer_info.csv', newline='') as csvfile:
     csv_reader = csv.reader(csvfile, delimiter=',', quotechar='|')
     
-    num_iterations_cumul = []
-    cost_cumul = []
-    primal_residual_cumul = []
-    dual_residual_cumul = []
+    num_iterationss_list = []
+    costs_list = []
+    primal_residuals_list = []
+    dual_residuals_list = []
     is_header = True
     for row in csv_reader:
         if is_header:
@@ -294,15 +302,15 @@ def generateDataOut():
           dual_residual_ndx = row.index('dual_residual')
           is_header = False
         else:
-          num_iterations_cumul.append(int(row[num_iterations_ndx]))
-          cost_cumul.append(float(row[cost_ndx]))
-          primal_residual_cumul.append(float(row[primal_residual_ndx]))
-          dual_residual_cumul.append(float(row[dual_residual_ndx]))
+          num_iterationss_list.append(int(row[num_iterations_ndx]))
+          costs_list.append(float(row[cost_ndx]))
+          primal_residuals_list.append(float(row[primal_residual_ndx]))
+          dual_residuals_list.append(float(row[dual_residual_ndx]))
       
-  data_out_json["num_iterations"] = num_iterations_cumul
-  data_out_json["cost"] = cost_cumul
-  data_out_json["primal_residual"] = primal_residual_cumul
-  data_out_json["dual_residual"] = dual_residual_cumul
+  data_out_json["num_iterations"] = num_iterationss_list
+  data_out_json["cost"] = costs_list
+  data_out_json["primal_residual"] = primal_residuals_list
+  data_out_json["dual_residual"] = dual_residuals_list
     
   # Read current data_out.json. If it exists, append the new data. Otherwise, create it.
   try:
@@ -352,9 +360,9 @@ with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile, \
     # We want xarray to be stored as a single list of numbers, but the 
     # tolist() function creates a nested lists, with the outter list containing
     # a single list. Thus, we use "[0]" to reference the inner list. 
-    x_cumul.append(xarray.transpose().tolist()[0])
-    u_cumul.append(uarray.transpose().tolist()[0])
-    t_cumul.append(t)
+    xs_list.append(xarray.transpose().tolist()[0])
+    us_list.append(uarray.transpose().tolist()[0])
+    ts_list.append(t)
 
     
   def snapshotPrediction(t_prediction: float, x_prediction_array: np.ndarray, description: str):
@@ -375,8 +383,8 @@ with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile, \
     # We want xarray to be stored as a single list of numbers, but the 
     # tolist() function creates a nested lists, with the outter list containing
     # a single list. Thus, we use "[0]" to reference the inner list. 
-    x_prediction_cumul.append(x_prediction_array.transpose().tolist()[0])
-    t_prediction_cumul.append(t_prediction)
+    x_predictions_list.append(x_prediction_array.transpose().tolist()[0])
+    t_predictions_list.append(t_prediction)
 
   t = 0.0
   cause_of_termination = "In progress"
@@ -391,7 +399,7 @@ with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile, \
       
       if x_input_line.startswith("Done"):
         print("Received 'DONE' from controller.")
-        walltime_cumul.append(time.time() - walltime_start_of_loop)
+        walltimes_list.append(time.time() - walltime_start_of_loop)
         break
 
       u_input_line = waitForLineFromFile(u_infile)
@@ -442,9 +450,9 @@ with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile, \
         instruction_count = 0
         cycles_count = 0
 
-      simulated_computation_time_cumul.append(simulated_computation_time)
-      instruction_count_cumul.append(instruction_count)
-      cycles_count_cumul.append(cycles_count)
+      simulated_computation_times_list.append(simulated_computation_time)
+      instruction_counts_list.append(instruction_count)
+      cycles_counts_list.append(cycles_count)
       
       simulated_computation_time_str = f"{simulated_computation_time:.8g}"
       print(f"Delay time: {simulated_computation_time_str} seconds ({100*simulated_computation_time/sample_time:.3g}% of sample time).")
@@ -492,8 +500,8 @@ with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile, \
         print("x output line:" + repr(x_out_string))
       x_outfile.write(x_out_string + "\n")# Write to pipe to C++
       t_delay_outfile.write(f"{simulated_computation_time_str} \n")
-      walltime_cumul.append(time.time() - walltime_start_of_loop)
-      t_delay_cumul.append(simulated_computation_time)
+      walltimes_list.append(time.time() - walltime_start_of_loop)
+      t_delays_list.append(simulated_computation_time)
       
       data_out_list = generateDataOut()
       with open('data_out_intermediate.json', 'w') as json_data_file:
@@ -503,7 +511,7 @@ with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile, \
     raise err
   except (DataNotRecievedViaFileError, BrokenPipeError) as err:
     cause_of_termination = repr(err)
-    walltime_cumul.append(time.time() - walltime_start_of_loop)
+    walltimes_list.append(time.time() - walltime_start_of_loop)
     traceback.print_exc()
   else:
     cause_of_termination = "Finished."

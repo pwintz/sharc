@@ -1,5 +1,6 @@
 # Scarab in Docker for Feedback Control Simulation
-This project uses Docker to provide a consistent development environment Scarab so that we can simulate the execution of a controller on a given processor in order to determine the time to compute. 
+This project uses Docker to provide a consistent development environment for 
+Scarab so that we can simulate the execution of a controller on a given processor in order to determine the time to compute. 
 Using the simulated computation time, we simulate the evolution of the control system incorporating the computation delays.
 
 # Setup (in Linux or the Windows Linux Subsystem)
@@ -8,13 +9,14 @@ Using the simulated computation time, we simulate the evolution of the control s
     1.  Install recommended extensions, most notably the Dev Containers extension and (if running on a Windows machine) the WSL extensions.
 3. Clone this repository.
   3.1 Run `git submodule update --init --recursive` to initialize Git submodules (`scarab` and `libmpc`)
+  Use `git submodule init` and `git submodule update` to setup the libmpc submodule.
 4. Currently, it is necessary to manually download the pin file into the `pins/` directory.'
 5. Open the repository folder in VS Code and use Dev Containers to build and run the Docker file (via CTRL+SHIFT+P followed by "Dev containers: Build and Open Container"). This will change your VS Code enviroment to running within the Docker container, where Scarab and LibMPC are configured.
 
 # Tools used by this project
 * Docker -- Creates easily reproducible enviornments so that we can immediately spin-up new virtual machines that run Scarab and ROS.
 * Scarab
-* DynamoRIO
+* DynamoRIO (Optional - Only needed if doing trace-based simulation with Scarab.)
 * [libmpc](https://github.com/nicolapiccinelli/libmpc)
 
 # Development in Dev Container
