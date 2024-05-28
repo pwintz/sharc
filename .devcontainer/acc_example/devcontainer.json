@@ -1,0 +1,32 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/docker-existing-dockerfile
+{
+	"name": "Scarab-ACC Example Development Container",
+	"privileged": true,
+	// "remoteUser": "user",
+	"build": {
+		// Sets the run context to one level up instead of the .devcontainer folder.
+		"context": "${localWorkspaceFolder}",
+		// Update the 'dockerFile' property if you aren't using the standard 'Dockerfile' filename.
+		"dockerfile": "${localWorkspaceFolder}/Dockerfile",
+		"args": {
+				// "USERNAME": "user", // This user must exist! (Created by Dockerfile).
+        // "isDevContainer": "true",
+        // "project_subdir": "acc_example"
+		},
+    "target": "acc-example-dev"
+	},
+	"runArgs": [ "--net=host"],
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+  "workspaceFolder": "/workspace",
+  "customizations": {
+    // Configure properties specific to VS Code.
+    "vscode": {
+      // Add the IDs of extensions you want installed when the container is created.
+      "extensions": [
+				"ms-vscode.cpptools-extension-pack"
+			]
+    }
+  }
+
+}
