@@ -44,25 +44,25 @@ PIPE_FILES = sim_dir/x_c++_to_py sim_dir/x_predict_c++_to_py sim_dir/t_predict_c
 
 .PHONY: clean simulate run clean_statistics run_plant $(PIPE_FILES)
 
-run: ${LIBMPC_MAIN} sim_dir config.json ${PIPE_FILES} PARAMS.generated
+run: ${LIBMPC_MAIN} sim_dir sim_dir/config.json ${PIPE_FILES} sim_dir/PARAMS.generated
 	./${LIBMPC_MAIN}
 
 # Simulate test_libmpc using Scarab while communicating with the Python ODE solver.
-simulate: ${LIBMPC_MAIN} clean_statistics ${PIPE_FILES} config.json PARAMS.generated
+simulate: ${LIBMPC_MAIN} clean_statistics ${PIPE_FILES} config.json sim_dir/PARAMS.generated
 	./scarab_test_libmpc.py ${LIBMPC_MAIN}
 
-run_plant: plant_dynamics.py config.json ${PIPE_FILES} 
+run_plant: plant_dynamics.py sim_dir/config.json ${PIPE_FILES} 
 	./plant_dynamics.py
 
 # If config_base.json updates, automatically update config.json to reflect the changes.
-config.json: config_base.json
-	cp config_base.json config.json
+sim_dir/config.json: config_base.json
+	cp config_base.json sim_dir/config.json
 
 # Make the generated PARAMS file as just the basic PARAMS file if it doesn't exist. 
 # In run_examples.py, modifications are made to PARAMS.generated that typically overwrite
 # the one generated here.
-PARAMS.generated: PARAMS.base
-	cp PARAMS.base PARAMS.generated
+sim_dir/PARAMS.generated: PARAMS.base
+	cp PARAMS.base sim_dir/PARAMS.generated
 
 # Link the main script using built-in implicit Make rules: 
 # https://www.gnu.org/software/make/manual/html_node/Catalogue-of-Rules.html#Catalogue-of-Rules
@@ -91,4 +91,4 @@ clean_statistics:
 	rm -f sim_dir/*.stat.* sim_dir/per_line_* sim_dir/per_branch* sim_dir/uop_queue* ramulator.stat.out 
 
 clean:
-	rm -f ${LIBMPC_MAIN} $(LIBMPC_OBJS) sim_dir/* data_out.json config.json PARAMS.generated
+	rm -f ${LIBMPC_MAIN} $(LIBMPC_OBJS) sim_dir/* data_out.json sim_dir/PARAMS.generated

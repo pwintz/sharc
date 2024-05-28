@@ -14,6 +14,8 @@
 		}
 	},
 	"runArgs": [ "--net=host"],
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+  "workspaceFolder": "/workspace",
   "customizations": {
     // Configure properties specific to VS Code.
     "vscode": {

@@ -95,8 +95,9 @@ def __main():
   args = parser.parse_args()
 
   cmd_to_simulate = args.cmd[0]
-  os.makedirs(args.sim_dir, exist_ok=True)
-  build_test_libmpc(cmd_to_simulate)
+  # TODO: Remove build_test_libmpc because building is handled by the Makefile.
+  # os.makedirs(args.sim_dir, exist_ok=True)
+  # build_test_libmpc(cmd_to_simulate)
   run_scarab(
     cmd_to_simulate, 
     use_fake_scarab_computation_times=config_data["use_fake_scarab_computation_times"],

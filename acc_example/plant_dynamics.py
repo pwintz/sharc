@@ -8,19 +8,13 @@ import numpy as np
 from scipy.integrate import ode
 import scipy.signal
 import numpy.linalg as linalg
+import argparse # Parsing of input args.
 
 import math
 import time
 import datetime
 import traceback # Provides pretty printing of exceptions (https://stackoverflow.com/a/1483494/6651650)
 
-
-import sys
-# Add the folder that contains the "scarabizor" module.
-sys.path.append('..')
-
-import os
-# os.chdir('/workspaces/ros-docker/libmpc_example')
 import scarabizor
 
 import json
@@ -32,15 +26,26 @@ class DataNotRecievedViaFileError(IOError):
 
 def main():
   
+  global args
+
+  parser = argparse.ArgumentParser(description=f'Run a command using Scarab.')
+  parser.add_argument('--sim_dir', nargs='?', help='Path to the simulation directory.', default="sim_dir")
+  args = parser.parse_args()
+
+  sim_dir:str = args.sim_dir
+  if not sim_dir.endswith('/'):
+    sim_dir += "/"
+
+
   # Read config.json.
-  with open('config.json') as json_data_file:
+  with open(sim_dir + 'config.json') as json_data_file:
       config_data = json.load(json_data_file)
 
   # Read system_dynamics.json.
-  with open('sim_dir/system_dynamics.json') as json_data_file:
+  with open(sim_dir + 'system_dynamics.json') as json_data_file:
       system_dynamics_data = json.load(json_data_file)
 
-  stats_reader = scarabizor.ScarabStatsReader('sim_dir')
+  stats_reader = scarabizor.ScarabStatsReader(sim_dir)
 
   # Debugging levels
   debug_config = config_data["==== Debgugging Levels ===="]
@@ -50,8 +55,6 @@ def main():
   # Settings
   use_scarab_delays = not config_data["use_fake_scarab_computation_times"]
   use_parallelizable_delays = config_data["use_parallelizable_delays"]
-
-  sim_dir = "sim_dir/"
 
   #  File names for the pipes we use for communicating with C++.
   x_in_filename = sim_dir + 'x_c++_to_py'
@@ -488,8 +491,8 @@ def main():
 
           # Save values. We use 'u' instead of 'u_prev' because this is the point where we would update the input if it were to update this time-step.
           snapshotState(k, t, x, u_prev, "After full sample interval - No control update.")
-        el
-        if use_parallelizable_delays:
+        
+        elif use_parallelizable_delays:
           t_start = t
           t_computation_update = t
           t_end = t + (n_samples_without_finishing_computation+1)*sample_time
