@@ -3,20 +3,21 @@
 {
 	"name": "Scarab-ACC Example Development Container",
 	"privileged": true,
-	// "remoteUser": "user",
 	"build": {
 		// Sets the run context to one level up instead of the .devcontainer folder.
 		"context": "${localWorkspaceFolder}",
 		// Update the 'dockerFile' property if you aren't using the standard 'Dockerfile' filename.
 		"dockerfile": "${localWorkspaceFolder}/Dockerfile",
 		"args": {
-				// "USERNAME": "user", // This user must exist! (Created by Dockerfile).
-        // "isDevContainer": "true",
-        // "project_subdir": "acc_example"
 		},
-    "target": "acc-example-dev"
+    "target": "acc-example-dev",
+    // Define arguments passed to 'docker build'
+    "options": [
+      // Print the output as plain text so that it can be read in the log more easily, since Dev Containers don't handle the (default) tty output very well.
+      // "--progress plain"
+    ]
 	},
-	"runArgs": [ "--net=host"],
+	"runArgs": ["--net=host"],
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
   "workspaceFolder": "/workspace",
   "customizations": {

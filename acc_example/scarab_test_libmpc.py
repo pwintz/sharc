@@ -45,7 +45,8 @@ import sys
 import json
 
 # Read config.json.
-with open('config.json') as json_data:
+sim_dir = 'sim_dir/'
+with open(sim_dir + 'config.json') as json_data:
     config_data = json.load(json_data)
 
 scarab_root_path = os.environ["SCARAB_ROOT"]
@@ -54,15 +55,6 @@ example_dir = os.path.dirname(os.path.abspath(__file__))
 # Add <scarab path>/bin to the Python search pth.
 sys.path.append(scarab_root_path + '/bin')
 from scarab_globals import *
-
-
-def build_test_libmpc(cmd_to_make):
-  print(f'Building the {cmd_to_make} static binary')
-  curr_dir = os.getcwd()
-  # os.chdir(scarab_paths.sim_dir + '/utils/qsort')
-  subprocess.check_call(['make', cmd_to_make])
-  os.chdir(curr_dir)
-
 
 def run_scarab(cmd_to_simulate, use_fake_scarab_computation_times=False, sim_dir="sim_dir"):
   if use_fake_scarab_computation_times:
@@ -77,8 +69,8 @@ def run_scarab(cmd_to_simulate, use_fake_scarab_computation_times=False, sim_dir
                      '--pintool_args',
                      '-fast_forward_to_start_inst 1',
                      '--scarab_args',
-                     '--inst_limit 15000000000'
-                     '--heartbeat_interval 50', 
+                     '--inst_limit 15000000000',
+                    #  '--heartbeat_interval 50', 
                      # '--num_heartbeats 1'
                      # '--power_intf_on 1']
                      ]
@@ -95,9 +87,6 @@ def __main():
   args = parser.parse_args()
 
   cmd_to_simulate = args.cmd[0]
-  # TODO: Remove build_test_libmpc because building is handled by the Makefile.
-  # os.makedirs(args.sim_dir, exist_ok=True)
-  # build_test_libmpc(cmd_to_simulate)
   run_scarab(
     cmd_to_simulate, 
     use_fake_scarab_computation_times=config_data["use_fake_scarab_computation_times"],

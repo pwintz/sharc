@@ -16,7 +16,7 @@
   #define PREDICTION_HORIZON 5
 #endif
 #ifdef CONTROL_HORIZON
-#else
+#else 
   #define CONTROL_HORIZON 3
 #endif
 
@@ -150,10 +150,10 @@ int main()
   PRINT("Example path: " << example_path)
 
   // File names for the pipes we use for communicating with Python.
-  std::string config_file_path = example_path + "config.json";
   // std::string data_out_file_path = "data_out.json";
 
   std::string sim_dir_path = example_path + "sim_dir/";
+  std::string config_file_path = sim_dir_path + "config.json";
   std::string x_out_filename = sim_dir_path + "x_c++_to_py";
   std::string x_predict_out_filename = sim_dir_path + "x_predict_c++_to_py";
   std::string t_predict_out_filename = sim_dir_path + "t_predict_c++_to_py";

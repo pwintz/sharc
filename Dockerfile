@@ -1,56 +1,109 @@
 ARG USERNAME=dcuser
-ARG PIN_FILENAME=pin-3.15-98253-gb56e429b1-gcc-linux
-ARG PIN_ROOT=/home/$USERNAME/$PIN_FILENAME
+ARG PIN_NAME=pin-3.15-98253-gb56e429b1-gcc-linux
+ARG PIN_ROOT=/$PIN_NAME
+ARG SCARAB_ROOT=/scarab
+ARG RESOURCES_DIR=/home/$USERNAME/resources/
+ARG TIME_ZONE=America/Los_Angeles
 
 ##################################
 ############## BASE ##############
 ##################################
-
 FROM ubuntu:20.04 AS apt-base
+ARG USERNAME
+ARG TIME_ZONE
 
 # Set the timezone to avoid getting stuck on a prompt when installing packages with apt-get.
-RUN ln -fs /usr/share/zoneinfo/America/Los_Angeles /etc/localtime 
+RUN ln -fs /usr/share/zoneinfo/$TIME_ZONE /etc/localtime 
 
 # Update the apt repositories.
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt install -y -qq --no-install-recommends build-essential manpages-dev software-properties-common && \
-    add-apt-repository ppa:ubuntu-toolchain-r/test && \
-    apt-get update -y -qq
+RUN apt-get update && \
+  DEBIAN_FRONTEND=noninteractive apt install --assume-yes --quiet=2 --no-install-recommends \ 
+    build-essential \
+    manpages-dev \
+    software-properties-common && \
+  add-apt-repository ppa:ubuntu-toolchain-r/test && \
+  apt-get update --assume-yes --quiet=2
 
-#################################
-############## PIN ##############
-#################################
-
-FROM apt-base AS PIN 
-ARG PIN_FILENAME
-
-# Install required packages
-RUN apt-get install -y \
-    # Used for downloading and unzipping PIN file
-    wget \
-    unzip
-
-# Download and unzip the Pin file. 
-# The file is placed at /$PIN_FILENAME
-RUN wget https://software.intel.com/sites/landingpage/pintool/downloads/$PIN_FILENAME.tar.gz && tar -xzvf $PIN_FILENAME.tar.gz
-
-
-####################################
-############## SCARAB ##############
-####################################
-FROM apt-base	as scarab
-
-# Load arguments into this stage.
-ARG PIN_ROOT
-ENV PIN_ROOT $PIN_ROOT
-
-# Install required packages
-RUN apt-get install -y \
+# Install basic programs that will be used in later stages.
+RUN apt-get install --assume-yes --quiet=2 --no-install-recommends \
     python3 \
     python3-pip \
     python2 \
     git \
-    # tig \
-    # sudo \
+    tig \
+    vim \
+    sudo \
+    # A tool for simplifying usage of sudo.
+    gosu
+
+# Create a new user '$USERNAME' with password '$USERNAME'
+RUN useradd --create-home --home-dir /home/$USERNAME --shell /bin/bash --user-group --groups adm,sudo $USERNAME && \
+    echo "$USERNAME:$USERNAME" | chpasswd 
+
+# Make sure the user owns their home drive. 
+# When running with Dev Conatiners this is needed for some unknown reason.
+RUN chown -R $USERNAME:$USERNAME /home/$USERNAME
+
+# # Authorize SSH Host. Is this neccessary?
+RUN mkdir -p /home/$USERNAME/.ssh && \
+    chown -R $USERNAME:root /home/$USERNAME/.ssh && \
+    chmod 700 /home/$USERNAME/.ssh
+
+##############################
+# Non-root User Setup
+##############################
+## Let the user have sudo control.
+RUN echo $USERNAME ALL=\(ALL\) NOPASSWD:ALL >> /etc/sudoers \
+    && touch /home/$USERNAME/.sudo_as_admin_successful
+RUN gosu $USERNAME mkdir -p /home/$USERNAME/.xdg_runtime_dir
+ENV XDG_RUNTIME_DIR=/home/$USERNAME/.xdg_runtime_dir
+
+############
+# SIMPOINT #
+############
+FROM apt-base as simpoint
+ARG USERNAME
+
+WORKDIR /home/$USERNAME/
+
+# Build SimPoint 3.2
+# Reference:
+# https://github.com/intel/pinplay-tools/blob/main/pinplay-scripts/PinPointsHome/Linux/bin/Makefile
+ADD http://cseweb.ucsd.edu/~calder/simpoint/releases/SimPoint.3.2.tar.gz SimPoint.3.2.tar.gz
+RUN  tar --extract --gzip -f SimPoint.3.2.tar.gz
+
+ADD https://raw.githubusercontent.com/intel/pinplay-tools/main/pinplay-scripts/PinPointsHome/Linux/bin/simpoint_modern_gcc.patch SimPoint.3.2/simpoint_modern_gcc.patch
+RUN patch --directory=SimPoint.3.2 --strip=1 < SimPoint.3.2/simpoint_modern_gcc.patch && \
+    make -C SimPoint.3.2 && \
+    ln -s SimPoint.3.2/bin/simpoint ./simpoint
+
+################################
+############ SCARAB ############
+################################
+FROM apt-base	as scarab
+ARG PIN_NAME
+ARG PIN_ROOT
+
+ENV SCARAB_ENABLE_PT_MEMTRACE 1
+ENV LD_LIBRARY_PATH $PIN_ROOT/extras/xed-intel64/lib
+ENV LD_LIBRARY_PATH $PIN_ROOT/intel64/runtime/pincrt:$LD_LIBRARY_PATH
+ENV SCARAB_ROOT=/scarab
+# The root of the Scarab repository, as used by scarab_paths.py (found in scarab/bin/scarab_globals).
+ENV SIMDIR=$SCARAB_ROOT
+
+# Install unzip so for unzipping the PIN file
+RUN apt-get install --assume-yes unzip
+
+# Download and unzip the Pin file. 
+# The file is placed at /$PIN_NAME
+ADD https://software.intel.com/sites/landingpage/pintool/downloads/$PIN_NAME.tar.gz $PIN_NAME.tar.gz
+RUN tar --extract --gzip -f $PIN_NAME.tar.gz && rm $PIN_NAME.tar.gz
+
+# Check that PIN was downloaded correctly and contains what we expect.
+RUN test -e $PIN_ROOT/source
+
+# Install required packages
+RUN apt-get install --assume-yes \
     # cmake is used to build Scarab.
     cmake \
     binutils \
@@ -65,7 +118,6 @@ RUN apt-get install -y \
     # gdb \
     # doxygen \
     libconfig++-dev \
-    vim \
     bc
 
 RUN update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 1
@@ -106,119 +158,83 @@ RUN update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 1
 ######################
 #### Setup Scarab ####
 ######################
-ARG PIN_ROOT
-ARG PIN_FILENAME
-ENV PIN_ROOT /root/$PIN_FILENAME
-ENV SCARAB_ENABLE_PT_MEMTRACE 1
-ENV LD_LIBRARY_PATH $PIN_ROOT/extras/xed-intel64/lib
-ENV LD_LIBRARY_PATH $PIN_ROOT/intel64/runtime/pincrt:$LD_LIBRARY_PATH
-ENV SCARAB_ROOT=/scarab
 
-# The root of the Scarab repository, as used by scarab_paths.py (found in scarab/bin/scarab_globals).
-ENV SIMDIR=$SCARAB_ROOT
 
 # Copy scarab from the local directory into the image. 
 # You must initialize the Git Submodule before this happens!
 COPY scarab $SCARAB_ROOT
 
-# Copy PIN file.
-COPY --from=PIN /$PIN_FILENAME $PIN_ROOT
-
-# Check that all of the Git submodules are correctly initialized.
+# Check that all of Scarab's Git submodules are correctly initialized.
 RUN test -e $SCARAB_ROOT/src/deps/mbuild && \
     test -e $SCARAB_ROOT/src/deps/xed && \
     test -e $SCARAB_ROOT/src/deps/dynamorio
 
-# Remove the .git file, which indicates that the scarab folder is a submodule. 
+# # Copy PIN file from previous stage.
+# COPY --from=PIN $PIN_ROOT $PIN_ROOT
+
+RUN ls $PIN_ROOT
+# Check that the $PIN_ROOT directory has the contents we expect.
+RUN test -e $PIN_ROOT/source
+
+# Remove the .git file, which indicates that the scarab/ folder is a submodule. 
 # Then, reinitialize the directory as a git repo. 
 # Not sure why this is needed, but without it building Scarab fails.
 RUN rm $SCARAB_ROOT/.git && cd $SCARAB_ROOT && git init
 
-# Install Scarab Python dependencies
+# Install Scarab's Python dependencies
 RUN pip3 install -r $SCARAB_ROOT/bin/requirements.txt
 
+# Build Scarab.
 RUN cd $SCARAB_ROOT/src && make
 
-# # Build SimPoint 3.2
-# # Reference:
-# # https://github.com/intel/pinplay-tools/blob/main/pinplay-scripts/PinPointsHome/Linux/bin/Makefile
-# RUN cd /home/$USERNAME/ && \
-#     wget -O - http://cseweb.ucsd.edu/~calder/simpoint/releases/SimPoint.3.2.tar.gz | tar -x -f - -z && \
-#     wget https://raw.githubusercontent.com/intel/pinplay-tools/main/pinplay-scripts/PinPointsHome/Linux/bin/simpoint_modern_gcc.patch -P SimPoint.3.2/ && \
-#     patch --directory=SimPoint.3.2 --strip=1 < SimPoint.3.2/simpoint_modern_gcc.patch && \
-#     make -C SimPoint.3.2 && \
-#     ln -s SimPoint.3.2/bin/simpoint ./simpoint
 
-ENV DOCKER_BUILDKIT 1
-ENV COMPOSE_DOCKER_CLI_BUILD 1
-
-
-FROM apt-base	as base
+FROM scarab	as base
 
 ARG USERNAME
-ENV SCARAB_ROOT=/home/$USERNAME/scarab
 
-RUN apt-get install -y -qq --no-install-recommends \
-        build-essential manpages-dev software-properties-common \
-        apt-utils \
-        lsb-release \
-        build-essential \
-        software-properties-common \
-        ca-certificates \
-        gpg-agent \
-        # wget \
-        # git \
-        # cmake \
-        lcov \
-        gcc-11 \
-        g++-11 \
-        libomp-dev \
-        sudo \
-        gosu
+ARG PIN_ROOT
+ENV PIN_ROOT $PIN_ROOT
 
+ARG SCARAB_ROOT
+ENV SCARAB_ROOT=$SCARAB_ROOT
+# The root of the Scarab repository, as used by scarab_paths.py (found in scarab/bin/scarab_globals).
+ENV SIMDIR=$SCARAB_ROOT
+ENV SCARAB_ENABLE_PT_MEMTRACE 1
+ENV LD_LIBRARY_PATH $PIN_ROOT/extras/xed-intel64/lib
+ENV LD_LIBRARY_PATH $PIN_ROOT/intel64/runtime/pincrt:$LD_LIBRARY_PATH
 
-# Create a new user '$USERNAME' with password '$USERNAME'
-RUN useradd --create-home --home-dir /home/$USERNAME --shell /bin/bash --user-group --groups adm,sudo $USERNAME && \
-    echo "$USERNAME:$USERNAME" | chpasswd 
+# Copy PIN file.
+RUN test -e $PIN_ROOT/source
 
-# Authorize SSH Host
-RUN mkdir -p /home/$USERNAME/.ssh && \
-    chown -R $USERNAME:root /home/$USERNAME/.ssh && \
-    chmod 700 /home/$USERNAME/.ssh
-
-##############################
-# Non-root user Setup
-##############################
-RUN echo $USERNAME ALL=\(ALL\) NOPASSWD:ALL >> /etc/sudoers \
-    && touch /home/$USERNAME/.sudo_as_admin_successful \
-    && gosu $USERNAME mkdir -p /home/$USERNAME/.xdg_runtime_dir
-ENV XDG_RUNTIME_DIR=/home/$USERNAME/.xdg_runtime_dir
-
-# Set the working directory
-WORKDIR /home/$USERNAME
-
-# Switch to the $USERNAME user
-USER $USERNAME
-
-# Copy scarab from the local directory into the image. 
-COPY --from=scarab --chown=$USERNAME /scarab $SCARAB_ROOT
-
+RUN apt-get install --assume-yes --quiet=2 --no-install-recommends \
+      # Manual pages about using GNU/Linux for development
+      manpages-dev \
+      # apt-utils \
+      # lsb-release \
+      # Manage the repositories that you install software from
+      software-properties-common \
+      # Common CA certificates to check for the authenticity of SSL connections
+      ca-certificates \
+      # Tool for secure communication and data storage.
+      gpg-agent \
+      # wget \
+      # git \
+      # cmake \
+      # Tool to summarise Code coverage information from GCOV
+      lcov \
+      gcc-11 \
+      g++-11 \
+      # OpenMP runtime for managing multiple threads.
+      libomp-dev
 
 #######################
 ##### ACC EXAMPLE #####
 #######################
 FROM base	as acc-example-base
 ARG USERNAME
+ARG RESOURCES_DIR
 
-USER root
-
-RUN apt-get install -y -qq --no-install-recommends \
-    python3 \
-    python3-pip \
-    # python2 \
-    git \
-    # tig \
-    # sudo \
+RUN apt-get install --assume-yes --quiet=2 --no-install-recommends \
     cmake \
     # binutils \
     # libunwind-dev \
@@ -232,7 +248,6 @@ RUN apt-get install -y -qq --no-install-recommends \
     # gdb \
     # doxygen \
     # libconfig++-dev \
-    # vim \
     # bc
 
 ##############################
@@ -248,17 +263,18 @@ RUN apt-get install -y -qq --no-install-recommends \
 ##############################
 # Eigen
 ##############################
-RUN apt-get install -y -qq --no-install-recommends \
-        libeigen3-dev \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get install --assume-yes --quiet=2 --no-install-recommends libeigen3-dev
+    # && apt-get clean \
+    # && rm -rf /var/lib/apt/lists/*
 
 
 ##############################
 # NL Optimization
 ##############################
-RUN git clone https://github.com/stevengj/nlopt /tmp/nlopt \
-    && cd /tmp/nlopt \
+# Get the nlopt code from the GitHub repository. 
+# By default, this excludes the .git folder.
+ADD https://github.com/stevengj/nlopt.git /tmp/nlopt
+RUN cd /tmp/nlopt \
     && mkdir build \
     && cd build \
     && cmake \
@@ -271,14 +287,17 @@ RUN git clone https://github.com/stevengj/nlopt /tmp/nlopt \
         .. \
     && make -j$(($(nproc)-1)) \
     && make install \
-    && rm -rf /tmp/*
+    && rm -rf /tmp/nlopt
 
 
 ##############################
 # OSQP Solver
 ##############################
-RUN git clone --depth 1 --branch v0.6.3 --recursive https://github.com/osqp/osqp /tmp/osqp \
-    && cd /tmp/osqp \
+
+ARG OSQP_BRANCH=v0.6.3
+ADD https://github.com/osqp/osqp.git#$OSQP_BRANCH /tmp/osqp
+# RUN git clone --depth 1 --branch v0.6.3 --recursive https://github.com/osqp/osqp /tmp/osqp \
+RUN cd /tmp/osqp \
     && mkdir build \
     && cd build \
     && cmake \ 
@@ -292,44 +311,43 @@ RUN git clone --depth 1 --branch v0.6.3 --recursive https://github.com/osqp/osqp
 ##############################
 # Catch2 - Testing Framework.
 ##############################
-RUN git clone https://github.com/catchorg/Catch2.git /tmp/Catch2 \
-    && cd /tmp/Catch2 \
-    && mkdir build \
-    && cd build \
-    && cmake \ 
-        -D BUILD_TESTING=OFF \
-        .. \
-    && make -j$(($(nproc)-1)) \
-    && make install \
-    && rm -rf /tmp/*
+# RUN git clone https://github.com/catchorg/Catch2.git /tmp/Catch2 \
+#     && cd /tmp/Catch2 \
+#     && mkdir build \
+#     && cd build \
+#     && cmake \ 
+#         -D BUILD_TESTING=OFF \
+#         .. \
+#     && make -j$(($(nproc)-1)) \
+#     && make install \
+#     && rm -rf /tmp/*
 
 # Update the linker to recognize recently added libraries. 
 # See: https://stackoverflow.com/questions/480764/linux-error-while-loading-shared-libraries-cannot-open-shared-object-file-no-s
 RUN ldconfig
 
-USER $USERNAME
-
 # Copy Bash configurations
 COPY --chown=$USERNAME .profile /home/$USERNAME/.bashrc
 
-# COPY requirements.txt /tmp/
-# RUN pip install --requirement /tmp/requirements.txt
-
-# Install acc-example python dependencies. 
-# TODO: Make this use the acc_example/requirements.txt 
-RUN pip3 install gdown numpy scipy pandas
-# RUN pip3 install -r acc_example/requirements.txt
-
 COPY --chown=$USERNAME scarabizor.py /home/$USERNAME/resources/scarabizor.py
-ENV PYTHONPATH "${PYTHONPATH}:/home/$USERNAME/resources/"
+ENV PYTHONPATH "${PYTHONPATH}:${RESOURCES_DIR}"
 
+USER $USERNAME
+
+################################
+# DevContainer for acc-example #
+################################
+FROM acc-example-base as acc-example-dev
+
+##############################################
+# Stand-alone acc-example (no dev container) #
+##############################################
 FROM acc-example-base as acc-example
 
 COPY --chown=$USERNAME acc_example /home/$USERNAME/acc_example
-# CMD cd ~/acc_example && ls && ./run_examples.py; cat 
-RUN cd /home/$USERNAME/acc_example && make acc_controller_7_4
-# CMD cd ~/acc_example && make 
-CMD cd ~/acc_example && ./run_examples.py; cat controller.log; cat plant_dynamics.log
 
-FROM acc-example-base as acc-example-dev
+# Set the working directory
+WORKDIR /home/$USERNAME/acc_example
 
+RUN make acc_controller_7_4
+CMD ./run_examples.py; cat controller.log; cat plant_dynamics.log

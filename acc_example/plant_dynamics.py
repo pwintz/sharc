@@ -54,7 +54,7 @@ def main():
 
   # Settings
   use_scarab_delays = not config_data["use_fake_scarab_computation_times"]
-  use_parallelizable_delays = config_data["use_parallelizable_delays"]
+  only_update_control_at_sample_times = config_data["only_update_control_at_sample_times"]
 
   #  File names for the pipes we use for communicating with C++.
   x_in_filename = sim_dir + 'x_c++_to_py'
@@ -200,8 +200,9 @@ def main():
       printIndented(str(Bd), 1)
       print(f"    xf={xf.transpose()}.")
       print(f"xf_alt={xf_alt.transpose()}.")
-    norm_diff_between_methods = linalg.norm(xf - xf_alt)
-    if norm_diff_between_methods > 1e-2:
+
+    error_metric_between_methods = linalg.norm(xf - xf_alt) / max(linalg.norm(xf), 1)
+    if error_metric_between_methods > 1e-2:
       raise ValueError(f"|xf - xf_alt| = {linalg.norm(xf - xf_alt)} is larger than tolerance")
     xf = xf_alt
 
@@ -319,7 +320,7 @@ def main():
       
     # Read current data_out.json. If it exists, append the new data. Otherwise, create it.
     try:
-      with open('data_out.json', 'r') as json_data_file:
+      with open(sim_dir + 'data_out.json', 'r') as json_data_file:
         data_out_list = json.load(json_data_file)
         data_out_list.append(data_out_json)
     except FileNotFoundError as err:
@@ -471,52 +472,37 @@ def main():
 
         n_samples_without_finishing_computation = math.floor(simulated_computation_time/sample_time)
         n_samples_until_next_sample_after_computation_finishes = n_samples_without_finishing_computation + 1
-        # If the controller computed the update in less than the sample time, then 
-        # we compute the remainder of the sample time period using the new control value. 
-        # If it was not computed in time, then u_prev will not be updated, so the previous 
-        # value will be used again in the next interval. 
-        if simulated_computation_time >= sample_time:
-          if debug_dynamics_level >= 1:
-            print(f"simulated_computation_time={simulated_computation_time_str} >= sample_time={sample_time:.2f}.")
 
+        if debug_dynamics_level >= 1:
+          print(f"simulated_computation_time={simulated_computation_time_str}, sample_time={sample_time:.2f}.")
+
+        if only_update_control_at_sample_times:
+          t_start = t
+          t_computation_update = t + (n_samples_without_finishing_computation+1)*sample_time
+          t_end = t_computation_update
+          # TODO: This model of the delay is designed to match the one used by Yasin's parallelized scheme, but we should check that his model uses u_prev until the computation time passes.
+          (t, x) = evolveState(t_start, x, u_prev, t_end)
+          snapshotState(k, t, x, u_prev, f"After full sample interval with {n_samples_without_finishing_computation} missed computation updates.")
+          u_prev = u
+        else: # Update when the computation finishes, without waiting for the next sample time.
           t_start = t
           t_computation_update = t + simulated_computation_time
           t_end = t + (n_samples_without_finishing_computation + 1)*sample_time
 
           # Evolve x over the one or more sample periods where the control is not updated.
           (t, x) = evolveState(t_start, x, u_prev, t_computation_update)
-          snapshotState(k, t, x, u_prev, "After missing {n_samples_without_finishing_computation} samples without updating controller.")
 
-          (t, x) = evolveState(t_computation_update, x, u, t_computation_update)
-
-          # Save values. We use 'u' instead of 'u_prev' because this is the point where we would update the input if it were to update this time-step.
-          snapshotState(k, t, x, u_prev, "After full sample interval - No control update.")
-        
-        elif use_parallelizable_delays:
-          t_start = t
-          t_computation_update = t
-          t_end = t + (n_samples_without_finishing_computation+1)*sample_time
-          # TODO: This model of the delay is designed to match the one used by Yasin's parallelized scheme, 
-          # TODO: but we should actually use u_prev here, until the computation ends.
-          (t, x) = evolveState(t_start, x, u, t_end)
-          snapshotState(k, t, x, u_prev, f"After full sample interval with {n_samples_without_finishing_computation} missed computation updates.")
-        else:
-          if debug_dynamics_level >= 1:
-            print(f"simulated_computation_time={simulated_computation_time:.2f} < sample_time={sample_time:.2f}. Control to be updated.")
-
-          t_start = t
-          t_computation_update = t + simulated_computation_time
-          t_end = t + (n_samples_without_finishing_computation + 1)*sample_time
-
-          # Evolve x until the computation finishes.
-          (t, x) = evolveState(t_start, x, u_prev, t_computation_update)
-
-          # Save values. We use 'u' instead of 'u_prev' because this is the point where we update the input.
-          snapshotState(k, t, x, u_prev, "After delay - Previous control")
-          snapshotState(k, t, x, u, "After delay - New control")
+          # Snapshot at the computation time with the old control value.
+          snapshotState(k, t, x, u_prev, f"After delay - Previous control. Missed {n_samples_without_finishing_computation} samples without updating controller.")
+          
+          # Snapshot at the computation time with the new control value.
+          snapshotState(k, t, x, u, f"After delay - New control. Missed {n_samples_without_finishing_computation} samples without updating controller.")
 
           (t, x) = evolveState(t_computation_update, x, u, t_end)
-          snapshotState(k, t, x, u, "End of sample")
+
+          # Save the state at the end of the sample period.
+          snapshotState(k, t, x, u, "End of sample period. Missed {n_samples_without_finishing_computation} samples without updating controller.")
+        
           u_prev = u
 
         # Pass the string back to C++.
@@ -529,7 +515,7 @@ def main():
         t_delays_list.append(simulated_computation_time)
         
         data_out_list = generateDataOut()
-        with open('data_out_intermediate.json', 'w') as json_data_file:
+        with open(sim_dir + 'data_out_intermediate.json', 'w') as json_data_file:
           json_data_file.write(json.dumps(data_out_list, allow_nan=False, indent=4))
         print('\n=====\n')
     except NameError as err:
@@ -544,7 +530,7 @@ def main():
   data_out_list = generateDataOut()
   # Save the data_out to file (if enabled)
   if config_data["record_data_out"]:
-    with open('data_out.json', 'w') as json_data_file:
+    with open(sim_dir + 'data_out.json', 'w') as json_data_file:
       json_data_file.write(json.dumps(data_out_list, allow_nan=False, indent=4))
   else:
     # print(json.dumps(data_out_list))

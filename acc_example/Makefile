@@ -13,14 +13,14 @@ CPPFLAGS = -I/usr/local/include \
 	-I/usr/include/eigen3 \
 	-I/usr/local/include/osqp \
 	-I../libmpc/include/ \
-	-I/home/dcuser/scarab/utils \
+	-I${SCARAB_ROOT}/utils \
 	-Wno-deprecated-enum-enum-conversion \
 	-DEIGEN_STACK_ALLOCATION_LIMIT=0 \
 	-D PREDICTION_HORIZON=${PREDICTION_HORIZON} \
 	-D CONTROL_HORIZON=${CONTROL_HORIZON} 
 # -g <- Enable debugging.
 
-CFLAGS = -I /usr/local/include/osqp 
+CFLAGS = -I/usr/local/include/osqp 
 
 # libmpc++ Test
 # LIBMPC_MAIN = acc_controller_7_4
@@ -48,7 +48,7 @@ run: ${LIBMPC_MAIN} sim_dir sim_dir/config.json ${PIPE_FILES} sim_dir/PARAMS.gen
 	./${LIBMPC_MAIN}
 
 # Simulate test_libmpc using Scarab while communicating with the Python ODE solver.
-simulate: ${LIBMPC_MAIN} clean_statistics ${PIPE_FILES} config.json sim_dir/PARAMS.generated
+simulate: ${LIBMPC_MAIN} clean_statistics ${PIPE_FILES} sim_dir/config.json sim_dir/PARAMS.generated
 	./scarab_test_libmpc.py ${LIBMPC_MAIN}
 
 run_plant: plant_dynamics.py sim_dir/config.json ${PIPE_FILES} 
@@ -74,13 +74,13 @@ $(LIBMPC_MAIN): $(LIBMPC_OBJS)
 $(LIBMPC_OBJS): $(LIBMPC_SRCS) $(shell find ../libmpc/include -type f)
 
 $(PIPE_FILES): sim_dir
-	# If the pipe file exists but is not pipe file, then delete it.
+# If the pipe file exists but is not pipe file, then delete it.
 	if [ -e $@ -a ! -p $@ ]; then rm $@ & echo "Deleted $@"; fi;
 
-	# If the pipe file does not exist, create it.
+# If the pipe file does not exist, create it.
 	if [ ! -e $@ ]; then mkfifo $@; fi;
 
-	# Check that the file is actually a pipe.
+# Check that the file is actually a pipe.
 	test -p $@
 
 # Create the simulation directory where the stats from Scarab are generated and the in/out pipe files for communicating between C++ and Python are placed.

@@ -37,9 +37,11 @@ import copy
 
 PARAMS_file_keys = ["chip_cycle_time", "l1_size", "icache_size", "dcache_size"]
 compile_option_keys = ["prediction_horizon", "control_horizon"]
-# config_json_keys = ["enable_mpc_warm_start", "osqp_maximum_iteration"]
 
+# Regex to find text in the form of "--name value"
 param_regex_pattern = re.compile(r"--(?P<param_name>[\w|\_]+)\s*(?P<param_value>\d+).*")
+
+# Format string to generate text in the form of "--name value"
 param_str_fmt = "--{}\t{}\n"
 
 def changeParamsValue(PARAM_lines, key, value):
@@ -58,21 +60,24 @@ def changeParamsValue(PARAM_lines, key, value):
 
 def main():
 
-  # Read JSON files.
+  # Read JSON configuration file.
   with open('config_base.json') as json_file:
       config_base_data = json.load(json_file)
+
+  # Open list of example configurations.
   with open('example_configs.json') as json_file:
       example_config_data = json.load(json_file)
 
   debug_configuration_level = config_base_data["==== Debgugging Levels ===="]["debug_configuration_level"]
 
+  sim_dir = "sim_dir/"
   if config_base_data["backup_previous_data"]:
     # Create a backup of the exising data_out.json file.
     os.makedirs("data_out_backups", exist_ok=True)
     timestr = time.strftime("%Y%m%d-%H%M%S")
     try:
       backup_file_name = "data_out_backups/data_out-" + timestr + "-backup.json"
-      os.rename('data_out.json', backup_file_name)
+      os.rename(sim_dir + 'data_out.json', backup_file_name)
       print(f"data_out.json backed up to {backup_file_name}")
     except FileNotFoundError as err:
       # Not creating backup because data_out.json does not exist.
@@ -83,16 +88,17 @@ def main():
     #     print(f"Compilation option: {key}={value}")
     #   pass
 
-  controller_log_filename = 'controller.log'
-  plant_dynamics_filename = 'plant_dynamics.log'
+  example_set_name = config_base_data["example_set_name"]
+  examples = example_config_data[example_set_name]
+  print(f"===== {example_set_name} ==== ")
+  
+  controller_log_filename = sim_dir + 'controller.log'
+  plant_dynamics_filename = sim_dir + 'plant_dynamics.log'
   with open(controller_log_filename, 'w') as controller_log, \
         open(plant_dynamics_filename, 'w') as plant_dynamics_log:
     
     # example_set_name = "Warm Start"
     # example_set_name = "Predictions"
-    example_set_name = config_base_data["example_set_name"]
-    examples = example_config_data[example_set_name]
-    print(f"===== {example_set_name} ==== ")
 
     for example in examples:
       if example.get("skip", False):
@@ -134,11 +140,11 @@ def main():
 
       # Create PARAMS.generated with the values from the base file modified
       # based on the values in example_configs.json.
-      with open('PARAMS.generated', 'w') as params_out_file:
+      with open(sim_dir + 'PARAMS.generated', 'w') as params_out_file:
         params_out_file.writelines(PARAM_file_lines)
 
       # Write the configuration to config.json.
-      with open('config.json', 'w') as config_file:
+      with open(sim_dir + 'config.json', 'w') as config_file:
           config_file.write(json.dumps(example_config_data))
 
       if not example_config_data["record_data_out"]:
