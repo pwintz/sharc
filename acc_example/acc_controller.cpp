@@ -7,9 +7,20 @@
 #include <Eigen/Eigenvalues>
 #include <unsupported/Eigen/MatrixFunctions>
 #include <boost/algorithm/string/predicate.hpp>
+#include "dr_api.h"
 
 // Define a macro to print a value 
 #define PRINT(x) std::cout << x << std::endl;
+
+// Necseesary for Dynamorio
+bool my_setenv(const char *var, const char *value)
+{
+#ifdef UNIX
+    return setenv(var, value, 1 /*override*/) == 0;
+#else
+    return SetEnvironmentVariable(var, value) == TRUE;
+#endif
+}
 
 #ifdef PREDICTION_HORIZON
 #else
@@ -136,6 +147,11 @@ void sendDouble(std::string label, int i_loop, double x, std::ofstream& outfile)
 
 int main()
 {
+  /* We also test -rstats_to_stderr */
+  if (!my_setenv("DYNAMORIO_OPTIONS",
+              "-stderr_mask 0xc -rstats_to_stderr "
+              "-client_lib ';;-offline'"))
+   std::cerr << "failed to set env var!\n";
   // PRINT("PREDICTION_HORIZON" << PREDICTION_HORIZON)
   // PRINT("CONTROL_HORIZON" << CONTROL_HORIZON)
   // return 0;
@@ -450,6 +466,7 @@ int main()
 
     // Begin a batch of Scarab statistics
     scarab_roi_dump_begin(); 
+    dr_app_setup_and_start();
 
       if (use_state_after_delay_prediction)
       {
@@ -494,6 +511,7 @@ int main()
 
     // Save a batch of Scarab statistics
     scarab_roi_dump_end();  
+    dr_app_stop_and_cleanup();
 
     u = res.cmd;
     
