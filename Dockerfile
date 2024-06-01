@@ -11,6 +11,9 @@ ARG TIME_ZONE=America/Los_Angeles
 FROM ubuntu:20.04 AS apt-base
 ARG USERNAME
 ARG TIME_ZONE
+ENV USERNAME=$USERNAME
+ARG RESOURCES_DIR
+ENV RESOURCES_DIR=$RESOURCES_DIR
 
 # Set the timezone to avoid getting stuck on a prompt when installing packages with apt-get.
 RUN ln -fs /usr/share/zoneinfo/$TIME_ZONE /etc/localtime 
@@ -90,6 +93,9 @@ ENV LD_LIBRARY_PATH $PIN_ROOT/intel64/runtime/pincrt:$LD_LIBRARY_PATH
 ENV SCARAB_ROOT=/scarab
 # The root of the Scarab repository, as used by scarab_paths.py (found in scarab/bin/scarab_globals).
 ENV SIMDIR=$SCARAB_ROOT
+ENV USERNAME=$USERNAME
+ARG RESOURCES_DIR
+ENV RESOURCES_DIR=$RESOURCES_DIR
 
 # Install unzip so for unzipping the PIN file
 RUN apt-get install --assume-yes unzip
@@ -112,6 +118,7 @@ RUN apt-get install --assume-yes \
     zlib1g-dev \
     libsnappy-dev \
     liblz4-dev \
+    wget \
     g++-9 \
     g++-9-multilib \
     # # Debugger
@@ -154,6 +161,14 @@ RUN update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 1
 
 # COPY --chown=$USERNAME run_scarab_mode_4.sh /home/$USERNAME/run_scarab_mode_4.sh
 # COPY --chown=$USERNAME gather_cluster_results.py /home/$USERNAME/gather_cluster_results.py
+
+ENV DYNAMORIO_ROOT=$RESOURCES_DIR/DynamoRIO-Linux-9.0.19314
+# Download and extract DynamoRIO
+RUN mkdir -p $RESOURCES_DIR && \
+    cd $RESOURCES_DIR && \
+    wget https://github.com/DynamoRIO/dynamorio/releases/download/cronbuild-9.0.19314/DynamoRIO-Linux-9.0.19314.tar.gz && \
+    tar -xzvf DynamoRIO-Linux-9.0.19314.tar.gz && \
+    rm DynamoRIO-Linux-9.0.19314.tar.gz
 
 ######################
 #### Setup Scarab ####
@@ -202,6 +217,9 @@ ENV SIMDIR=$SCARAB_ROOT
 ENV SCARAB_ENABLE_PT_MEMTRACE 1
 ENV LD_LIBRARY_PATH $PIN_ROOT/extras/xed-intel64/lib
 ENV LD_LIBRARY_PATH $PIN_ROOT/intel64/runtime/pincrt:$LD_LIBRARY_PATH
+ENV USERNAME=$USERNAME
+ARG RESOURCES_DIR
+ENV RESOURCES_DIR=$RESOURCES_DIR
 
 # Copy PIN file.
 RUN test -e $PIN_ROOT/source
@@ -233,6 +251,8 @@ RUN apt-get install --assume-yes --quiet=2 --no-install-recommends \
 FROM base	as acc-example-base
 ARG USERNAME
 ARG RESOURCES_DIR
+ENV USERNAME=$USERNAME
+ENV RESOURCES_DIR=$RESOURCES_DIR
 
 RUN apt-get install --assume-yes --quiet=2 --no-install-recommends \
     cmake \
@@ -321,6 +341,18 @@ RUN cd /tmp/osqp \
 #     && make -j$(($(nproc)-1)) \
 #     && make install \
 #     && rm -rf /tmp/*
+
+# change to g++-11
+# Install GCC 11 and G++ 11
+RUN apt-get install -y gcc-11 g++-11
+
+# Set up update-alternatives to configure gcc and g++ commands
+RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 2 \
+ && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 2
+
+# Optionally set GCC 11 and G++ 11 as the default compilers
+RUN update-alternatives --set gcc /usr/bin/gcc-11 \
+ && update-alternatives --set g++ /usr/bin/g++-11
 
 # Update the linker to recognize recently added libraries. 
 # See: https://stackoverflow.com/questions/480764/linux-error-while-loading-shared-libraries-cannot-open-shared-object-file-no-s
