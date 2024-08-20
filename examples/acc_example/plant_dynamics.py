@@ -15,7 +15,7 @@ import time
 import datetime
 import traceback # Provides pretty printing of exceptions (https://stackoverflow.com/a/1483494/6651650)
 
-import scarabizor
+import scarabinloop.scarabizor as scarabizor
 
 import json
 import csv
@@ -358,9 +358,9 @@ def main():
         printIndented(f'u: {u_str}', 1)
         printIndented(f't: {t_str}', 1)
 
-      x_datafile.write(x_str + "\n")
-      u_datafile.write(u_str + "\n")
-      t_datafile.write(t_str + "\n")
+      # x_datafile.write(x_str + "\n")
+      # u_datafile.write(u_str + "\n")
+      # t_datafile.write(t_str + "\n")
 
       # Add xarray and uarray to the cumulative lists. 
       # We want xarray to be stored as a single list of numbers, but the 

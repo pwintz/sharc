@@ -25,7 +25,6 @@
   # chip_cycle_time
   # decode_cycles
 
-import sys
 import json
 import os
 import concurrent.futures
@@ -33,7 +32,10 @@ import subprocess
 import re
 import time
 import copy
+import argparse
+from warnings import warn
 
+from slugify import slugify
 
 PARAMS_file_keys = ["chip_cycle_time", "l1_size", "icache_size", "dcache_size"]
 compile_option_keys = ["prediction_horizon", "control_horizon"]
@@ -45,6 +47,10 @@ param_regex_pattern = re.compile(r"--(?P<param_name>[\w|\_]+)\s*(?P<param_value>
 param_str_fmt = "--{}\t{}\n"
 
 def changeParamsValue(PARAM_lines, key, value):
+  """
+  Search through PARAM_lines and modify it in-place by updating the value for the given key. 
+  If the key is not found, then an error is raised.
+  """
   for line_num, line in enumerate(PARAM_lines):
     regex_match = param_regex_pattern.match(line)
     if not regex_match:
@@ -55,22 +61,83 @@ def changeParamsValue(PARAM_lines, key, value):
       PARAM_lines[line_num] = new_line_text
       # print(f"Replaced line number {line_num} with {new_line_text}")
       return PARAM_lines
+    
   # After looping through all of the lines, we didn't find the key.
   raise ValueError(f"Key \"{key}\" was not found in PARAM file lines.")
 
+
 def main():
+  # Create the argument parser
+  parser = argparse.ArgumentParser(description="Run a set of examples.")
+  
+  parser.add_argument(
+      'example_dir',
+      help="Enter the directory of the example. It must contain all of required example files; see the project README file for a full description of the required files and their format."
+  )
+
+  parser.add_argument(
+      '--example_set_name',  # Another argument name
+      type=str,  # Specify the data type
+      default="Default",  # Provide a default value
+      help="Select the set of examples (default: 'Default')"
+  )
+  
+  parser.add_argument(
+      '--output_dir', 
+      type=str, # Specify the data type
+      help="Select the folder where files produced by the simulation are placed."
+  )
+  
+  parser.add_argument(
+      '--config_filename',
+      type=str,  # Specify the data type
+      default= ,
+      help="Select the name of a JSON file located in <example_dir>/simulation_configs."
+  )
+
+  # Parse the arguments from the command line
+  args = parser.parse_args()
+  example_dir = args.example_dir
+  example_set_name = args.example_set_name
+  config_filename = args.config_filename
+
+  # If the user gave an output directory, then use it. Otherwise, use "out/" within the example folder.
+  if args.output_dir:
+    output_dir = os.path.abspath(args.output_dir)
+  else:
+    output_dir = os.path.abspath(example_dir) + "/out"
+
+  try:
+    os.chdir(example_dir)  # Change the current working directory
+  except FileNotFoundError:
+    raise FileNotFoundError(f"Error: The example directory '{example_dir}' does not exist.")
+  print(f"Directory changed to: {os.getcwd()}")
 
   # Read JSON configuration file.
   with open('config_base.json') as json_file:
-      config_base_data = json.load(json_file)
+    config_base_data = json.load(json_file)
 
   # Open list of example configurations.
   with open('example_configs.json') as json_file:
-      example_config_data = json.load(json_file)
+    example_config_data = json.load(json_file)
 
   debug_configuration_level = config_base_data["==== Debgugging Levels ===="]["debug_configuration_level"]
 
-  sim_dir = "sim_dir/"
+  time_in_filename_format = "%Y-%m-%d-%H:%M:%S"
+  sim_dir = output_dir + "/" + slugify(example_set_name) + "-" + time.strftime(time_in_filename_format) + "/"
+  print(f"sim_dir: {sim_dir}")
+
+  latest_sim_dir_path = output_dir + "/latest"
+
+  if not os.path.exists(sim_dir):
+    # Create the sim_dir if it does not exist.
+    os.makedirs(sim_dir)
+
+  if os.path.exists(latest_sim_dir_path):
+    os.remove(latest_sim_dir_path)
+
+  os.symlink(sim_dir, latest_sim_dir_path, target_is_directory=True)
+
   if config_base_data["backup_previous_data"]:
     # Create a backup of the exising data_out.json file.
     os.makedirs("data_out_backups", exist_ok=True)
@@ -82,25 +149,21 @@ def main():
     except FileNotFoundError as err:
       # Not creating backup because data_out.json does not exist.
       pass
-    
-    # def changeCompilationOption(key, value):
-    #   if debug_configuration_level >= 2:
-    #     print(f"Compilation option: {key}={value}")
-    #   pass
 
-  example_set_name = config_base_data["example_set_name"]
-  examples = example_config_data[example_set_name]
-  print(f"===== {example_set_name} ==== ")
+  # example_set_name = config_base_data["example_set_name"]
+  try:
+    example_set = example_config_data[example_set_name]
+  except KeyError as e:
+    raise ValueError(f"There is no set of examples named '{example_set_name}' in example_configs.json.")
+ 
+  print(f"==== {example_set_name} ==== ")
   
   controller_log_filename = sim_dir + 'controller.log'
-  plant_dynamics_filename = sim_dir + 'plant_dynamics.log'
+  plant_dynamics_log_filename = sim_dir + 'plant_dynamics.log'
   with open(controller_log_filename, 'w') as controller_log, \
-        open(plant_dynamics_filename, 'w') as plant_dynamics_log:
-    
-    # example_set_name = "Warm Start"
-    # example_set_name = "Predictions"
+        open(plant_dynamics_log_filename, 'w') as plant_dynamics_log:
 
-    for example in examples:
+    for example in example_set:
       if example.get("skip", False):
         print(f'Skipping example: {example["label"]}')
         continue
@@ -165,11 +228,16 @@ def main():
         print(f'Starting controller Scarab for {example["label"]} example...  (See {controller_log_filename})')
         # subprocess.check_call(['make', 'simulate', ], stdout=controller_log, stderr=controller_log)
         
-        subprocess.check_call(make_cmd, stdout=controller_log, stderr=controller_log)
+        try:
+          subprocess.check_call(make_cmd, stdout=controller_log, stderr=controller_log)
+        except subprocess.CalledProcessError as err:
+          warn(f'Running "{" ".join(make_cmd)}" Failed')
+          warn(err.output)
+          raise err
         print('Scarab thread finished.')
 
       def run_plant():
-        print(f'Starting plant dynamics for {example["label"]} example...  (See {plant_dynamics_filename})')
+        print(f'Starting plant dynamics for {example["label"]} example...  (See {plant_dynamics_log_filename})')
         subprocess.check_call(['make', 'run_plant'], stdout=plant_dynamics_log, stderr=plant_dynamics_log)
         print('Plant dynamics thread finshed.')
 

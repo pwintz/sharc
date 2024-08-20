@@ -4,3 +4,6 @@
 [submodule "scarab"]
 	path = scarab
 	url = git@github.com:Litz-Lab/scarab.git
+[submodule "examples/inverted-pendulum"]
+	path = examples/inverted-pendulum
+	url = git@github.com:YasinSonmez/Inverted-Pendulum.git

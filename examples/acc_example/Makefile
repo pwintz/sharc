@@ -9,10 +9,11 @@ CC = gcc-11
 # C++ flags
 CXXFLAGS = -std=c++20
 # C Preprocessor flags.
-CPPFLAGS = -I/usr/local/include \
+CPPFLAGS = \
+	-I/usr/local/include \
 	-I/usr/include/eigen3 \
 	-I/usr/local/include/osqp \
-	-I../libmpc/include/ \
+	-I${LIBMPC_INCLUDE} \
 	-I${SCARAB_ROOT}/utils \
 	-Wno-deprecated-enum-enum-conversion \
 	-DEIGEN_STACK_ALLOCATION_LIMIT=0 \
@@ -24,14 +25,15 @@ CFLAGS = -I/usr/local/include/osqp
 
 # libmpc++ Test
 # LIBMPC_MAIN = acc_controller_7_4
-LIBMPC_MAIN = acc_controller_${PREDICTION_HORIZON}_${CONTROL_HORIZON}
 # LIBMPC_SRCS = ${LIBMPC_MAIN}.cpp
-LIBMPC_SRCS = acc_controller.cpp
-LIBMPC_OBJS = $(LIBMPC_SRCS:.cpp=.o)
+ACC_SRCS = acc_controller.cpp
+# ACC_MAIN = acc_controller_${PREDICTION_HORIZON}_${CONTROL_HORIZON}
+ACC_MAIN = $(ACC_SRCS:.cpp=_${PREDICTION_HORIZON}_${CONTROL_HORIZON})
+ACC_OBJS = $(ACC_SRCS:.cpp=.o)
 
 # Eigen Test
-EIGEN_MAIN = test_eigen
 EIGEN_SRCS = test_eigen.cpp
+EIGEN_MAIN = $(EIGEN_SRCS:.cpp=)
 EIGEN_OBJS = $(EIGEN_SRCS:.cpp=.o)
 
 # Linker flags
@@ -40,16 +42,22 @@ LDFLAGS = # -L/usr/local/mysql-connector-c++/lib64
 # The command "-lm" is from the NLopt documentation.
 LDLIBS = -lnlopt -lm -losqp
 
-PIPE_FILES = sim_dir/x_c++_to_py sim_dir/x_predict_c++_to_py sim_dir/t_predict_c++_to_py  sim_dir/u_c++_to_py sim_dir/x_py_to_c++ sim_dir/iterations_c++_to_py sim_dir/t_delay_py_to_c++
+PIPE_FILES = sim_dir/x_c++_to_py \
+						 sim_dir/x_predict_c++_to_py \
+						 sim_dir/t_predict_c++_to_py \
+						 sim_dir/u_c++_to_py \
+						 sim_dir/x_py_to_c++ \
+						 sim_dir/iterations_c++_to_py \
+						 sim_dir/t_delay_py_to_c++
 
 .PHONY: clean simulate run clean_statistics run_plant $(PIPE_FILES)
 
-run: ${LIBMPC_MAIN} sim_dir sim_dir/config.json ${PIPE_FILES} sim_dir/PARAMS.generated
-	./${LIBMPC_MAIN}
+run: ${ACC_MAIN} sim_dir sim_dir/config.json ${PIPE_FILES} sim_dir/PARAMS.generated
+	./${ACC_MAIN}
 
 # Simulate test_libmpc using Scarab while communicating with the Python ODE solver.
-simulate: ${LIBMPC_MAIN} clean_statistics ${PIPE_FILES} sim_dir/config.json sim_dir/PARAMS.generated
-	./scarab_test_libmpc.py ${LIBMPC_MAIN}
+simulate: ${ACC_MAIN} clean_statistics ${PIPE_FILES} sim_dir/config.json sim_dir/PARAMS.generated
+	./scarab_test_libmpc.py ${ACC_MAIN}
 
 run_plant: plant_dynamics.py sim_dir/config.json ${PIPE_FILES} 
 	./plant_dynamics.py
@@ -66,12 +74,12 @@ sim_dir/PARAMS.generated: PARAMS.base
 
 # Link the main script using built-in implicit Make rules: 
 # https://www.gnu.org/software/make/manual/html_node/Catalogue-of-Rules.html#Catalogue-of-Rules
-$(LIBMPC_MAIN): $(LIBMPC_OBJS)
-	$(CXX) -o $(LIBMPC_MAIN) $(LIBMPC_OBJS) $(LDFLAGS) $(LDLIBS)
+$(ACC_MAIN): $(ACC_OBJS)
+	$(CXX) -o $(ACC_MAIN) $(ACC_OBJS) $(LDFLAGS) $(LDLIBS)
 
 # Compile the object file using built-in implicit Make rules: 
 # https://www.gnu.org/software/make/manual/html_node/Catalogue-of-Rules.html#Catalogue-of-Rules
-$(LIBMPC_OBJS): $(LIBMPC_SRCS) $(shell find ../libmpc/include -type f)
+$(ACC_OBJS): $(ACC_SRCS) $(shell find ${LIBMPC_INCLUDE} -type f)
 
 $(PIPE_FILES): sim_dir
 # If the pipe file exists but is not pipe file, then delete it.
@@ -91,4 +99,4 @@ clean_statistics:
 	rm -f sim_dir/*.stat.* sim_dir/per_line_* sim_dir/per_branch* sim_dir/uop_queue* ramulator.stat.out 
 
 clean:
-	rm -f ${LIBMPC_MAIN} $(LIBMPC_OBJS) sim_dir/* data_out.json sim_dir/PARAMS.generated
+	rm -f ${ACC_MAIN} $(ACC_OBJS) sim_dir/* data_out.json sim_dir/PARAMS.generated

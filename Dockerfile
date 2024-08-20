@@ -4,6 +4,7 @@ ARG PIN_ROOT=/$PIN_NAME
 ARG SCARAB_ROOT=/scarab
 ARG RESOURCES_DIR=/home/$USERNAME/resources/
 ARG TIME_ZONE=America/Los_Angeles
+ARG WORKSPACE_ROOT=/dev-workspace
 
 ##################################
 ############## BASE ##############
@@ -125,9 +126,14 @@ RUN update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 1
 #####################################
 ############# DynamoRIO #############
 #####################################
-# FROM ubuntu:20.04	as dynamorio
-# # DynamoRIO build from source
-# RUN git clone --recursive https://github.com/DynamoRIO/dynamorio.git && cd dynamorio && git reset --hard release_10.0.0 && mkdir build && cd build && cmake .. && make -j 40
+# DynamoRIO build from source
+# RUN git clone --recursive https://github.com/DynamoRIO/dynamorio.git && cd dynamorio && git reset --hard release_10.0.0 && mkdir build && cd build && cmake .. && make
+ADD https://github.com/DynamoRIO/dynamorio.git#release_10.0.0 /home/$USERNAME/dynamorio
+RUN cd /home/$USERNAME/dynamorio && mkdir build && cd build && cmake .. && make
+
+#####################################
+############# Simpoint? #############
+#####################################
 
 # # Build DynamoRIO package for fingerprint client
 # RUN mkdir /home/$USERNAME/dynamorio/package && \
@@ -147,7 +153,7 @@ RUN update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 1
 # COPY --chown=$USERNAME utilities.sh /home/$USERNAME/utilities.sh
 # COPY --chown=$USERNAME run_clustering.sh /home/$USERNAME/run_clustering.sh
 # COPY --chown=$USERNAME run_trace_post_processing.sh /home/$USERNAME/run_trace_post_processing.sh
-
+# 
 # COPY --chown=$USERNAME run_simpoint_trace.sh /home/$USERNAME/run_simpoint_trace.sh
 # COPY --chown=$USERNAME run_scarab.sh /home/$USERNAME/run_scarab.sh
 # COPY --chown=$USERNAME gather_fp_pieces.py /home/$USERNAME/gather_fp_pieces.py
@@ -158,7 +164,6 @@ RUN update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 1
 ######################
 #### Setup Scarab ####
 ######################
-
 
 # Copy scarab from the local directory into the image. 
 # You must initialize the Git Submodule before this happens!
@@ -186,7 +191,6 @@ RUN pip3 install -r $SCARAB_ROOT/bin/requirements.txt
 
 # Build Scarab.
 RUN cd $SCARAB_ROOT/src && make
-
 
 FROM scarab	as base
 
@@ -225,14 +229,36 @@ RUN apt-get install --assume-yes --quiet=2 --no-install-recommends \
       gcc-11 \
       g++-11 \
       # OpenMP runtime for managing multiple threads.
-      libomp-dev
+      libomp-dev \ 
+      man
+
+RUN yes | unminimize
+
+# Copy Bash configurations
+COPY --chown=$USERNAME .profile /home/$USERNAME/.bashrc
+
+# Copy scarabintheloop module and add to path.
+COPY --chown=$USERNAME scarabintheloop /home/$USERNAME/resources/scarabintheloop
+
+RUN pip3 install -r /home/$USERNAME/resources/scarabintheloop/requirements.txt
+
+## If doing development on run_examples.py, then we want to use the version stored in dev-workspace.
+# ENV PYTHONPATH "${PYTHONPATH}:/home/$USERNAME/resources:${SCARAB_ROOT}/bin"
+# ENV PATH "${PATH}:/home/$USERNAME/resources/scarabintheloop/scripts:${SCARAB_ROOT}/bin"
+
+ARG WORKSPACE_ROOT
+ENV PYTHONPATH "${PYTHONPATH}:${WORKSPACE_ROOT}:${SCARAB_ROOT}/bin"
+ENV PATH "${PATH}:${WORKSPACE_ROOT}/scarabintheloop/scripts:${SCARAB_ROOT}/bin"
+
 
 #######################
 ##### ACC EXAMPLE #####
 #######################
 FROM base	as acc-example-base
 ARG USERNAME
-ARG RESOURCES_DIR
+ARG WORKSPACE_ROOT
+
+ENV LIBMPC_INCLUDE $WORKSPACE_ROOT/libmpc/include/
 
 RUN apt-get install --assume-yes --quiet=2 --no-install-recommends \
     cmake \
@@ -249,6 +275,9 @@ RUN apt-get install --assume-yes --quiet=2 --no-install-recommends \
     # doxygen \
     # libconfig++-dev \
     # bc
+
+# COPY requirements.txt requirements.txt
+# RUN pip3 install -r requirements.txt
 
 ##############################
 # libMPC++
@@ -326,13 +355,9 @@ RUN cd /tmp/osqp \
 # See: https://stackoverflow.com/questions/480764/linux-error-while-loading-shared-libraries-cannot-open-shared-object-file-no-s
 RUN ldconfig
 
-# Copy Bash configurations
-COPY --chown=$USERNAME .profile /home/$USERNAME/.bashrc
-
-COPY --chown=$USERNAME scarabizor.py /home/$USERNAME/resources/scarabizor.py
-ENV PYTHONPATH "${PYTHONPATH}:${RESOURCES_DIR}"
 
 USER $USERNAME
+
 
 ################################
 # DevContainer for acc-example #
@@ -344,10 +369,13 @@ FROM acc-example-base as acc-example-dev
 ##############################################
 FROM acc-example-base as acc-example
 
-COPY --chown=$USERNAME acc_example /home/$USERNAME/acc_example
+COPY --chown=$USERNAME examples/acc_example /home/$USERNAME/examples/acc_example
+COPY --chown=$USERNAME libmpc /home/$USERNAME/libmpc
+
+ENV LIBMPC_INCLUDE /home/$USERNAME/libmpc/include/
 
 # Set the working directory
-WORKDIR /home/$USERNAME/acc_example
+WORKDIR /home/$USERNAME/examples/acc_example
 
 RUN make acc_controller_7_4
-CMD ./run_examples.py; cat controller.log; cat plant_dynamics.log
+# CMD run_examples.py . && cat controller.log && cat plant_dynamics.log

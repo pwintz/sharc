@@ -38,7 +38,6 @@ from __future__ import print_function
 
 import argparse
 import os
-import shutil
 import subprocess
 import sys
 
@@ -49,11 +48,11 @@ sim_dir = 'sim_dir/'
 with open(sim_dir + 'config.json') as json_data:
     config_data = json.load(json_data)
 
-scarab_root_path = os.environ["SCARAB_ROOT"]
 example_dir = os.path.dirname(os.path.abspath(__file__))
 
 # Add <scarab path>/bin to the Python search pth.
-sys.path.append(scarab_root_path + '/bin')
+# scarab_root_path = os.environ["SCARAB_ROOT"]
+# sys.path.append(scarab_root_path + '/bin')
 from scarab_globals import *
 
 def run_scarab(cmd_to_simulate, use_fake_scarab_computation_times=False, sim_dir="sim_dir"):

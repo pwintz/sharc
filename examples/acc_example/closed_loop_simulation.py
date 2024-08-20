@@ -3,7 +3,7 @@
 import time
 import numpy as np
 from scipy.integrate import ode
-import scarabizor
+import scarabinloop.scarabizor as scarabizor
 import re
 import numpy
 

@@ -5,6 +5,10 @@ install/
 log/
 build/
 
+# Ignore "trash/" folder where I move old files.
+trash 
+
+
 # Created by https://www.toptal.com/developers/gitignore/api/c++,ros
 # Edit at https://www.toptal.com/developers/gitignore?templates=c++,ros
 

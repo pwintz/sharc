@@ -2,7 +2,7 @@
 
 from distutils.core import setup
 
-setup(name='scarabizor',
+setup(name='scarabinloop',
       version='1.0',
       # description='Python Distribution Utilities',
       # author='Greg Ward',
