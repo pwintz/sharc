@@ -9,41 +9,48 @@ from scipy.integrate import ode
 import scipy.signal
 import numpy.linalg as linalg
 import argparse # Parsing of input args.
+import example_dynamics
 
 import math
 import time
 import datetime
 import traceback # Provides pretty printing of exceptions (https://stackoverflow.com/a/1483494/6651650)
 
-import scarabinloop.scarabizor as scarabizor
+import scarabintheloop.scarabizor as scarabizor
 
 import json
 import csv
 import re
+import os
 
 class DataNotRecievedViaFileError(IOError):
   pass
 
 def main():
-  
-  global args
-
-  parser = argparse.ArgumentParser(description=f'Run a command using Scarab.')
-  parser.add_argument('--sim_dir', nargs='?', help='Path to the simulation directory.', default="sim_dir")
+  parser = argparse.ArgumentParser(description=f'Run the plant dynamics, which communicates with the controller via pipe files.')
   args = parser.parse_args()
 
-  sim_dir:str = args.sim_dir
+  sim_dir:str = os.path.abspath('.')
   if not sim_dir.endswith('/'):
     sim_dir += "/"
-
-
+  
   # Read config.json.
   with open(sim_dir + 'config.json') as json_data_file:
       config_data = json.load(json_data_file)
+      print("Read JSON data from 'config.json'")
 
   # Read system_dynamics.json.
+  remaining_timeout = 60 # seconds
+  while not os.path.exists(sim_dir + 'system_dynamics.json'):
+    print(f'Waiting for system_dynamics.json to be created ({remaining_timeout:0.1f} sec until timeout).')
+    time.sleep(0.1)
+    remaining_timeout -= 0.1
+    if remaining_timeout <= 0:
+      raise IOError(f'system_dynamics.json was not created within the time limit.')
+  
   with open(sim_dir + 'system_dynamics.json') as json_data_file:
-      system_dynamics_data = json.load(json_data_file)
+    system_dynamics_data = json.load(json_data_file)
+    print("Read JSON data from 'system_dynamics.json'")
 
   stats_reader = scarabizor.ScarabStatsReader(sim_dir)
 
@@ -74,30 +81,39 @@ def main():
   sample_time = config_data["sample_time"] # Discrete sample period.
   fake_computation_delay_times = config_data["fake_computation_delay_times"]
 
-  # Read the state and input matrices from the JSON files, reshaping them according to the given 
-  # values of m and n (they are stored as 1D vectors).
+  ######################################
+  ######## Define the Dynamics #########
+  ######################################
+
+
+#   # Read the state and input matrices from the JSON files, reshaping them according to the given 
+#   # values of m and n (they are stored as 1D vectors).
+#   n = system_dynamics_data["state_dimension"]
+#   m = system_dynamics_data["input_dimension"]
+#   A = np.array(system_dynamics_data["Ac_entries"]).reshape(n, n)
+#   B = np.array(system_dynamics_data["Bc_entries"]).reshape(n, m)
+#   B_dist = np.array(system_dynamics_data["Bc_disturbances_entries"]).reshape(n, m)
+# 
+#   C = np.identity(5, float)
+#   D = np.zeros([5, 1], float)
+# 
+#   if debug_dynamics_level >= 1:
+#     (A_to_delay, B_to_delay, C_to_delay, D_to_delay, dt) = scipy.signal.cont2discrete((A, B, C, D), fake_computation_delay_times)
+#     (A_delay_to_sample, B_delay_to_sample, C_delay_to_sample, D_delay_to_sample, dt) = scipy.signal.cont2discrete((A, B, C, D), sample_time - fake_computation_delay_times)
+#     print("A_to_delay")
+#     print(A_to_delay)
+#     print("A_delay_to_sample")
+#     print(A_delay_to_sample)
+# 
+#   if debug_dynamics_level >= 2 or debug_interfile_communication_level >= 2:
+#     print("A from C++:")
+#     print(A)
+#     print("B from C++:")
+#     print(B)
+
   n = system_dynamics_data["state_dimension"]
   m = system_dynamics_data["input_dimension"]
-  A = np.array(system_dynamics_data["Ac_entries"]).reshape(n, n)
-  B = np.array(system_dynamics_data["Bc_entries"]).reshape(n, m)
-  B_dist = np.array(system_dynamics_data["Bc_disturbances_entries"]).reshape(n, m)
-
-  C = np.identity(5, float)
-  D = np.zeros([5, 1], float)
-  (A_to_delay, B_to_delay, C_to_delay, D_to_delay, dt) = scipy.signal.cont2discrete((A, B, C, D), fake_computation_delay_times)
-  (A_delay_to_sample, B_delay_to_sample, C_delay_to_sample, D_delay_to_sample, dt) = scipy.signal.cont2discrete((A, B, C, D), sample_time - fake_computation_delay_times)
-
-  if debug_dynamics_level >= 1:
-    print("A_to_delay")
-    print(A_to_delay)
-    print("A_delay_to_sample")
-    print(A_delay_to_sample)
-
-  if debug_dynamics_level >= 2 or debug_interfile_communication_level >= 2:
-    print("A from C++:")
-    print(A)
-    print("B from C++:")
-    print(B)
+  evolveState = example_dynamics.getDynamicsFunction(config_data, system_dynamics_data)
 
   xs_list = []
   us_list = []
@@ -149,71 +165,71 @@ def main():
     # printIndented('String: ' + string, 1)
     return string
 
-  def system_derivative(t, x, params):
-      """ Give the value of f(x) for the system \dot{x} = f(x). """
-      # Convert x into a 2D (nx1) array instead of 1D array (length n).
-      x = x[:,None]
-      u = params["u"]
-      w = params["w"]
+#   def system_derivative(t, x, params):
+#       """ Give the value of f(x) for the system \dot{x} = f(x). """
+#       # Convert x into a 2D (nx1) array instead of 1D array (length n).
+#       x = x[:,None]
+#       u = params["u"]
+#       w = params["w"]
+# 
+#       if debug_dynamics_level >= 3:
+#         print('Values when calculating system xdot:')
+#         printIndented('x = ' + str(x), 1)
+#         printIndented('u = ' + str(u), 1)
+#         printIndented('w = ' + str(w), 1)
+# 
+#       # Compute the system dynamics.
+#       xdot = np.matmul(A, x) +  np.matmul(B, u) + B_dist * w;
+# 
+#       if debug_dynamics_level >= 3:
+#         print('Values when calculating system xdot:')
+#         printIndented('  A*x = ' + str( np.matmul(A, x)), 1)
+#         printIndented('  B*u = ' + str( np.matmul(B, u)), 1)
+#         printIndented('B_d*w = ' + str((B_dist * w)), 1)
+#         printIndented(' xdot = ' + str(xdot), 1)
+#       return xdot
 
-      if debug_dynamics_level >= 3:
-        print('Values when calculating system xdot:')
-        printIndented('x = ' + str(x), 1)
-        printIndented('u = ' + str(u), 1)
-        printIndented('w = ' + str(w), 1)
-
-      # Compute the system dynamics.
-      xdot = np.matmul(A, x) +  np.matmul(B, u) + B_dist * w;
-
-      if debug_dynamics_level >= 3:
-        print('Values when calculating system xdot:')
-        printIndented('  A*x = ' + str( np.matmul(A, x)), 1)
-        printIndented('  B*u = ' + str( np.matmul(B, u)), 1)
-        printIndented('B_d*w = ' + str((B_dist * w)), 1)
-        printIndented(' xdot = ' + str(xdot), 1)
-      return xdot
-
-  solver = ode(system_derivative).set_integrator('vode', method='bdf')
-  def evolveState(t0, x0, u, tf):
-
-    if debug_dynamics_level >= 1:
-      print(f"== evolveState(t=[{t0:.2}, {tf:.2}]) ==")
-      print("x0': " + str(x0.transpose()))
-      print(" u': " + str(u))
-
-    # Create an ODE solver
-    params = {"u": u, "w": 0}
-    solver.set_f_params(params)
-    solver.set_initial_value(x0, t=t0)
-    # Simulate the system until the computation ends, using the previous control value.
-    solver.integrate(tf)
-    xf = solver.y
-
-    # As an alternative method to compute the evolution of the state, use the discretized dynamics.
-    Ad, Bd = scipy.signal.cont2discrete((A, B, C, D), tf - t0)[0:2]
-    xf_alt = np.matmul(Ad, x) + np.matmul(Bd, u)
-    
-    if debug_dynamics_level >= 2:
-      print("Ad")
-      printIndented(str(Ad), 1)
-      print("Bd")
-      printIndented(str(Bd), 1)
-      print(f"    xf={xf.transpose()}.")
-      print(f"xf_alt={xf_alt.transpose()}.")
-
-    error_metric_between_methods = linalg.norm(xf - xf_alt) / max(linalg.norm(xf), 1)
-    if error_metric_between_methods > 1e-2:
-      raise ValueError(f"|xf - xf_alt| = {linalg.norm(xf - xf_alt)} is larger than tolerance")
-    xf = xf_alt
-
-    if debug_dynamics_level >= 2:
-      print(f'ODE solver run over interval t=[{t0}, {tf}] with x0={x0.transpose().tolist()[0]}, u={u}')
-    if debug_dynamics_level >= 3:
-      print('Solver values at end of delay.')
-      print(f"\tsolver.u = {repr(solver.f_params)}")
-      print(f"\tsolver.y = {repr(solver.y)}")
-      print(f"\tsolver.t = {repr(solver.t)}")
-    return (tf, xf)
+#   solver = ode(system_derivative).set_integrator('vode', method='bdf')
+#   def evolveState(t0, x0, u, tf):
+# 
+#     if debug_dynamics_level >= 1:
+#       print(f"== evolveState(t=[{t0:.2}, {tf:.2}]) ==")
+#       print("x0': " + str(x0.transpose()))
+#       print(" u': " + str(u))
+# 
+#     # Create an ODE solver
+#     params = {"u": u, "w": 0}
+#     solver.set_f_params(params)
+#     solver.set_initial_value(x0, t=t0)
+#     # Simulate the system until the computation ends, using the previous control value.
+#     solver.integrate(tf)
+#     xf = solver.y
+# 
+#     # As an alternative method to compute the evolution of the state, use the discretized dynamics.
+#     Ad, Bd = scipy.signal.cont2discrete((A, B, C, D), tf - t0)[0:2]
+#     xf_alt = np.matmul(Ad, x) + np.matmul(Bd, u)
+#     
+#     if debug_dynamics_level >= 2:
+#       print("Ad")
+#       printIndented(str(Ad), 1)
+#       print("Bd")
+#       printIndented(str(Bd), 1)
+#       print(f"    xf={xf.transpose()}.")
+#       print(f"xf_alt={xf_alt.transpose()}.")
+# 
+#     error_metric_between_methods = linalg.norm(xf - xf_alt) / max(linalg.norm(xf), 1)
+#     if error_metric_between_methods > 1e-2:
+#       raise ValueError(f"|xf - xf_alt| = {linalg.norm(xf - xf_alt)} is larger than tolerance")
+#     xf = xf_alt
+# 
+#     if debug_dynamics_level >= 2:
+#       print(f'ODE solver run over interval t=[{t0}, {tf}] with x0={x0.transpose().tolist()[0]}, u={u}')
+#     if debug_dynamics_level >= 3:
+#       print('Solver values at end of delay.')
+#       print(f"\tsolver.u = {repr(solver.f_params)}")
+#       print(f"\tsolver.y = {repr(solver.y)}")
+#       print(f"\tsolver.t = {repr(solver.t)}")
+#     return (tf, xf)
 
   def checkAndStripInputLoopNumber(expected_k, input_line):
     """ Check that an input line, formatted as "Loop <k>: <data>" 
@@ -269,6 +285,8 @@ def main():
     data_out_json["instruction_counts"] = instruction_counts_list;
     data_out_json["cycles_counts"] = cycles_counts_list
     data_out_json["execution_walltime"] = walltimes_list
+    
+    # Info specific to MPC:
     data_out_json["prediction_horizon"] = system_dynamics_data["prediction_horizon"]
     data_out_json["control_horizon"] = system_dynamics_data["control_horizon"]
 
@@ -396,7 +414,7 @@ def main():
     cause_of_termination = "In progress"
     try:
       for k in range(0, n_time_steps+1):
-        print(f'(Loop {k})')
+        print(f'(Loop {k}) - Waiting for state \'x\' from file.')
         t_start_of_loop = t
         walltime_start_of_loop = time.time()
 
@@ -427,7 +445,6 @@ def main():
           printIndented("t prediction input line: " + t_predict_input_line.strip(), 1)
           printIndented("  iterations input line: " + iterations_input_line.strip(), 1)
 
-        
         x = convertStringToVector(x_input_line)
         u = convertStringToVector(u_input_line)
         x_prediction = convertStringToVector(x_predict_input_line)
@@ -437,7 +454,7 @@ def main():
         # Get the statistics input line.
         if use_scarab_delays: 
           if debug_interfile_communication_level >= 2:
-            print('Waiting for staistics from Scarab.')
+            print('Waiting for statistics from Scarab.')
           stats_reader.waitForStatsFile(k)
           simulated_computation_time = stats_reader.readTime(k)
           instruction_count = stats_reader.readInstructionCount(k)

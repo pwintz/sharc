@@ -101,7 +101,7 @@ int debug_dynamics_level;
 // Eigen::IOFormat fmt(4, 0, ", ", "\n", "", "");
 
 // File names for the pipes we use for communicating with Python.
-std::string sim_dir_path = "/workspaces/ros-docker/libmpc_example/sim_dir/";
+std::string sim_dir_path = "./"; // example_path + "sim_dir/";
 std::string x_out_filename = sim_dir_path + "x_c++_to_py";
 std::string x_predict_out_filename = sim_dir_path + "x_predict_c++_to_py";
 std::string t_predict_out_filename = sim_dir_path + "t_predict_c++_to_py";
@@ -248,7 +248,6 @@ int main()
     PRINT("Bd_disturbance:")
     PRINT(Bd_disturbance)
   }
-  
 
   mat<Tnx, Tnx> Ad_predictive;
   mat<Tnx, Tnu> Bd_predictive;
@@ -283,7 +282,7 @@ int main()
 
   PRINT("Set parameters...");
   lmpc.setOptimizerParameters(params);
-  PRINT("Finshed setting parameters");
+  PRINT("Finished setting optimizer parameters");
 
   lmpc.setStateSpaceModel(Ad, Bd, C);
   lmpc.setDisturbances(Bd_disturbance, mat<Tny, Tndu>::Zero());
@@ -307,16 +306,15 @@ int main()
   {
     throw std::invalid_argument( "The output weight was negative." );
   }
-  
-  
 
   // Input change weights
   cvec<Tnu> DeltaInputW;
   DeltaInputW.setZero();
 
   lmpc.setObjectiveWeights(OutputW, InputW, DeltaInputW, {0, prediction_horizon});
+  PRINT("Finished setting weights.");
 
-  // Set 
+  // Set disturbances
   mat<Tndu, prediction_horizon> disturbance_input;
   disturbance_input.setOnes();
   disturbance_input *= lead_car_input;
@@ -326,6 +324,8 @@ int main()
   auto disturbance_vec = Bd_disturbance;
   disturbance_vec *= disturbance_input(0);
   // printMat("Disturbance vector", disturbance_vec);
+  
+  PRINT("Finished setting disturbances.");
 
   // ======== Constraints ========== //
 
@@ -353,7 +353,6 @@ int main()
   lmpc.setReferences(yRef, cvec<Tnu>::Zero(), cvec<Tnu>::Zero(), {0, prediction_horizon});
 
   // I/O Setup
-
   std::ofstream x_outfile;
   std::ofstream x_predict_outfile;
   std::ofstream t_predict_outfile;
@@ -503,9 +502,13 @@ int main()
       
       if (debug_interfile_communication_level >= 2)
       {
-        PRINT("Getting line from python: ");
+        PRINT("Getting 'x' line from Python: ");
       }
       std::getline(x_infile, x_in_line_from_py);
+      if (debug_interfile_communication_level >= 2)
+      {
+        PRINT("Getting 't_delays' line from Python: ");
+      }
       std::getline(t_delays_infile, t_delay_in_line_from_py);
       if (debug_interfile_communication_level >= 2)
       {

@@ -4,11 +4,6 @@
 ### 
 ### Example usage:
 ###   ./trace.sh <path_to_scarab> <executable> <start_index> <n_cores> <restart_flag> <PARAMS path> <controller params path> <sampling time> 
-### 
-### 
-### 
-### 
-###
 
 # Get the current working directory
 main_path=$(pwd)

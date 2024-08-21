@@ -237,19 +237,21 @@ RUN yes | unminimize
 # Copy Bash configurations
 COPY --chown=$USERNAME .profile /home/$USERNAME/.bashrc
 
-# Copy scarabintheloop module and add to path.
-COPY --chown=$USERNAME scarabintheloop /home/$USERNAME/resources/scarabintheloop
-
-RUN pip3 install -r /home/$USERNAME/resources/scarabintheloop/requirements.txt
+# # Copy scarabintheloop module and add to path.
+# COPY --chown=$USERNAME scarabintheloop /home/$USERNAME/resources/scarabintheloop
+# 
+# RUN pip3 install -r /home/$USERNAME/resources/scarabintheloop/requirements.txt
 
 ## If doing development on run_examples.py, then we want to use the version stored in dev-workspace.
 # ENV PYTHONPATH "${PYTHONPATH}:/home/$USERNAME/resources:${SCARAB_ROOT}/bin"
 # ENV PATH "${PATH}:/home/$USERNAME/resources/scarabintheloop/scripts:${SCARAB_ROOT}/bin"
 
+### Setup scarabintheloop for development in a Dev Contiainer ###  
 ARG WORKSPACE_ROOT
 ENV PYTHONPATH "${PYTHONPATH}:${WORKSPACE_ROOT}:${SCARAB_ROOT}/bin"
 ENV PATH "${PATH}:${WORKSPACE_ROOT}/scarabintheloop/scripts:${SCARAB_ROOT}/bin"
-
+COPY scarabintheloop/requirements.txt sitl-requirements.txt
+RUN pip3 install -r sitl-requirements.txt && rm sitl-requirements.txt
 
 #######################
 ##### ACC EXAMPLE #####
@@ -276,8 +278,8 @@ RUN apt-get install --assume-yes --quiet=2 --no-install-recommends \
     # libconfig++-dev \
     # bc
 
-# COPY requirements.txt requirements.txt
-# RUN pip3 install -r requirements.txt
+COPY examples/acc_example/requirements.txt acc-requirements.txt
+RUN pip3 install -r acc-requirements.txt && rm acc-requirements.txt
 
 ##############################
 # libMPC++

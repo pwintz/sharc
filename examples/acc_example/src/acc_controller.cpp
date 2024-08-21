@@ -7,9 +7,20 @@
 #include <Eigen/Eigenvalues>
 #include <unsupported/Eigen/MatrixFunctions>
 #include <boost/algorithm/string/predicate.hpp>
+// #include "dr_api.h"
 
 // Define a macro to print a value 
 #define PRINT(x) std::cout << x << std::endl;
+
+// // Necseesary for Dynamorio
+// bool my_setenv(const char *var, const char *value)
+// {
+// #ifdef UNIX
+//     return setenv(var, value, 1 /*override*/) == 0;
+// #else
+//     return SetEnvironmentVariable(var, value) == TRUE;
+// #endif
+// }
 
 #ifdef PREDICTION_HORIZON
 #else
@@ -136,6 +147,12 @@ void sendDouble(std::string label, int i_loop, double x, std::ofstream& outfile)
 
 int main()
 {
+  // /* We also test -rstats_to_stderr */
+  // if (!my_setenv("DYNAMORIO_OPTIONS",
+  //             "-stderr_mask 0xc -rstats_to_stderr "
+  //             "-client_lib ';;-offline'")){
+  //   std::cerr << "failed to set env var!\n";
+  // }
   // PRINT("PREDICTION_HORIZON" << PREDICTION_HORIZON)
   // PRINT("CONTROL_HORIZON" << CONTROL_HORIZON)
   // return 0;
@@ -152,7 +169,7 @@ int main()
   // File names for the pipes we use for communicating with Python.
   // std::string data_out_file_path = "data_out.json";
 
-  std::string sim_dir_path = example_path + "sim_dir/";
+  std::string sim_dir_path = "./"; // example_path + "sim_dir/";
   std::string config_file_path = sim_dir_path + "config.json";
   std::string x_out_filename = sim_dir_path + "x_c++_to_py";
   std::string x_predict_out_filename = sim_dir_path + "x_predict_c++_to_py";
@@ -164,6 +181,7 @@ int main()
   std::string optimizer_info_out_filename = sim_dir_path + "optimizer_info.csv";
 
   std::string system_dynamics_filename = sim_dir_path + "system_dynamics.json";
+  PRINT("system_dynamics_filename: " << system_dynamics_filename)
 
   assert_file_exists(config_file_path);
   std::ifstream config_json_file(config_file_path);
@@ -340,8 +358,11 @@ int main()
   disturbance_input.setOnes();
   disturbance_input *= lead_car_input;
   lmpc.setExogenuosInputs(disturbance_input);
+  // printMat("Disturbance input", disturbance_input);
+  // printMat("Disturbance matirx", Bd_disturbance);
   auto disturbance_vec = Bd_disturbance;
   disturbance_vec *= disturbance_input(0);
+  // printMat("Disturbance vector", disturbance_vec);
 
   PRINT("Finished setting disturbances.");
 
@@ -450,6 +471,7 @@ int main()
 
     // Begin a batch of Scarab statistics
     scarab_roi_dump_begin(); 
+    // dr_app_setup_and_start();
 
       if (use_state_after_delay_prediction)
       {
@@ -494,6 +516,7 @@ int main()
 
     // Save a batch of Scarab statistics
     scarab_roi_dump_end();  
+    // dr_app_stop_and_cleanup();
 
     u = res.cmd;
     

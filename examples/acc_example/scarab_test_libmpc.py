@@ -21,17 +21,7 @@
 #  SOFTWARE.
 
 """
-# Sanity Check Using QSORT Example
-
-./utils/qsort includes a small test program for running libc's qsort() on
-random data that we use for sanity checks. To run it, use:
-
 > python ./bin/scarab_test_qsort.py path_to_results_directory
-
-./utils/qsort/ref_stats includes sample stats that you can use for sanity
-checks. The exact statistics are unlikely to match with the reference stats
-because the produced binary is compiler-dependent.
-
 """
 
 from __future__ import print_function
@@ -53,6 +43,7 @@ example_dir = os.path.dirname(os.path.abspath(__file__))
 # Add <scarab path>/bin to the Python search pth.
 # scarab_root_path = os.environ["SCARAB_ROOT"]
 # sys.path.append(scarab_root_path + '/bin')
+
 from scarab_globals import *
 
 def run_scarab(cmd_to_simulate, use_fake_scarab_computation_times=False, sim_dir="sim_dir"):
@@ -78,7 +69,7 @@ def run_scarab(cmd_to_simulate, use_fake_scarab_computation_times=False, sim_dir
 
 
 def __main():
-  global args
+  global args #?? Is this needed??
 
   parser = argparse.ArgumentParser(description=f'Run a command using Scarab.')
   parser.add_argument('cmd', nargs=1, help='Command to build with Make (if needed) and then simulate with Scarab.')

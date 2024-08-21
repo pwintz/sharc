@@ -20,11 +20,7 @@ parser.add_argument(
 # Parse the arguments from the command line
 args = parser.parse_args()
 
-# if len(sys.argv) < 2:
-#     print('Usage: python portabilize_trace.py [trace directory, e.g. ~/drmemtrace.trace1.1234.2134.dir/]')
-#     exit()
-
-traceDir = parser.trace_directory
+traceDir = args.trace_directory
 
 if not path.exists(traceDir):
   # TODO: Check if it is a directory too. 
