@@ -1,3 +1,7 @@
+"""
+This module defines a function that defines the evolution of the plant of a given system. 
+It is loaded by the run_plant.py script.
+"""
 
 import numpy as np
 from scipy.integrate import ode
