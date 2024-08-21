@@ -99,9 +99,12 @@ def main():
   print(f"Directory changed to: {os.getcwd()}")
 
   # Add the example's scripts directory to the PATH.
-  os.environ["PATH"] += os.pathsep + os.path.abspath(example_dir + "/scripts")
+  # os.environ["PATH"] += os.pathsep + os.path.abspath(example_dir + "/scripts")
   os.environ["PATH"] += os.pathsep + os.path.abspath(example_dir + "/bin")
 
+  # Update the PYTHONPATH env variable to include the scripts folder.
+  sys.path.append(os.path.abspath(example_dir + "/scripts"))
+  os.environ["PYTHONPATH"] = os.pathsep.join(sys.path)
 
   # Read JSON configuration file.
   with open(base_config_file_path) as json_file:
@@ -244,7 +247,7 @@ def main():
           plant_dynamics_log.flush()
 
           try:
-            run_shell_cmd_for_plant('plant_dynamics.py')
+            run_shell_cmd_for_plant('run_plant.py')
           except Exception as e:
             print('plant dynamics failed')
             raise e
@@ -254,13 +257,10 @@ def main():
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
             tasks = [executor.submit(run_controller), executor.submit(run_plant)]
             for future in concurrent.futures.as_completed(tasks):
-              try:
-                print(f"Task {future} finished? {future.exception()}")
-                data = future.result()
-              except Exception as e:
-                print('Exception!')
-                executor.shutdown()
-                raise e
+              if future.exception():
+                print(f"Task {future} faile with exception: {future.exception()}")
+                break
+              data = future.result()
   # try:
   #   example_list = sim_config[example_list_name]
   # except KeyError as e:
