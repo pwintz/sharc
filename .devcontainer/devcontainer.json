@@ -11,7 +11,8 @@
 		"dockerfile": "${localWorkspaceFolder}/Dockerfile",
 		"args": {
 				// "USERNAME": "user", // This user must exist! (Created by Dockerfile).
-		}
+		},
+    "options": ["--target=mpc-examples-dev"]
 	},
 	"runArgs": [ "--net=host"],
   "workspaceMount": "source=${localWorkspaceFolder},target=/dev-workspace,type=bind,consistency=cached",

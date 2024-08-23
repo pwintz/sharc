@@ -124,14 +124,6 @@ RUN apt-get install --assume-yes \
 RUN update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 1
 
 #####################################
-############# DynamoRIO #############
-#####################################
-# DynamoRIO build from source
-# RUN git clone --recursive https://github.com/DynamoRIO/dynamorio.git && cd dynamorio && git reset --hard release_10.0.0 && mkdir build && cd build && cmake .. && make
-ADD https://github.com/DynamoRIO/dynamorio.git#release_10.0.0 /home/$USERNAME/dynamorio
-RUN cd /home/$USERNAME/dynamorio && mkdir build && cd build && cmake .. && make
-
-#####################################
 ############# Simpoint? #############
 #####################################
 
@@ -253,13 +245,45 @@ ENV PATH "${PATH}:${WORKSPACE_ROOT}/scarabintheloop/scripts:${SCARAB_ROOT}/bin"
 COPY scarabintheloop/requirements.txt sitl-requirements.txt
 RUN pip3 install -r sitl-requirements.txt && rm sitl-requirements.txt
 
-#######################
-##### ACC EXAMPLE #####
-#######################
-FROM base	as acc-example-base
+
+#####################################
+############# DynamoRIO #############
+#####################################
+# DynamoRIO build from source
+# RUN git clone --recursive https://github.com/DynamoRIO/dynamorio.git && cd dynamorio && git reset --hard release_10.0.0 && mkdir build && cd build && cmake .. && make
+# ADD https://github.com/DynamoRIO/dynamorio.git#release_10.0.0 /home/$USERNAME/dynamorio
+# RUN cd /home/$USERNAME/dynamorio && mkdir build && cd build && cmake .. && make
+
+# Set environment variables for the setup
+# ENV PROJECT_DIR=/home/$USERNAME/Project
+ENV RESOURCES_DIR=/home/$USERNAME/resources
+RUN mkdir -p $RESOURCES_DIR
+ARG DYNAMORIO_VERSION=DynamoRIO-Linux-9.0.19314
+ENV DYNAMORIO_HOME=$RESOURCES_DIR/$DYNAMORIO_VERSION
+ENV PIN_ROOT=$RESOURCES_DIR/pin-3.15-98253-gb56e429b1-gcc-linux
+ENV SCARAB_ENABLE_PT_MEMTRACE=1
+ENV SCARAB_ENABLE_MEMTRACE=1
+ENV LD_LIBRARY_PATH=$RESOURCES_DIR/pin-3.15-98253-gb56e429b1-gcc-linux/extras/xed-intel64/lib:$RESOURCES_DIR/pin-3.15-98253-gb56e429b1-gcc-linux/intel64/runtime/pincrt:$LD_LIBRARY_PATH
+
+# Download and extract DynamoRIO
+ADD https://github.com/DynamoRIO/dynamorio/releases/download/cronbuild-9.0.19314/$DYNAMORIO_VERSION.tar.gz $RESOURCES_DIR
+RUN cd $RESOURCES_DIR && \
+    tar -xzvf $DYNAMORIO_VERSION.tar.gz && \
+    rm $DYNAMORIO_VERSION.tar.gz 
+    # cd $DYNAMORIO_HOME && \
+    # mkdir build && \
+    # cd build && \
+    # cmake .. && \
+    # make
+
+########################
+##### MPC EXAMPLES #####
+########################
+FROM base	as mpc-examples-base
 ARG USERNAME
 ARG WORKSPACE_ROOT
 
+# RUN cmake .. && sudo cmake --install . # <- Run something like this to build libmpc in libmpc/build.
 ENV LIBMPC_INCLUDE $WORKSPACE_ROOT/libmpc/include/
 
 RUN apt-get install --assume-yes --quiet=2 --no-install-recommends \
@@ -271,7 +295,9 @@ RUN apt-get install --assume-yes --quiet=2 --no-install-recommends \
     # libsnappy-dev \
     # liblz4-dev \
     g++-9 \
-    g++-9-multilib 
+    g++-9-multilib \
+    # SFML is used(?) by the inverted-pendulum example
+    libsfml-dev
     # # Debugger
     # gdb \
     # doxygen \
@@ -290,86 +316,93 @@ RUN pip3 install -r acc-requirements.txt && rm acc-requirements.txt
 #     && tar -xzvf 0.4.0.tar.gz \
 #     && rm 0.4.0.tar.gz
 
-
-##############################
-# Eigen
-##############################
-RUN apt-get install --assume-yes --quiet=2 --no-install-recommends libeigen3-dev
-    # && apt-get clean \
-    # && rm -rf /var/lib/apt/lists/*
+ADD https://github.com/pwintz/libmpc.git libmpc
+RUN libmpc/configure.sh
+RUN mkdir libmpc/build && cd libmpc/build && cmake .. && cmake --install .
 
 
-##############################
-# NL Optimization
-##############################
-# Get the nlopt code from the GitHub repository. 
-# By default, this excludes the .git folder.
-ADD https://github.com/stevengj/nlopt.git /tmp/nlopt
-RUN cd /tmp/nlopt \
-    && mkdir build \
-    && cd build \
-    && cmake \
-        -D CMAKE_BUILD_TYPE=Release \
-        -D NLOPT_PYTHON=OFF \
-        -D NLOPT_OCTAVE=OFF \
-        -D NLOPT_MATLAB=OFF \
-        -D NLOPT_GUILE=OFF \
-        -D NLOPT_SWIG=OFF \
-        .. \
-    && make -j$(($(nproc)-1)) \
-    && make install \
-    && rm -rf /tmp/nlopt
-
-
-##############################
-# OSQP Solver
-##############################
-
-ARG OSQP_BRANCH=v0.6.3
-ADD https://github.com/osqp/osqp.git#$OSQP_BRANCH /tmp/osqp
-# RUN git clone --depth 1 --branch v0.6.3 --recursive https://github.com/osqp/osqp /tmp/osqp \
-RUN cd /tmp/osqp \
-    && mkdir build \
-    && cd build \
-    && cmake \ 
-        -G "Unix Makefiles" \
-        .. \
-    && make -j$(($(nproc)-1)) \
-    && make install \
-    && rm -rf /tmp/*
-
-
-##############################
-# Catch2 - Testing Framework.
-##############################
-# RUN git clone https://github.com/catchorg/Catch2.git /tmp/Catch2 \
-#     && cd /tmp/Catch2 \
+# ##############################
+# # Eigen
+# ##############################
+# RUN apt-get install --assume-yes --quiet=2 --no-install-recommends libeigen3-dev
+#     # && apt-get clean \
+#     # && rm -rf /var/lib/apt/lists/*
+# 
+# 
+# ##############################
+# # NL Optimization
+# ##############################
+# # Get the nlopt code from the GitHub repository. 
+# # By default, this excludes the .git folder.
+# ADD https://github.com/stevengj/nlopt.git /tmp/nlopt
+# RUN cd /tmp/nlopt \
+#     && mkdir build \
+#     && cd build \
+#     && cmake \
+#         -D CMAKE_BUILD_TYPE=Release \
+#         -D NLOPT_PYTHON=OFF \
+#         -D NLOPT_OCTAVE=OFF \
+#         -D NLOPT_MATLAB=OFF \
+#         -D NLOPT_GUILE=OFF \
+#         -D NLOPT_SWIG=OFF \
+#         .. \
+#     && make -j$(($(nproc)-1)) \
+#     && make install \
+#     && rm -rf /tmp/nlopt
+# 
+# 
+# ##############################
+# # OSQP Solver
+# ##############################
+# 
+# ARG OSQP_BRANCH=v0.6.3
+# ADD https://github.com/osqp/osqp.git#$OSQP_BRANCH /tmp/osqp
+# # RUN git clone --depth 1 --branch v0.6.3 --recursive https://github.com/osqp/osqp /tmp/osqp \
+# RUN cd /tmp/osqp \
 #     && mkdir build \
 #     && cd build \
 #     && cmake \ 
-#         -D BUILD_TESTING=OFF \
+#         -G "Unix Makefiles" \
 #         .. \
 #     && make -j$(($(nproc)-1)) \
 #     && make install \
 #     && rm -rf /tmp/*
-
-# Update the linker to recognize recently added libraries. 
-# See: https://stackoverflow.com/questions/480764/linux-error-while-loading-shared-libraries-cannot-open-shared-object-file-no-s
-RUN ldconfig
-
+# # ENV OSQP_INCLUDE_DIR=/usr/local/include/osqp/
+# # ENV OSQP_LIBRARIES=/usr/local/lib/
+# 
+# 
+# ############################
+# # Catch2 - Testing Library #
+# ############################
+# ADD https://github.com/catchorg/Catch2.git /tmp/Catch2
+# RUN cd /tmp/Catch2 \
+#     && mkdir build \
+#     && cd build \
+#     && cmake \
+#     -D BUILD_TESTING=OFF \
+#     .. \
+#     && make -j$(($(nproc)-1)) \
+#     && make install \
+#     && rm -rf /tmp/*
+# 
+# # Update the linker to recognize recently added libraries. 
+# # See: https://stackoverflow.com/questions/480764/linux-error-while-loading-shared-libraries-cannot-open-shared-object-file-no-s
+# RUN ldconfig
 
 USER $USERNAME
 
+#################################
+# DevContainer for mpc-examples #
+#################################
+FROM mpc-examples-base as mpc-examples-dev
+ARG USERNAME
 
-################################
-# DevContainer for acc-example #
-################################
-FROM acc-example-base as acc-example-dev
+CMD cd $WORKSPACE_ROOT/libmpc && mkdir build && cd build && cmake .. && sudo cmake --install 
 
-##############################################
-# Stand-alone acc-example (no dev container) #
-##############################################
-FROM acc-example-base as acc-example
+###############################################
+# Stand-alone mpc-examples (no dev container) #
+###############################################
+FROM mpc-examples-base as mpc-examples
 
 COPY --chown=$USERNAME examples/acc_example /home/$USERNAME/examples/acc_example
 COPY --chown=$USERNAME libmpc /home/$USERNAME/libmpc
@@ -379,5 +412,6 @@ ENV LIBMPC_INCLUDE /home/$USERNAME/libmpc/include/
 # Set the working directory
 WORKDIR /home/$USERNAME/examples/acc_example
 
-RUN make acc_controller_7_4
-# CMD run_examples.py . && cat controller.log && cat plant_dynamics.log
+USER $USERNAME
+
+CMD run_scarabintheloop.py . && cd out/latest/default-settings && cat controller.log && cat plant_dynamics.log
