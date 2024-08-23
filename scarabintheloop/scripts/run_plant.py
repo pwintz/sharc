@@ -2,7 +2,7 @@
 """ 
 This script computes the evolution of a system (plant) using control imputs received from a controller executable. 
 The communication is done via pipe files contained in the simdir directory.
-Instead of calling this script directly, call run_scarabintheloop.py.
+Instead of calling this script directly, call run_scarabintheloop.py
 """
 import numpy as np
 from scipy.integrate import ode

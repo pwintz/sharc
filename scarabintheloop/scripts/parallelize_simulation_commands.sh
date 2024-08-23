@@ -1,7 +1,8 @@
 #! /usr/bin/bash
-# Previously named "simulate.sh"
+# Previously named "simulate.sh". Called from main.sh.
 
-input="$1/simulation_commands.txt"
+timesteps_path=$1
+input="$timesteps_path/simulation_commands.txt"
 declare -a pids  # Array to store process IDs
 counter=0
 while IFS= read -r line; do

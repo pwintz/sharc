@@ -270,11 +270,6 @@ ADD https://github.com/DynamoRIO/dynamorio/releases/download/cronbuild-9.0.19314
 RUN cd $RESOURCES_DIR && \
     tar -xzvf $DYNAMORIO_VERSION.tar.gz && \
     rm $DYNAMORIO_VERSION.tar.gz 
-    # cd $DYNAMORIO_HOME && \
-    # mkdir build && \
-    # cd build && \
-    # cmake .. && \
-    # make
 
 ########################
 ##### MPC EXAMPLES #####

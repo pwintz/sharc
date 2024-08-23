@@ -1,9 +1,10 @@
 # Modified version to parallelize portabilizing. 
-# This must be run within 
+# This must be run within the trace folder(?)
 
-# Get the directory of the current script
-SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
+# Get the directory of the current script.
+# SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
 
+# For each folder inside the current working directory.
 for dir in */; do
     {
         echo "Current directory: $dir"

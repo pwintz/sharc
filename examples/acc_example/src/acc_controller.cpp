@@ -8,6 +8,7 @@
 #include <unsupported/Eigen/MatrixFunctions>
 #include <boost/algorithm/string/predicate.hpp>
 // #include "dr_api.h"
+// #include "scarabintheloop.h"
 
 // Define a macro to print a value 
 #define PRINT(x) std::cout << x << std::endl;

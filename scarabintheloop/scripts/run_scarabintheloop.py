@@ -98,6 +98,9 @@ def main():
     raise FileNotFoundError(f"Error: The example directory '{example_dir}' does not exist.")
   print(f"Directory changed to: {os.getcwd()}")
 
+
+  # TODO: Check that plant_dynamics not alread on path
+
   # Add the example's scripts directory to the PATH.
   # os.environ["PATH"] += os.pathsep + os.path.abspath(example_dir + "/scripts")
   os.environ["PATH"] += os.pathsep + os.path.abspath(example_dir + "/bin")
@@ -105,6 +108,7 @@ def main():
   # Update the PYTHONPATH env variable to include the scripts folder.
   sys.path.append(os.path.abspath(example_dir + "/scripts"))
   os.environ["PYTHONPATH"] = os.pathsep.join(sys.path)
+
 
   # Read JSON configuration file.
   with open(base_config_file_path) as json_file:
@@ -210,9 +214,11 @@ def main():
           else:
              make_cmd = ['make'] + make_parameters
           print(f">> " + " ".join(make_cmd))
+          # Run the make command from the root directory of the example.
           result = subprocess.check_output(make_cmd, cwd=example_dir)
           return result.decode("utf-8")
 
+        # TODO: Controller executable
         executable = example_dir + "/bin/" + run_make('print_executable').strip()
         
         # Build the executable, via Make.
@@ -225,9 +231,11 @@ def main():
           print(f'Starting controller for {sim_label} example...  (See {controller_log_filename})')
           try:
             if sim_config["parallel_scarab_simulation"]:
-              run_shell_cmd_for_controller(executable)
+              # Yasin's code is called.
+              # Trace executable using DynamaRIO (if using Scarab ROI)
+              run_shell_cmd_for_controller(f"main.sh {0} {time_horizon} {chip_params_path} {controller_params_path} {sim_config["label"]} {executable} ")
 
-            if sim_config["use_fake_scarab_computation_times"]:
+            elif sim_config["use_fake_scarab_computation_times"]:
               run_shell_cmd_for_controller(executable)
             else:
               run_scarab(
@@ -339,7 +347,7 @@ def run_scarab(cmd_to_simulate, sim_dir=None, stdout=None, stderr=None):
                      '-fast_forward_to_start_inst 1',
                      '--scarab_args',
                      '--inst_limit 15000000000',
-                    #  '--heartbeat_interval 50', 
+                     #  '--heartbeat_interval 50', 
                      # '--num_heartbeats 1'
                      # '--power_intf_on 1']
                      ]

@@ -87,7 +87,8 @@
     "valarray": "cpp",
     "charconv": "cpp",
     "*.ipp": "cpp",
-    "*.tlh": "cpp"
+    "*.tlh": "cpp",
+    "*.in": "c"
   },
   "files.autoSave": "onFocusChange",
   "terminal.integrated.profiles.windows": {
