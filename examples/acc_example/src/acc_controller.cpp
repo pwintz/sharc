@@ -1,34 +1,43 @@
 // 
 // Compile with g++ -c test_libmpc.cpp -I ~/libmpc-0.4.0/include/ -I /usr/include/eigen3/ -I /usr/local/include -std=c++20
+// #include <cstdio>
 #include <iostream>
+
 #include <mpc/LMPC.hpp>
 #include <mpc/Utils.hpp>
 #include "scarab_markers.h"
 #include <Eigen/Eigenvalues>
 #include <unsupported/Eigen/MatrixFunctions>
 #include <boost/algorithm/string/predicate.hpp>
-// #include "dr_api.h"
+#include <regex> // Used to find and rename Dynamorio trace directories.
+
+// #define USE_DYNAMORIO
+
+// #define USE_DYNAMORIO
+#ifdef USE_DYNAMORIO
+  #include "dr_api.h"
+  bool my_setenv(const char *var, const char *value){
+    #ifdef UNIX
+        return setenv(var, value, 1 /*override*/) == 0;
+    #else
+        return SetEnvironmentVariable(var, value) == TRUE;
+    #endif
+  }
+#endif
 // #include "scarabintheloop.h"
 
 // Define a macro to print a value 
 #define PRINT(x) std::cout << x << std::endl;
-
-// // Necseesary for Dynamorio
-// bool my_setenv(const char *var, const char *value)
-// {
-// #ifdef UNIX
-//     return setenv(var, value, 1 /*override*/) == 0;
-// #else
-//     return SetEnvironmentVariable(var, value) == TRUE;
-// #endif
-// }
+#define PRINT_WITH_FILE_LOCATION(x) std::cout << __FILE__  << ":" << __LINE__ << ": " << x << std::endl;
 
 #ifdef PREDICTION_HORIZON
 #else
+  // Provide a default value
   #define PREDICTION_HORIZON 5
 #endif
 #ifdef CONTROL_HORIZON
 #else 
+  // Provide a default value
   #define CONTROL_HORIZON 3
 #endif
 
@@ -41,7 +50,7 @@ using json = nlohmann::json;
  
 using namespace mpc;
 
-Eigen::IOFormat fmt(4, // precision
+Eigen::IOFormat fmt(3, // precision
                     0, // flags
                     ", ", // coefficient separator
                     "\n", // row prefix
@@ -54,11 +63,9 @@ Eigen::IOFormat fmt_high_precision(20, // precision
                     "[", // matrix prefix
                     "]"); // matrix suffix.
 
-inline void assert_file_exists(const std::string& name) {
+inline void assertFileExists(const std::string& name) {
   // Check that a file exists.
-  std::cout << "Checking if \"" + name + "\" exists." << std::endl;
-  // std::ifstream f(name.c_str());
-  // if (f.good()) {
+  // std::cout << "Checking if \"" + name + "\" exists." << std::endl;
   if (std::filesystem::exists(name)){
     return;
   } else {
@@ -132,7 +139,7 @@ void sendCVec(std::string label, int i_loop, mpc::cvec<rows> x, std::ofstream& o
   auto out_str = x.transpose().format(fmt_high_precision);
   if (debug_interfile_communication_level >= 1) 
   {
-    PRINT(label << " (send to Python): " << out_str);
+    PRINT_WITH_FILE_LOCATION(label << " (send to Python): " << out_str);
   } 
   outfile << "Loop " << i_loop << ": " << out_str << std::endl;
 }
@@ -141,50 +148,85 @@ void sendDouble(std::string label, int i_loop, double x, std::ofstream& outfile)
 {
   if (debug_interfile_communication_level >= 1) 
   {
-    PRINT(label << " (send to Python): " << x);
+    PRINT_WITH_FILE_LOCATION(label << " (send to Python): " << x);
   } 
   outfile << "Loop " << i_loop << ": " << x << std::endl;
 }
 
 int main()
+// int main(int argc, char *argv[])
 {
+  PRINT("==== Start of acc_controller.main() ====")
   // /* We also test -rstats_to_stderr */
   // if (!my_setenv("DYNAMORIO_OPTIONS",
   //             "-stderr_mask 0xc -rstats_to_stderr "
   //             "-client_lib ';;-offline'")){
   //   std::cerr << "failed to set env var!\n";
   // }
-  // PRINT("PREDICTION_HORIZON" << PREDICTION_HORIZON)
-  // PRINT("CONTROL_HORIZON" << CONTROL_HORIZON)
+  #ifdef USE_DYNAMORIO
+    PRINT("Using DynamoRio.")
+
+    /* We also test -rstats_to_stderr */
+    if (!my_setenv("DYNAMORIO_OPTIONS",
+                   "-stderr_mask 0xc -rstats_to_stderr "
+                   "-client_lib ';;-offline'"))
+        std::cerr << "failed to set env var!\n";
+  #else 
+    PRINT("Not using DynamoRio")
+  #endif
+  PRINT("PREDICTION_HORIZON: " << PREDICTION_HORIZON)
+  PRINT("CONTROL_HORIZON: " << CONTROL_HORIZON)
   // return 0;
-  auto cwd = std::filesystem::current_path();
-  if ( boost::algorithm::ends_with(cwd.string(), "sim_dir") )
-  {
-      example_path = cwd.parent_path().string() + "/";
-  } else
-  {
-    example_path = cwd.string() + "/";
-  }
-  PRINT("Example path: " << example_path)
+
+  // if (argc == 1){
+  //     PRINT_WITH_FILE_LOCATION("Adaptive Cruise Control (ACC) controller. Example usage:")
+  //     PRINT_WITH_FILE_LOCATION("\tacc_controller <simulation_directory>")
+  //     PRINT_WITH_FILE_LOCATION("Typically, you wouldn't call this directly. Instead, call")
+  //     PRINT_WITH_FILE_LOCATION("\t run_scarabintheloop <example_directory>.")
+  //     return 0;
+  // }
+
+  // std::string sim_dir(argv[1]);
+  std::string cwd = std::filesystem::current_path().string();
+  std::string sim_dir = cwd + "/";
+  PRINT_WITH_FILE_LOCATION("Simulation directory: " << sim_dir)
+
+  // auto cwd = std::filesystem::current_path();
+  // if ( boost::algorithm::ends_with(cwd.string(), "sim_dir") )
+  // {
+  //     example_path = cwd.parent_path().string() + "/";
+  // } else
+  // {
+  //   example_path = cwd.string() + "/";
+  // }
+  // PRINT_WITH_FILE_LOCATION("Example path: " << example_path)
 
   // File names for the pipes we use for communicating with Python.
   // std::string data_out_file_path = "data_out.json";
 
-  std::string sim_dir_path = "./"; // example_path + "sim_dir/";
-  std::string config_file_path = sim_dir_path + "config.json";
-  std::string x_out_filename = sim_dir_path + "x_c++_to_py";
-  std::string x_predict_out_filename = sim_dir_path + "x_predict_c++_to_py";
-  std::string t_predict_out_filename = sim_dir_path + "t_predict_c++_to_py";
-  std::string iterations_out_filename = sim_dir_path + "iterations_c++_to_py";
-  std::string u_out_filename = sim_dir_path + "u_c++_to_py";
-  std::string x_in_filename = sim_dir_path + "x_py_to_c++";
-  std::string t_delays_in_filename = sim_dir_path + "t_delay_py_to_c++";
-  std::string optimizer_info_out_filename = sim_dir_path + "optimizer_info.csv";
+  std::string config_file_path            = sim_dir + "config.json";
+  std::string x_out_filename              = sim_dir + "x_c++_to_py";
+  std::string x_predict_out_filename      = sim_dir + "x_predict_c++_to_py";
+  std::string t_predict_out_filename      = sim_dir + "t_predict_c++_to_py";
+  std::string iterations_out_filename     = sim_dir + "iterations_c++_to_py";
+  std::string u_out_filename              = sim_dir + "u_c++_to_py";
+  std::string x_in_filename               = sim_dir + "x_py_to_c++";
+  std::string t_delays_in_filename        = sim_dir + "t_delay_py_to_c++";
+  std::string optimizer_info_out_filename = sim_dir + "optimizer_info.csv";
 
-  std::string system_dynamics_filename = sim_dir_path + "system_dynamics.json";
-  PRINT("system_dynamics_filename: " << system_dynamics_filename)
+  assertFileExists(config_file_path);
+  assertFileExists(x_out_filename);
+  assertFileExists(x_predict_out_filename);
+  assertFileExists(t_predict_out_filename);
+  assertFileExists(iterations_out_filename);
+  assertFileExists(u_out_filename);
+  assertFileExists(x_in_filename);
+  assertFileExists(t_delays_in_filename);
+  
+  // std::string system_dynamics_filename = sim_dir + "system_dynamics.json";
+  // std::string system_dyanmics_lock_filename = system_dynamics_filename + ".lock";
+  // PRINT_WITH_FILE_LOCATION("system_dynamics_filename: " << system_dynamics_filename)
 
-  assert_file_exists(config_file_path);
   std::ifstream config_json_file(config_file_path);
   json json_data = json::parse(config_json_file);
   config_json_file.close();
@@ -204,21 +246,38 @@ int main()
   const int Tndu = 1; // Exogenous control (disturbance) dimension
   const int Tny = 2;  // Output dimension
 
+  // Check values.
+  if (Tnx != json_data["system_parameters"]["state_dimension"]) {
+    throw  std::runtime_error("state_dimension (compiled) does not match the value in the JSON.");
+  }
+  if (Tnu != json_data["system_parameters"]["input_dimension"]) {
+    throw  std::runtime_error("input_dimension (compiled) does not match the value in the JSON.");
+  }
+  if (Tny != json_data["system_parameters"]["output_dimension"]) {
+    throw  std::runtime_error("output_dimension (compiled) does not match the value in the JSON.");
+  }
+
   // MPC options.
   const int prediction_horizon = PREDICTION_HORIZON;
   const int control_horizon = CONTROL_HORIZON;
-  
+  if (prediction_horizon != json_data["prediction_horizon"]) {
+    throw  std::runtime_error("prediction_horizon (compiled) does not match the value in the JSON.");
+  }
+  if (control_horizon != json_data["control_horizon"]) {
+    throw  std::runtime_error("control_horizon (compiled) does not match the value in the JSON.");
+  }
+
   // Convergence termination tolerance: How close to the reference do we need to be stop?
-  double convergence_termination_tol = json_data["convergence_termination_tol"];
+  double convergence_termination_tol = json_data["system_parameters"]["convergence_termination_tol"];
 
   // Discretization Options.
-  double sample_time = json_data["sample_time"];
+  double sample_time = json_data["system_parameters"]["sample_time"];
 
   // Set whether the evolution of the dyanmics are computed extenally 
   // (with Python) or are done within this process, using libmpc.
   bool use_external_dynamics_computation = json_data["use_external_dynamics_computation"];
 
-  PRINT("Creating Matrices");
+  PRINT_WITH_FILE_LOCATION("Creating Matrices");
   // Continuous-time Matrices for \dot{x} = Ax + bu. 
   // Model is the HCW equations for relative satellite motion.
   mat<Tnx, Tnx> Ac;
@@ -226,8 +285,10 @@ int main()
   mat<Tny, Tnx> C;
   mat<Tnx, Tndu> Bc_disturbance;
   
-  double lead_car_input = json_data["lead_car_input"];
-  double tau = json_data["tau"];
+  double lead_car_input = json_data["system_parameters"]["lead_car_input"];
+  double tau = json_data["system_parameters"]["tau"];
+
+  // TODO: Read the matrix values from the JSON data.
   // Define continuous-time state matrix A_c
   Ac << 0,      1, 0,  0,      0, // v1
         0, -1/tau, 0,  0,      0, // a1
@@ -249,27 +310,31 @@ int main()
   // Set input disturbance matrix.
   Bc_disturbance << 0, 1/tau, 0, 0, 0;
 
-  json json_out_data;
-  json_out_data["state_dimension"] = Tnx;
-  json_out_data["input_dimension"] = Tnu;
-  std::vector<double> Ac_entries = matToStdVector(Ac);
-  std::vector<double> Bc_entries = matToStdVector(Bc);
-  std::vector<double> Bc_disturbances_entries = matToStdVector(Bc);
-  json_out_data["Ac_entries"] = Ac_entries;
-  json_out_data["Bc_entries"] = Bc_entries;
-  json_out_data["Bc_disturbances_entries"] = Bc_disturbances_entries;
-  json_out_data["prediction_horizon"] = prediction_horizon;
-  json_out_data["control_horizon"] = control_horizon;
+  // json system_dynamics_json_out_data;
+  // system_dynamics_json_out_data["state_dimension"] = Tnx;
+  // system_dynamics_json_out_data["input_dimension"] = Tnu;
+  // std::vector<double> Ac_entries = matToStdVector(Ac);
+  // std::vector<double> Bc_entries = matToStdVector(Bc);
+  // std::vector<double> Bc_disturbances_entries = matToStdVector(Bc);
+  // Insert computed values.
+  // system_dynamics_json_out_data["Ac_entries"] = Ac_entries;
+  // system_dynamics_json_out_data["Bc_entries"] = Bc_entries;
+  // system_dynamics_json_out_data["Bc_disturbances_entries"] = Bc_disturbances_entries;
+  // Insert values loaded from 
+  // system_dynamics_json_out_data["prediction_horizon"] = prediction_horizon;
+  // system_dynamics_json_out_data["control_horizon"] = control_horizon;
   
   std::ofstream optimizer_info_out_file(optimizer_info_out_filename);
   optimizer_info_out_file << "num_iterations,cost,primal_residual,dual_residual" << std::endl;
 
   // write prettified JSON to another file
-  std::ofstream json_outfile(system_dynamics_filename);
-  json_outfile 
-    << std::setw(4) // Makes the JSON file better formatted.
-    << json_out_data 
-    << std::endl;
+  // std::ofstream { system_dyanmics_lock_filename };
+  // std::ofstream system_dynamics_json_outfile(system_dynamics_filename);
+  // system_dynamics_json_outfile 
+  //   << std::setw(4) // Makes the JSON file better formatted.
+  //   << system_dynamics_json_out_data 
+  //   << std::endl;
+  // std::remove(system_dyanmics_lock_filename.c_str());
 
   mat<Tnx, Tnx> Ad;
   mat<Tnx, Tnu> Bd;
@@ -279,24 +344,24 @@ int main()
 
   if (debug_dynamics_level >= 1)
   {
-    PRINT("=== Discretization Output ===")
-    PRINT("Ad:")
-    PRINT(Ad)
-    PRINT("Bd:")
-    PRINT(Bd)
-    PRINT("Bd_disturbance:")
-    PRINT(Bd_disturbance)
+    PRINT_WITH_FILE_LOCATION("=== Discretization Output ===")
+    PRINT_WITH_FILE_LOCATION("Ad:")
+    PRINT_WITH_FILE_LOCATION(Ad)
+    PRINT_WITH_FILE_LOCATION("Bd:")
+    PRINT_WITH_FILE_LOCATION(Bd)
+    PRINT_WITH_FILE_LOCATION("Bd_disturbance:")
+    PRINT_WITH_FILE_LOCATION(Bd_disturbance)
   }
 
   mat<Tnx, Tnx> Ad_predictive;
   mat<Tnx, Tnu> Bd_predictive;
   mat<Tnx, Tndu> Bd_disturbance_predictive;
 
-  PRINT("Finished creating Matrices");
+  PRINT_WITH_FILE_LOCATION("Finished creating Matrices");
 
-  PRINT("Creating LMPC object...");
+  PRINT_WITH_FILE_LOCATION("Creating LMPC object...");
   LMPC<Tnx, Tnu, Tndu, Tny, prediction_horizon, control_horizon> lmpc;
-  PRINT("Finished creating LMPC object.");
+  PRINT_WITH_FILE_LOCATION("Finished creating LMPC object.");
 
   LParameters params;
   // ADMM relaxation parameter (see https://osqp.org/docs/solver/index.html#algorithm)
@@ -319,9 +384,9 @@ int main()
   params.verbose = json_data["osqp_verbose"];
   params.polish = true;
 
-  PRINT("Set parameters...");
+  PRINT_WITH_FILE_LOCATION("Set parameters...");
   lmpc.setOptimizerParameters(params);
-  PRINT("Finished setting optimizer parameters");
+  PRINT_WITH_FILE_LOCATION("Finished setting optimizer parameters");
 
   lmpc.setStateSpaceModel(Ad, Bd, C);
   lmpc.setDisturbances(Bd_disturbance, mat<Tny, Tndu>::Zero());
@@ -352,7 +417,7 @@ int main()
 
   lmpc.setObjectiveWeights(OutputW, InputW, DeltaInputW, {0, prediction_horizon});
 
-  PRINT("Finished setting weights.");
+  PRINT_WITH_FILE_LOCATION("Finished setting weights.");
 
   // Set disturbances
   mat<Tndu, prediction_horizon> disturbance_input;
@@ -365,7 +430,7 @@ int main()
   disturbance_vec *= disturbance_input(0);
   // printMat("Disturbance vector", disturbance_vec);
 
-  PRINT("Finished setting disturbances.");
+  PRINT_WITH_FILE_LOCATION("Finished setting disturbances.");
 
   // ======== Constraints ========== //
 
@@ -386,7 +451,7 @@ int main()
 
   lmpc.setConstraints(xmin, umin, ymin, xmax, umax, ymax, {0, prediction_horizon});
 
-  PRINT("Finished setting constraints.");
+  PRINT_WITH_FILE_LOCATION("Finished setting constraints.");
 
   // Output reference point
   cvec<Tny> yRef;
@@ -394,7 +459,7 @@ int main()
 
   lmpc.setReferences(yRef, cvec<Tnu>::Zero(), cvec<Tnu>::Zero(), {0, prediction_horizon});
 
-  PRINT("Finished setting references.");
+  PRINT_WITH_FILE_LOCATION("Finished setting references.");
 
   // I/O Setup
   std::ofstream x_outfile;
@@ -406,41 +471,40 @@ int main()
   std::ifstream t_delays_infile;
   if (use_external_dynamics_computation) {
     // Open the pipes to Python. Each time we open one of these streams, 
-    // this process pauses until 
-    // it is connected to the Python process (or another process). 
+    // this process pauses until it is connected to the Python process (or another process). 
     // The order needs to match the order in the reader process.
     
-    PRINT("Starting IO setup.");
+    PRINT_WITH_FILE_LOCATION("Starting IO setup.");
 
-    assert_file_exists(x_out_filename);
-    PRINT("About to open x_outfile output stream. Waiting for reader.");
+    assertFileExists(x_out_filename);
+    PRINT_WITH_FILE_LOCATION("Opening x_outfile. Waiting for reader.");
     x_outfile.open(x_out_filename, std::ofstream::out);
 
-    assert_file_exists(u_out_filename);
-    PRINT("About to open u_outfile output stream. Waiting for reader.");
+    assertFileExists(u_out_filename);
+    PRINT_WITH_FILE_LOCATION("Opening u_outfile. Waiting for reader.");
     u_outfile.open(u_out_filename, std::ofstream::out);
 
-    assert_file_exists(x_predict_out_filename);
-    PRINT("About to open x_predict_outfile output stream. Waiting for reader.");
+    assertFileExists(x_predict_out_filename);
+    PRINT_WITH_FILE_LOCATION("Opening x_predict_outfile. Waiting for reader.");
     x_predict_outfile.open(x_predict_out_filename, std::ofstream::out);
 
-    assert_file_exists(t_predict_out_filename);
-    PRINT("About to open t_predict_outfile output stream. Waiting for reader.");
+    assertFileExists(t_predict_out_filename);
+    PRINT_WITH_FILE_LOCATION("Opening t_predict_outfile. Waiting for reader.");
     t_predict_outfile.open(t_predict_out_filename, std::ofstream::out);
 
-    assert_file_exists(iterations_out_filename);
-    PRINT("About to open iterations_outfile output stream. Waiting for reader.");
+    assertFileExists(iterations_out_filename);
+    PRINT_WITH_FILE_LOCATION("Opening iterations_outfile. Waiting for reader.");
     iterations_outfile.open(iterations_out_filename, std::ofstream::out);
 
     // In files.
-    assert_file_exists(x_in_filename);
-    PRINT("About to open x_infile input stream. Waiting for reader.");
+    assertFileExists(x_in_filename);
+    PRINT_WITH_FILE_LOCATION("Opening x_infile. Waiting for reader.");
     x_infile.open(x_in_filename, std::ofstream::in);
 
-    assert_file_exists(t_delays_in_filename);
-    PRINT("About to open t_delays_infile input stream. Waiting for reader.");
+    assertFileExists(t_delays_in_filename);
+    PRINT_WITH_FILE_LOCATION("Opening t_delays_infile. Waiting for reader.");
     t_delays_infile.open(t_delays_in_filename, std::ofstream::in);
-    PRINT("All files open.");
+    PRINT_WITH_FILE_LOCATION("All files open.");
   }
 
   // State vector state.
@@ -462,74 +526,134 @@ int main()
   // Store the delay time required to compute the previous controller value.
   double t_delay_prev = 0;
 
-  scarab_begin(); // Tell Scarab to stop "fast forwarding". This is needed for '--pintool_args -fast_forward_to_start_inst 1'
+  if (!json_data["use_fake_scarab_computation_times"] && !json_data["parallel_scarab_simulation"]) {
+    scarab_begin(); // Tell Scarab to stop "fast forwarding". This is needed for '--pintool_args -fast_forward_to_start_inst 1'
+  }
 
   for (int i = 0; i < n_time_steps; i++)
   {
     PRINT(std::endl << "====== Starting loop #" << i << " ======");
     PRINT("At x=" << modelX.transpose().format(fmt));
 
-
     // Begin a batch of Scarab statistics
-    scarab_roi_dump_begin(); 
-    // dr_app_setup_and_start();
-
-      if (use_state_after_delay_prediction)
-      {
-        t_predict = t_delay_prev;
-        discretization<Tnx, Tnu, Tndu>(Ac, Bc, Bc_disturbance, t_predict, Ad_predictive, Bd_predictive, Bd_disturbance_predictive);
-        
-        x_predict = Ad_predictive * modelX + Bd_predictive * u + Bd_disturbance_predictive*lead_car_input;
-        
-        if (debug_dynamics_level >= 1)
-        {
-          PRINT("====== Ad_predictive: ")
-          PRINT(Ad_predictive)
-          PRINT("====== Bd_predictive: ")
-          PRINT(Bd_predictive)
-          PRINT("====== Bd_disturbance_predictive: ")
-          PRINT(Bd_disturbance_predictive)
-        }
-        // int n_time_step_division = 1000;
-        // double delta_t = t_delay_prev / double(n_time_step_division);
-        // x_predict = modelX;
-        // for (int i = 0; i < n_time_step_division; i++)
-        // {
-        //   // Do Euler's forward method for computing predicted state.
-        //   x_predict += delta_t * (Ac * modelX + Bc * u + Bc_disturbance*lead_car_input);
-        //   t_predict += delta_t;
-        //   PRINT("t_predict: " << t_predict << ", after i=" << i << " Euler Forward steps. (delta_t=" << delta_t <<")")
-        // }
-        // x_predict = modelX + t_predict * (Ac * modelX + Bc * u);
-      } else {
-        x_predict = modelX;
-        t_predict = 0;
+    #ifdef USE_DYNAMORIO
+        PRINT_WITH_FILE_LOCATION("Starting DynamoRIO region of interest.")
+        dr_app_setup_and_start();
+    #else
+      if (!json_data["use_fake_scarab_computation_times"]) {
+        PRINT_WITH_FILE_LOCATION("Starting Scarab region of interest.")
+        scarab_roi_dump_begin(); 
       }
-      if (debug_dynamics_level >= 1) 
+    #endif
+    if (use_state_after_delay_prediction)
+    {
+      t_predict = t_delay_prev;
+      discretization<Tnx, Tnu, Tndu>(Ac, Bc, Bc_disturbance, t_predict, Ad_predictive, Bd_predictive, Bd_disturbance_predictive);
+      
+      x_predict = Ad_predictive * modelX + Bd_predictive * u + Bd_disturbance_predictive*lead_car_input;
+      
+      if (debug_dynamics_level >= 1)
       {
-        PRINT("====== t_delay_prev: " << t_delay_prev);
-        PRINT("====== t_predict: " << t_predict);
-        PRINT("====== x_predict: " << x_predict.transpose());
+        PRINT("====== Ad_predictive: ")
+        PRINT(Ad_predictive)
+        PRINT("====== Bd_predictive: ")
+        PRINT(Bd_predictive)
+        PRINT("====== Bd_disturbance_predictive: ")
+        PRINT(Bd_disturbance_predictive)
+      }
+      // int n_time_step_division = 1000;
+      // double delta_t = t_delay_prev / double(n_time_step_division);
+      // x_predict = modelX;
+      // for (int i = 0; i < n_time_step_division; i++)
+      // {
+      //   // Do Euler's forward method for computing predicted state.
+      //   x_predict += delta_t * (Ac * modelX + Bc * u + Bc_disturbance*lead_car_input);
+      //   t_predict += delta_t;
+      //   PRINT_WITH_FILE_LOCATION("t_predict: " << t_predict << ", after i=" << i << " Euler Forward steps. (delta_t=" << delta_t <<")")
+      // }
+      // x_predict = modelX + t_predict * (Ac * modelX + Bc * u);
+    } else {
+      x_predict = modelX;
+      t_predict = 0;
+    }
+    if (debug_dynamics_level >= 1) 
+    {
+      PRINT("====== t_delay_prev: " << t_delay_prev);
+      PRINT("====== t_predict: " << t_predict);
+      PRINT("====== x_predict: " << x_predict.transpose());
+    }
+
+    // Compute a step of the MPC controller. This does NOT change the value of modelX.
+    Result res = lmpc.step(x_predict, u);
+
+    #ifdef USE_DYNAMORIO
+      PRINT_WITH_FILE_LOCATION("End of DynamoRIO region of interest.")
+      dr_app_stop_and_cleanup();
+
+      std::filesystem::path folder(sim_dir);
+      if(!std::filesystem::is_directory(folder))
+      {
+          throw std::runtime_error(folder.string() + " is not a folder");
+      }
+      std::vector<std::string> file_list;
+      PRINT("DynamoRIO Trace Files in " << folder.string())
+
+      // Regex to match stings like "<path to sim dir>/drmemtrace.acc_controller_5_2_dynamorio.268046.6519.dir"
+      std::regex dynamorio_trace_filename_regex("(.*)drmemtrace\\.acc_controller_\\d_\\d_dynamorio\\.\\d{6}\\.\\d{4}\\.dir");
+      
+      bool is_first_dir_found = true;
+      for (const auto& folder_entry : std::filesystem::directory_iterator(folder)) {
+          const auto full_path = folder_entry.path().string();
+          bool is_dynamorio_trace = std::regex_match(full_path, dynamorio_trace_filename_regex);
+          if (is_dynamorio_trace) {
+            PRINT("- " << folder_entry.path().string())
+            std::string new_dir_name("dynamorio_trace_" +  std::to_string(i));
+            std::string new_path = std::regex_replace(full_path, dynamorio_trace_filename_regex, new_dir_name);
+            PRINT("Renaming")
+            PRINT("\t     " << folder_entry.path().string())
+            PRINT("\t to: " << new_path)
+            std::filesystem::rename(folder_entry.path().string(), new_dir_name);
+            // Check that we don't have multiple DynamoRIO trace files, which would indicate that we failed to rename them incrementally. 
+            if (!is_first_dir_found) {
+              throw std::runtime_error("Multiple DynamoRIO trace files found in " + folder.string());
+            }
+            is_first_dir_found = false;
+
+
+          } else {
+            // PRINT("- Not a DyanmoRIO trace directory.")
+          }
+
+          // if (folder_entry.is_regular_file())
+          // {
+          //   const auto base_name = folder_entry.path().filename().string();
+          //   /* Match the file, probably std::regex_match.. */
+          //   if(match)
+          //         file_list.push_back(full_path);
+          // }
       }
 
-      // Compute a step of the MPC controller. This does NOT change the value of modelX.
-      Result res = lmpc.step(x_predict, u);
 
-    // Save a batch of Scarab statistics
-    scarab_roi_dump_end();  
-    // dr_app_stop_and_cleanup();
+      PRINT_WITH_FILE_LOCATION("Finished saving trace with DyanmoRIO")
+    #else
+      if (!json_data["use_fake_scarab_computation_times"]) {
+        // Save a batch of Scarab statistics
+        PRINT_WITH_FILE_LOCATION("End of Scarab region of interest.")
+        scarab_roi_dump_end();  
+      }
+    #endif
 
     u = res.cmd;
     
     if (debug_optimizer_stats_level >= 1) 
     {
-      PRINT("Optimizer Info")
-      PRINT("         Return code: " << res.retcode)
-      PRINT("       Result status: " << res.status)
-      PRINT("Number of iterations: " << res.num_iterations)
-      PRINT("                Cost: " << res.cost)
-      PRINT("    Constraint error: " << res.primal_residual)
-      PRINT("          Dual error: " << res.dual_residual)
+      PRINT_WITH_FILE_LOCATION("Optimizer Info")
+      PRINT_WITH_FILE_LOCATION("         Return code: " << res.retcode)
+      PRINT_WITH_FILE_LOCATION("       Result status: " << res.status)
+      PRINT_WITH_FILE_LOCATION("Number of iterations: " << res.num_iterations)
+      PRINT_WITH_FILE_LOCATION("                Cost: " << res.cost)
+      PRINT_WITH_FILE_LOCATION("    Constraint error: " << res.primal_residual)
+      PRINT_WITH_FILE_LOCATION("          Dual error: " << res.dual_residual)
     }
 
     optimizer_info_out_file << res.num_iterations << "," << res.cost << "," << res.primal_residual << "," << res.dual_residual << std::endl;  
@@ -563,19 +687,19 @@ int main()
       
       if (debug_interfile_communication_level >= 2)
       {
-        PRINT("Getting 'x' line from Python: ");
+        PRINT_WITH_FILE_LOCATION("Getting 'x' line from Python: ");
       }
       std::getline(x_infile, x_in_line_from_py);
       if (debug_interfile_communication_level >= 2)
       {
-        PRINT("Getting 't_delays' line from Python: ");
+        PRINT_WITH_FILE_LOCATION("Getting 't_delays' line from Python: ");
       }
       std::getline(t_delays_infile, t_delay_in_line_from_py);
       if (debug_interfile_communication_level >= 2)
       {
-        PRINT("Lines received from Python:")
-        PRINT("\t      x: " << x_in_line_from_py);
-        PRINT("\tt_delay: " << t_delay_in_line_from_py);
+        PRINT_WITH_FILE_LOCATION("Lines received from Python:")
+        PRINT_WITH_FILE_LOCATION("\t      x: " << x_in_line_from_py);
+        PRINT_WITH_FILE_LOCATION("\tt_delay: " << t_delay_in_line_from_py);
       }
 
       // Create a stringstream to parse the string
@@ -589,8 +713,8 @@ int main()
       t_delay_ss >> t_delay_prev;
       if (debug_interfile_communication_level >= 1) 
       {
-        PRINT("x (from Python): " << modelX.transpose().format(fmt_high_precision));
-        PRINT("t_delay_prev (from Python): " << t_delay_prev);
+        PRINT_WITH_FILE_LOCATION("x (from Python): " << modelX.transpose().format(fmt));
+        PRINT_WITH_FILE_LOCATION("t_delay_prev (from Python): " << t_delay_prev);
       }
     } else {
       printVector("modelX", modelX);
@@ -603,11 +727,12 @@ int main()
     y = C * modelX;
     if ((y-yRef).norm() < convergence_termination_tol)
     {
-      PRINT("Converged to the origin after " << i << " steps.");
+      PRINT_WITH_FILE_LOCATION("Converged to the origin after " << i << " steps.");
       break;
     }
     
   } 
+  PRINT_WITH_FILE_LOCATION("Finshed looping through " << n_time_steps << " time steps.")
   // printVector("y", y);
 
   if (use_external_dynamics_computation)

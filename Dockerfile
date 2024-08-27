@@ -169,7 +169,6 @@ RUN test -e $SCARAB_ROOT/src/deps/mbuild && \
 # # Copy PIN file from previous stage.
 # COPY --from=PIN $PIN_ROOT $PIN_ROOT
 
-RUN ls $PIN_ROOT
 # Check that the $PIN_ROOT directory has the contents we expect.
 RUN test -e $PIN_ROOT/source
 
@@ -260,10 +259,11 @@ ENV RESOURCES_DIR=/home/$USERNAME/resources
 RUN mkdir -p $RESOURCES_DIR
 ARG DYNAMORIO_VERSION=DynamoRIO-Linux-9.0.19314
 ENV DYNAMORIO_HOME=$RESOURCES_DIR/$DYNAMORIO_VERSION
-ENV PIN_ROOT=$RESOURCES_DIR/pin-3.15-98253-gb56e429b1-gcc-linux
+# ARG PIN_NAME=pin-3.15-98253-gb56e429b1-gcc-linux
+# ARG PIN_ROOT=$RESOURCES_DIR/pin-3.15-98253-gb56e429b1-gcc-linux
 ENV SCARAB_ENABLE_PT_MEMTRACE=1
-ENV SCARAB_ENABLE_MEMTRACE=1
-ENV LD_LIBRARY_PATH=$RESOURCES_DIR/pin-3.15-98253-gb56e429b1-gcc-linux/extras/xed-intel64/lib:$RESOURCES_DIR/pin-3.15-98253-gb56e429b1-gcc-linux/intel64/runtime/pincrt:$LD_LIBRARY_PATH
+ENV SCARAB_ENABLE_MEMTRACE=1 
+ENV LD_LIBRARY_PATH=$PIN_ROOT/extras/xed-intel64/lib:$PIN_ROOT/intel64/runtime/pincrt:$LD_LIBRARY_PATH
 
 # Download and extract DynamoRIO
 ADD https://github.com/DynamoRIO/dynamorio/releases/download/cronbuild-9.0.19314/$DYNAMORIO_VERSION.tar.gz $RESOURCES_DIR

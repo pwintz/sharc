@@ -1,5 +1,7 @@
 {
   "files.associations": {
+    "*.sty": "latex",
+    "*.cls": "latex",
     "array": "cpp",
     "atomic": "cpp",
     "bit": "cpp",

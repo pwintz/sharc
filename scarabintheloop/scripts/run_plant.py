@@ -27,6 +27,7 @@ class DataNotRecievedViaFileError(IOError):
   pass
 
 def main():
+  print("Start of run_plant.py")
   parser = argparse.ArgumentParser(description=f'Run the plant dynamics, which communicates with the controller via pipe files.')
   args = parser.parse_args()
 
@@ -34,23 +35,29 @@ def main():
   if not sim_dir.endswith('/'):
     sim_dir += "/"
   
+  print(f"Runnning run_plant.py in {sim_dir}")
+  
   # Read config.json.
   with open(sim_dir + 'config.json') as json_data_file:
-      config_data = json.load(json_data_file)
-      print("Read JSON data from 'config.json'")
+    config_data = json.load(json_data_file)
+    print("Read JSON data from 'config.json'.")
 
-  # Read system_dynamics.json.
-  remaining_timeout = 60 # seconds
-  while not os.path.exists(sim_dir + 'system_dynamics.json'):
-    print(f'Waiting for system_dynamics.json to be created ({remaining_timeout:0.1f} sec until timeout).')
-    time.sleep(0.1)
-    remaining_timeout -= 0.1
-    if remaining_timeout <= 0:
-      raise IOError(f'system_dynamics.json was not created within the time limit.')
-  
-  with open(sim_dir + 'system_dynamics.json') as json_data_file:
-    system_dynamics_data = json.load(json_data_file)
-    print("Read JSON data from 'system_dynamics.json'")
+#   # Read system_dynamics.json.
+#   remaining_timeout = 60 # seconds
+#   if not os.path.exists(sim_dir + 'system_dynamics.json.lock'):
+#     raise IOError(f"The file {sim_dir + 'system_dynamics.json.lock'} does not exist.")
+#   while not os.path.exists(sim_dir + 'system_dynamics.json') or os.path.exists(sim_dir + 'system_dynamics.json.lock'):
+#     print(f'Waiting for system_dynamics.json to be created ({remaining_timeout:0.1f} sec until timeout).')
+#     time.sleep(0.1)
+#     remaining_timeout -= 0.1
+#     if remaining_timeout <= 0:
+#       raise IOError(f'system_dynamics.json was not created within the time limit.')
+#   # Sleep a moment to make sure system_dynamics.json is done being written.
+#   time.sleep(1)
+# 
+#   with open(sim_dir + 'system_dynamics.json') as json_data_file:
+#     system_dynamics_data = json.load(json_data_file)
+#     print("Read JSON data from 'system_dynamics.json'")
 
   stats_reader = scarabizor.ScarabStatsReader(sim_dir)
 
@@ -62,6 +69,15 @@ def main():
   # Settings
   use_scarab_delays = not config_data["use_fake_scarab_computation_times"]
   only_update_control_at_sample_times = config_data["only_update_control_at_sample_times"]
+  is_parallelized = config_data["parallel_scarab_simulation"]
+  if is_parallelized:
+    if use_scarab_delays:
+      print(f"Changing use_scarab_delays={use_scarab_delays} to False because parallel_scarab_simulation=True.")
+      use_scarab_delays = False
+    if not only_update_control_at_sample_times:
+      print(f"Changing only_update_control_at_sample_times={only_update_control_at_sample_times} to True because parallel_scarab_simulation=True.")
+      only_update_control_at_sample_times = True
+
 
   #  File names for the pipes we use for communicating with C++.
   x_in_filename = sim_dir + 'x_c++_to_py'
@@ -78,13 +94,13 @@ def main():
   t_data_filename = sim_dir + 't_data.csv'
 
   n_time_steps = config_data["n_time_steps"]
-  sample_time = config_data["sample_time"] # Discrete sample period.
+  sample_time = config_data["system_parameters"]["sample_time"] # Discrete sample period.
   fake_computation_delay_times = config_data["fake_computation_delay_times"]
 
   # Get the dynamics definition.
-  n = system_dynamics_data["state_dimension"]
-  m = system_dynamics_data["input_dimension"]
-  evolveState = plant_dynamics.getDynamicsFunction(config_data, system_dynamics_data)
+  n = config_data["system_parameters"]["state_dimension"]
+  m = config_data["system_parameters"]["input_dimension"]
+  evolveState = plant_dynamics.getDynamicsFunction(config_data)
 
   xs_list = []
   us_list = []
@@ -191,14 +207,10 @@ def main():
     data_out_json["cycles_counts"] = cycles_counts_list
     data_out_json["execution_walltime"] = walltimes_list
     
-    # Info specific to MPC:
-    data_out_json["prediction_horizon"] = system_dynamics_data["prediction_horizon"]
-    data_out_json["control_horizon"] = system_dynamics_data["control_horizon"]
-
     # Remove all of the phony JSON "header" entries, such as "==== Settings ====".
-    for key in  list(data_out_json.keys()):
-      if key.startswith("="):
-        del data_out_json[key]
+    # for key in  list(data_out_json.keys()):
+    #   if key.startswith("="):
+    #     del data_out_json[key]
 
     if use_scarab_delays:
       # Save Scarab parameters from PARAMS.out into the data_out JSON object. 
@@ -436,9 +448,9 @@ def main():
         walltimes_list.append(time.time() - walltime_start_of_loop)
         t_delays_list.append(simulated_computation_time)
         
-        data_out_list = generateDataOut()
+        data_out_intermediate_list = generateDataOut()
         with open(sim_dir + 'data_out_intermediate.json', 'w') as json_data_file:
-          json_data_file.write(json.dumps(data_out_list, allow_nan=False, indent=4))
+          json_data_file.write(json.dumps(data_out_intermediate_list, allow_nan=False, indent=4))
         print('\n=====\n')
     except NameError as err:
       raise err
@@ -451,13 +463,8 @@ def main():
 
   data_out_list = generateDataOut()
   # Save the data_out to file (if enabled)
-  if config_data["record_data_out"]:
-    with open(sim_dir + 'data_out.json', 'w') as json_data_file:
-      json_data_file.write(json.dumps(data_out_list, allow_nan=False, indent=4))
-  else:
-    # print(json.dumps(data_out_list))
-    print("JSON Data not recorded because config_data[\"record_data_out\"] is False.")
-
+  with open(sim_dir + 'data_out.json', 'w') as json_data_file:
+    json_data_file.write(json.dumps(data_out_list, allow_nan=False, indent=4))
 
   print(f"There are now {len(data_out_list)} entries in data_out.json")
 

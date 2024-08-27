@@ -59,10 +59,9 @@ class ScarabStatsReader:
 
   def waitForStatsFile(self,k):
     file_path = self.getStatsFilePath(k)
-    # if not file_path:
-    #    raise
     while not os.path.exists(file_path):
       time.sleep(0.01)
+    time.sleep(0.1)
 
   def readStatistic(self, k: int, stat_key: str): 
     with open(self.getStatsFilePath(k), 'r') as stats_file:

@@ -8,7 +8,19 @@ from scipy.integrate import ode
 import scipy.signal
 import numpy.linalg as linalg
 
-def getDynamicsFunction(config_data, system_dynamics_data):
+# TODO: Implement "appendComputedParameters" to generate computed parameters that need to be accessible from both the plant and controller. Currently, these values are hard coded in both the C++ controller and the Python plant.
+# def appendComputedParameters(config_data: dict):
+#   """
+#   For the given config_data, compute any additional system parameters that are dependent on the given data.
+#   """
+#   # config_data["system_dynamics"]["Ac_entriesa"] = 
+#   # system_dynamics_data["Ac_entries"]).reshape(n, n
+#   A 
+#   B = np.array(system_dynamics_data["Bc_entries"]).reshape(n, m)
+#   B_dist = np.array(system_dynamics_data["Bc_disturbances_entries"])
+
+
+def getDynamicsFunction(config_data: dict):
 
   # Debugging levels
   debug_config = config_data["==== Debgugging Levels ===="]
@@ -21,16 +33,45 @@ def getDynamicsFunction(config_data, system_dynamics_data):
 
   # Read the state and input matrices from the JSON files, reshaping them according to the given 
   # values of m and n (they are stored as 1D vectors).
-  n = system_dynamics_data["state_dimension"]
-  m = system_dynamics_data["input_dimension"]
-  A = np.array(system_dynamics_data["Ac_entries"]).reshape(n, n)
-  B = np.array(system_dynamics_data["Bc_entries"]).reshape(n, m)
-  B_dist = np.array(system_dynamics_data["Bc_disturbances_entries"]).reshape(n, m)
+  n = config_data["system_parameters"]["state_dimension"]
+  m = config_data["system_parameters"]["input_dimension"]
+  if not n == 5:
+      raise ValueError('Unsupported state dimension') 
+  if not m == 1:
+      raise ValueError('Unsupported input dimension') 
+  # A = np.array(config_data["system_parameters"]["Ac_entries"]).reshape(n, n)
+  # B = np.array(config_data["system_parameters"]["Bc_entries"]).reshape(n, m)
+  # B_dist = np.array(config_data["system_parameters"]["Bc_disturbances_entries"]).reshape(n, m)
 
-  C = np.identity(5, float)
+  tau = config_data["system_parameters"]["tau"]
+  A = np.array([[0,      1, 0,  0,      0],  # v1
+                [0, -1/tau, 0,  0,      0],  # a1
+                [1,      0, 0, -1,      0],  # d2
+                [0,      0, 0,  0,      1],  # v2
+                [0,      0, 0,  0, -1/tau]]) # a2
+
+  # Define continuous-time input matrix B_c
+  B = np.array([[0],
+                [0],
+                [0], 
+                [0], 
+                [-1/tau]]);
+  B_dist = np.array([[0],
+                     [1/tau],
+                     [0], 
+                     [0], 
+                     [0]]);
+  
+
+  # State to output matrix
+  C = np.array([[0, 0, 1, 0, 0], 
+                [1, 0, 0,-1, 0]]);
+
   D = np.zeros([5, 1], float)
 
   if debug_dynamics_level >= 1:
+    fake_computation_delay_times = config_data["use_fake_scarab_computation_times"]
+    sample_time = config_data["system_parameters"]["sample_time"]
     (A_to_delay, B_to_delay, C_to_delay, D_to_delay, dt) = scipy.signal.cont2discrete((A, B, C, D), fake_computation_delay_times)
     (A_delay_to_sample, B_delay_to_sample, C_delay_to_sample, D_delay_to_sample, dt) = scipy.signal.cont2discrete((A, B, C, D), sample_time - fake_computation_delay_times)
     print("A_to_delay")

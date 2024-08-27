@@ -15,7 +15,7 @@ main_path=$(pwd)
 echo "Current working directory: $main_path"
 
 # Define the script path
-script_path="${main_path}/../../.."
+# script_path="${main_path}/../../.."
 
 # Get the scarab path from the first argument. UNUSED
 # scarab_path=$1
@@ -55,19 +55,20 @@ else
     start_simulation_from="$start_from"
 fi
 
+### Create Timesteps Path
 # Define the timesteps path for file naming
 timesteps_path=$main_path"/Timesteps_${start_simulation_from}-${last_timestep}"
 
 # Add a timestamp to the folder name to create a unique path
 twist="_$(date +"%Y%m%d_%H%M%S")"
 timesteps_path="${timesteps_path}${twist}"
-
 # Check if the timesteps path already exists
 if [ -e "$timesteps_path" ]; then
     echo "Path already exists: $timesteps_path"
     echo "Aborting."
     return 1
 fi
+echo "timesteps_path: ${timesteps_path}"
 
 # Define the traces and simulation paths
 traces_path=$timesteps_path/traces
@@ -97,11 +98,13 @@ IS_NOT_RESTART=0
 # Run the dynamics simulation and record states
 # Run the simulation with or without the restart flag
 if [ "$restart_flag" = "true" ]; then
-    echo "Simulate: (IS_RESTART)"
+    echo "Simulate (is a restart):"
     $simulation_executable $start_simulation_from $num_timesteps 0 $IS_RESTART
 else
-    echo "Simulate: (IS_NOT_RESTART)"
+    echo "Simulate (not a restart):"
+    echo Executing $simulation_executable
     $simulation_executable $start_simulation_from $num_timesteps 0 $IS_NOT_RESTART
+    echo "Finished executing $simulation_executable"
 fi
 wait
 sleep 1
@@ -141,14 +144,14 @@ echo -e "4. Portabilizing the trace file started"
 echo ""
 
 # Define the portabilize script path
-PORTABILIZE_SCRIPT="${script_path}/run_portabilize_trace.sh"
+PORTABILIZE_SCRIPT="run_portabilize_trace.sh"
 cd "$traces_path"
 
 # Run the portabilize script in the background for each subfolder
 {
     for subfolder in */; do
         if [ -d "$subfolder" ]; then
-            (cd "$subfolder" && bash "${PORTABILIZE_SCRIPT}") & # <- run in separate script.
+            (cd "$subfolder" && bash "${PORTABILIZE_SCRIPT}") & # <- run in separate shell.
         fi
     done
     wait
@@ -204,6 +207,7 @@ while [ "$counter" -lt "$num_timesteps" ]; do
 done
 
 # Write plot commands to the plot_commands.txt file
-echo "cd $main_path" >> plot_commands.txt
-echo "python3 ${script_path}/../plot_cycles.py ${simulation_path} ${control_sampling_time}" >> plot_commands.txt
+# TODO: Do plotting after the fact.
+# echo "cd $main_path" >> plot_commands.txt
+# echo "python3 ${script_path}/../plot_cycles.py ${simulation_path} ${control_sampling_time}" >> plot_commands.txt
 echo -e "5. Simulation commands are written to simulation_commands.txt file "
