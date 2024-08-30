@@ -182,6 +182,13 @@ RUN pip3 install -r $SCARAB_ROOT/bin/requirements.txt
 
 # Build Scarab.
 RUN cd $SCARAB_ROOT/src && make
+# Add the Scarab "src" directory to path. 
+ENV PATH "${PATH}:$SCARAB_ROOT/src"
+
+# TODO: Try this, to make the built Scarab binaries not in the source directory. 
+# RUN mkdir build && cd build && make $SCARAB_ROOT/src
+# # Add the Scarab "src" directory to 
+# ENV PATH "${PATH}:$SCARAB_ROOT/src"
 
 FROM scarab	as base
 
@@ -240,7 +247,7 @@ COPY --chown=$USERNAME .profile /home/$USERNAME/.bashrc
 ### Setup scarabintheloop for development in a Dev Contiainer ###  
 ARG WORKSPACE_ROOT
 ENV PYTHONPATH "${PYTHONPATH}:${WORKSPACE_ROOT}:${SCARAB_ROOT}/bin"
-ENV PATH "${PATH}:${WORKSPACE_ROOT}/scarabintheloop/scripts:${SCARAB_ROOT}/bin"
+ENV PATH "${PATH}:${WORKSPACE_ROOT}/scarabintheloop:${WORKSPACE_ROOT}/scarabintheloop/scripts:${SCARAB_ROOT}/bin"
 COPY scarabintheloop/requirements.txt sitl-requirements.txt
 RUN pip3 install -r sitl-requirements.txt && rm sitl-requirements.txt
 
@@ -392,7 +399,7 @@ USER $USERNAME
 FROM mpc-examples-base as mpc-examples-dev
 ARG USERNAME
 
-CMD cd $WORKSPACE_ROOT/libmpc && mkdir build && cd build && cmake .. && sudo cmake --install 
+# RUN cd $WORKSPACE_ROOT/libmpc && mkdir build && cd build && cmake .. && sudo cmake --install 
 
 ###############################################
 # Stand-alone mpc-examples (no dev container) #
@@ -400,7 +407,7 @@ CMD cd $WORKSPACE_ROOT/libmpc && mkdir build && cd build && cmake .. && sudo cma
 FROM mpc-examples-base as mpc-examples
 
 COPY --chown=$USERNAME examples/acc_example /home/$USERNAME/examples/acc_example
-COPY --chown=$USERNAME libmpc /home/$USERNAME/libmpc
+# COPY --chown=$USERNAME libmpc /home/$USERNAME/libmpc
 
 ENV LIBMPC_INCLUDE /home/$USERNAME/libmpc/include/
 

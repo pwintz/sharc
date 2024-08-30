@@ -8,7 +8,8 @@ import numpy as np
 from scipy.integrate import ode
 import scipy.signal
 import numpy.linalg as linalg
-import argparse # Parsing of input args.
+import copy
+# import argparse # Parsing of input args.
 import plant_dynamics
 
 import math
@@ -17,67 +18,49 @@ import datetime
 import traceback # Provides pretty printing of exceptions (https://stackoverflow.com/a/1483494/6651650)
 
 import scarabintheloop.scarabizor as scarabizor
+from scarabintheloop.utils import assertFileExists, printIndented, writeJson, readJson
 
 import json
 import csv
 import re
 import os
 
+
 class DataNotRecievedViaFileError(IOError):
   pass
 
-def main():
-  print("Start of run_plant.py")
-  parser = argparse.ArgumentParser(description=f'Run the plant dynamics, which communicates with the controller via pipe files.')
-  args = parser.parse_args()
-
-  sim_dir:str = os.path.abspath('.')
-  if not sim_dir.endswith('/'):
+def run(sim_dir: str, config_data) -> dict:
+  if not sim_dir.endswith("/"):
     sim_dir += "/"
-  
-  print(f"Runnning run_plant.py in {sim_dir}")
-  
-  # Read config.json.
-  with open(sim_dir + 'config.json') as json_data_file:
-    config_data = json.load(json_data_file)
-    print("Read JSON data from 'config.json'.")
-
-#   # Read system_dynamics.json.
-#   remaining_timeout = 60 # seconds
-#   if not os.path.exists(sim_dir + 'system_dynamics.json.lock'):
-#     raise IOError(f"The file {sim_dir + 'system_dynamics.json.lock'} does not exist.")
-#   while not os.path.exists(sim_dir + 'system_dynamics.json') or os.path.exists(sim_dir + 'system_dynamics.json.lock'):
-#     print(f'Waiting for system_dynamics.json to be created ({remaining_timeout:0.1f} sec until timeout).')
-#     time.sleep(0.1)
-#     remaining_timeout -= 0.1
-#     if remaining_timeout <= 0:
-#       raise IOError(f'system_dynamics.json was not created within the time limit.')
-#   # Sleep a moment to make sure system_dynamics.json is done being written.
-#   time.sleep(1)
-# 
-#   with open(sim_dir + 'system_dynamics.json') as json_data_file:
-#     system_dynamics_data = json.load(json_data_file)
-#     print("Read JSON data from 'system_dynamics.json'")
+  print(f"Start of plant_runner.run()  in {sim_dir}")
 
   stats_reader = scarabizor.ScarabStatsReader(sim_dir)
 
+  # Load sub-level dictionaries from config_data
+  debug_config: dict = config_data["==== Debgugging Levels ===="]
+  simulation_options: dict = config_data["Simulation Options"]
+
   # Debugging levels
-  debug_config = config_data["==== Debgugging Levels ===="]
   debug_interfile_communication_level = debug_config["debug_interfile_communication_level"]
   debug_dynamics_level = debug_config["debug_dynamics_level"]
 
   # Settings
-  use_scarab_delays = not config_data["use_fake_scarab_computation_times"]
+  use_scarab_delays = not simulation_options["use_fake_scarab_computation_times"]
   only_update_control_at_sample_times = config_data["only_update_control_at_sample_times"]
-  is_parallelized = config_data["parallel_scarab_simulation"]
+  is_parallelized = simulation_options["parallel_scarab_simulation"]
+  
+  # Update some setting to make sure 
   if is_parallelized:
-    if use_scarab_delays:
-      print(f"Changing use_scarab_delays={use_scarab_delays} to False because parallel_scarab_simulation=True.")
-      use_scarab_delays = False
-    if not only_update_control_at_sample_times:
-      print(f"Changing only_update_control_at_sample_times={only_update_control_at_sample_times} to True because parallel_scarab_simulation=True.")
-      only_update_control_at_sample_times = True
+    use_scarab_delays = False
+    only_update_control_at_sample_times = True
+    # if simulation_options["use_fake_scarab_computation_times"]:
+      # raise ValueError("Incompatible options: parallel_scarab_simulation=True and use_fake_scarab_computation_times=True.")
 
+      # print(f"Changing use_scarab_delays={use_scarab_delays} to False because parallel_scarab_simulation=True.")
+    # if not only_update_control_at_sample_times:
+    #   raise ValueError("Incompatible options: parallel_scarab_simulation=True and only_update_control_at_sample_times=False.")
+#       print(f"Changing only_update_control_at_sample_times={only_update_control_at_sample_times} to True because parallel_scarab_simulation=True.")
+#       only_update_control_at_sample_times = True
 
   #  File names for the pipes we use for communicating with C++.
   x_in_filename = sim_dir + 'x_c++_to_py'
@@ -95,7 +78,6 @@ def main():
 
   n_time_steps = config_data["n_time_steps"]
   sample_time = config_data["system_parameters"]["sample_time"] # Discrete sample period.
-  fake_computation_delay_times = config_data["fake_computation_delay_times"]
 
   # Get the dynamics definition.
   n = config_data["system_parameters"]["state_dimension"]
@@ -114,12 +96,6 @@ def main():
   walltimes_list = []
 
   u_prev = np.zeros((m, 1)) 
-
-  def printIndented(string_to_print:str, indent: int=1):
-    indent_str = '\t' * indent
-    indented_line_break = "\n" + indent_str
-    string_to_print = string_to_print.replace('\n', indented_line_break)
-    print(indent_str + string_to_print)
 
 
   def convertStringToVector(vector_str: str):
@@ -145,10 +121,6 @@ def main():
 
   def numpyArrayToCsv(array: np.array) -> str:
     string = ', '.join(map(str, array.flatten()))
-    # print("In numpyArrayToCsv")
-    # printIndented("array", 1)
-    # printIndented(repr(array), 2)
-    # printIndented('String: ' + string, 1)
     return string
 
 
@@ -187,31 +159,24 @@ def main():
           print(input_line)
         return input_line
 
-      # time.sleep(0.1) # Sleep for X seconds
-
     raise DataNotRecievedViaFileError(f"No input recieved from {file.name}.")
 
-  def generateDataOut():
+  def generateSimulationData() -> dict:
     # Create a JSON object for storing the data out, using all the values in config_data.
-    data_out_json = config_data;
-    data_out_json["datetime_of_run"] = datetime.datetime.now().isoformat()
-    data_out_json["cause_of_termination"] = cause_of_termination
-    data_out_json["x"] = xs_list;
-    data_out_json["x_prediction"] = x_predictions_list;
-    data_out_json["t_prediction"] = t_predictions_list;
-    data_out_json["t_delay"] = t_delays_list;
-    data_out_json["u"] = us_list;
-    data_out_json["t"] = ts_list;
-    data_out_json["computation_delays"] = simulated_computation_times_list;
-    data_out_json["instruction_counts"] = instruction_counts_list;
-    data_out_json["cycles_counts"] = cycles_counts_list
-    data_out_json["execution_walltime"] = walltimes_list
+    simulation_data = {} # copy.deepcopy(config_data)
+    simulation_data["datetime_of_run"] = datetime.datetime.now().isoformat()
+    simulation_data["cause_of_termination"] = cause_of_termination
+    simulation_data["x"] = xs_list;
+    simulation_data["x_prediction"] = x_predictions_list;
+    simulation_data["t_prediction"] = t_predictions_list;
+    simulation_data["t_delay"] = t_delays_list;
+    simulation_data["u"] = us_list;
+    simulation_data["t"] = ts_list;
+    simulation_data["simulated_computation_times_list"] = simulated_computation_times_list;
+    simulation_data["instruction_counts"] = instruction_counts_list;
+    simulation_data["cycles_counts"] = cycles_counts_list
+    simulation_data["execution_walltime"] = walltimes_list
     
-    # Remove all of the phony JSON "header" entries, such as "==== Settings ====".
-    # for key in  list(data_out_json.keys()):
-    #   if key.startswith("="):
-    #     del data_out_json[key]
-
     if use_scarab_delays:
       # Save Scarab parameters from PARAMS.out into the data_out JSON object. 
       param_keys_to_save_in_data_out = ["chip_cycle_time", "l1_size", "dcache_size", "icache_size", "decode_cycles"]
@@ -224,9 +189,10 @@ def main():
             param_name = regex_match.groupdict()['param_name']
             param_value = regex_match.groupdict()['param_value']
             if param_name in param_keys_to_save_in_data_out:
-              data_out_json[param_name] = int(param_value)
+              simulation_data[param_name] = int(param_value)
         
     # Read optimizer info.
+    # TODO: Move the processing of the optimizer info out of "run_plant.py"
     with open(sim_dir + 'optimizer_info.csv', newline='') as csvfile:
       csv_reader = csv.reader(csvfile, delimiter=',', quotechar='|')
       
@@ -248,22 +214,24 @@ def main():
             primal_residuals_list.append(float(row[primal_residual_ndx]))
             dual_residuals_list.append(float(row[dual_residual_ndx]))
         
-    data_out_json["num_iterations"] = num_iterationss_list
-    data_out_json["cost"] = costs_list
-    data_out_json["primal_residual"] = primal_residuals_list
-    data_out_json["dual_residual"] = dual_residuals_list
+    simulation_data["num_iterations"]  = num_iterationss_list
+    simulation_data["cost"]            = costs_list
+    simulation_data["primal_residual"] = primal_residuals_list
+    simulation_data["dual_residual"]   = dual_residuals_list
       
-    # Read current data_out.json. If it exists, append the new data. Otherwise, create it.
-    try:
-      with open(sim_dir + 'data_out.json', 'r') as json_data_file:
-        data_out_list = json.load(json_data_file)
-        data_out_list.append(data_out_json)
-    except FileNotFoundError as err:
-      # Create a new data_out_list containing one element, the data_out_json from this run.
-      print('data_out.json not found. Creating a new data_out_list.')
-      data_out_list = [data_out_json]
+    # # Read current simulation_data.json. If it exists, append the new data. Otherwise, create it.
+    # try:
+    #   with open(sim_dir + 'simulation_data.json', 'r') as json_data_file:
+    #     data_out_list = json.load(json_data_file)
+    #     data_out_list.append(simulation_data)
+    # except FileNotFoundError as err:
+    #   # Create a new data_out_list containing one element, the simulation_data from this run.
+    #   print('simulation_data.json not found. Creating a new data_out_list.')
+    #   data_out_list = [simulation_data]
 
-    return data_out_list
+    if not isinstance(simulation_data, dict):
+      raise ValueError(f"Expected simulation_data to be a dictionary, but instead it was a {type(simulation_data)}.")
+    return simulation_data
 
   LINE_BUFFERING = 1
   if debug_interfile_communication_level >= 1:
@@ -377,8 +345,9 @@ def main():
           instruction_count = stats_reader.readInstructionCount(k)
           cycles_count = stats_reader.readCyclesCount(k)
         else:
-          delay_model_slope = config_data["computation_delay_slope"]
-          delay_model_y_intercept = config_data["computation_delay_y-intercept"]
+          # TODO: Move the computation delays generated by a model out of the plant_runner module.
+          delay_model_slope       = config_data["computation_delay_model"]["computation_delay_slope"]
+          delay_model_y_intercept = config_data["computation_delay_model"]["computation_delay_y-intercept"]
           if delay_model_slope:
             if not delay_model_y_intercept:
               raise ValueError(f"delay_model_slope was set but delay_model_y_intercept was not.")
@@ -386,7 +355,7 @@ def main():
             print(f"simulated_computation_time = {simulated_computation_time:.8g} = {delay_model_slope:.8g} * {iterations:.8g} + {delay_model_y_intercept:.8g}")
           else:
             print('Using constant delay times.')
-            simulated_computation_time = fake_computation_delay_times
+            simulated_computation_time = config_data["computation_delay_model"]["fake_computation_delay_times"]
           instruction_count = 0
           cycles_count = 0
 
@@ -435,7 +404,7 @@ def main():
           (t, x) = evolveState(t_computation_update, x, u, t_end)
 
           # Save the state at the end of the sample period.
-          snapshotState(k, t, x, u, "End of sample period. Missed {n_samples_without_finishing_computation} samples without updating controller.")
+          snapshotState(k, t, x, u, f"End of sample period. Missed {n_samples_without_finishing_computation} samples without updating controller.")
         
           u_prev = u
 
@@ -448,9 +417,10 @@ def main():
         walltimes_list.append(time.time() - walltime_start_of_loop)
         t_delays_list.append(simulated_computation_time)
         
-        data_out_intermediate_list = generateDataOut()
-        with open(sim_dir + 'data_out_intermediate.json', 'w') as json_data_file:
-          json_data_file.write(json.dumps(data_out_intermediate_list, allow_nan=False, indent=4))
+        simulation_data_incremental = generateSimulationData()
+        writeJson(sim_dir + "simulation_data_incremental.json", simulation_data_incremental)
+        # with open(sim_dir + 'simulation_data_incremental.json', 'w') as json_data_file:
+        #   json_data_file.write(json.dumps(simulation_data_incremental, allow_nan=False, indent=4))
         print('\n=====\n')
     except NameError as err:
       raise err
@@ -461,13 +431,16 @@ def main():
     else:
       cause_of_termination = "Finished."
 
-  data_out_list = generateDataOut()
-  # Save the data_out to file (if enabled)
-  with open(sim_dir + 'data_out.json', 'w') as json_data_file:
-    json_data_file.write(json.dumps(data_out_list, allow_nan=False, indent=4))
+  simulation_data = generateSimulationData()
+  writeJson(sim_dir + "simulation_data.json", simulation_data)
 
-  print(f"There are now {len(data_out_list)} entries in data_out.json")
-
+  # # Save the data_out to file (if enabled)
+  # simulation_data_path = os.path.abspath(sim_dir + 'simulation_data.json')
+  # with open(simulation_data_path, 'w') as json_data_file:
+  #   json_data_file.write(json.dumps(simulation_data, allow_nan=False, indent=4))
+  # 
+  # print(f"There are now {len(simulation_data)} entries in {simulation_data_path}")
+  return simulation_data
 
 if __name__ == "__main__":
-  main()
+  raise ValueError("Not intended to be run directly")

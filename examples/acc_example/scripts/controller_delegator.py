@@ -29,10 +29,9 @@ def get_controller_executable(example_dir:str, build_config:dict) -> str:
   # else:
   #   raise ValueError(f"Unexpected value: debug_build_level={debug_build_level}. Only 0, 1, and 2 are supported.")
 
-  use_dynamorio = build_config["parallel_scarab_simulation"]
-  prediction_horizon = build_config["prediction_horizon"]
-  control_horizon = build_config["control_horizon"]
-  options_to_pass_to_cmake = ["prediction_horizon", "control_horizon"]
+  use_dynamorio = build_config["Simulation Options"]["parallel_scarab_simulation"]
+  prediction_horizon = build_config["system_parameters"]["mpc_options"]["prediction_horizon"]
+  control_horizon = build_config["system_parameters"]["mpc_options"]["control_horizon"]
 
   executable_name = f"acc_controller_{prediction_horizon}_{control_horizon}"
   # TODO: Change executable name if using DyanmoRio
@@ -68,16 +67,12 @@ def get_controller_executable(example_dir:str, build_config:dict) -> str:
     if not os.path.exists(executable_path):
       raise IOError(f'The expected executable file "{executable_path}" was not build.')
 
-  cmake_arguments_from_config = [f"-D{key.upper()}={build_config[key]}" for key in options_to_pass_to_cmake]
+  cmake_arguments_from_config = [f"-DPREDICTION_HORIZON={prediction_horizon}", f"-DCONTROL_HORIZON={control_horizon}"]
 
   if use_dynamorio:
     cmake_arguments_from_config += [f"-DUSE_DYNAMORIO=ON"]
   else:
     cmake_arguments_from_config += [f"-DUSE_DYNAMORIO=OFF"]
-
-  # prediction_horizon = build_config["prediction_horizon"]
-  # control_horizon = build_config["control_horizon"]
-  # print(cmake_arguments_from_config)
 
   if debug_build_level:
     print("== Running CMake to generate build tree ==")

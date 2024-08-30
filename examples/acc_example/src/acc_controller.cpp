@@ -238,7 +238,7 @@ int main()
   debug_optimizer_stats_level = debug_config["debug_optimizer_stats_level"];
   debug_dynamics_level = debug_config["debug_dynamics_level"];
 
-  bool use_state_after_delay_prediction = json_data["use_state_after_delay_prediction"];
+  bool use_state_after_delay_prediction = json_data["system_parameters"]["mpc_options"]["use_state_after_delay_prediction"];
 
   // Vector sizes.
   const int Tnx = 5;  // State dimension
@@ -260,10 +260,10 @@ int main()
   // MPC options.
   const int prediction_horizon = PREDICTION_HORIZON;
   const int control_horizon = CONTROL_HORIZON;
-  if (prediction_horizon != json_data["prediction_horizon"]) {
+  if (prediction_horizon != json_data["system_parameters"]["mpc_options"]["prediction_horizon"]) {
     throw  std::runtime_error("prediction_horizon (compiled) does not match the value in the JSON.");
   }
-  if (control_horizon != json_data["control_horizon"]) {
+  if (control_horizon != json_data["system_parameters"]["mpc_options"]["control_horizon"]) {
     throw  std::runtime_error("control_horizon (compiled) does not match the value in the JSON.");
   }
 
@@ -275,7 +275,7 @@ int main()
 
   // Set whether the evolution of the dyanmics are computed extenally 
   // (with Python) or are done within this process, using libmpc.
-  bool use_external_dynamics_computation = json_data["use_external_dynamics_computation"];
+  bool use_external_dynamics_computation = json_data["Simulation Options"]["use_external_dynamics_computation"];
 
   PRINT_WITH_FILE_LOCATION("Creating Matrices");
   // Continuous-time Matrices for \dot{x} = Ax + bu. 
@@ -370,18 +370,18 @@ int main()
   params.rho = 1e-6;
   params.adaptive_rho = true;
   // Relative tolerance
-  params.eps_rel = json_data["osqp_rel_tolerance"];
+  params.eps_rel = json_data["system_parameters"]["osqp_options"]["rel_tolerance"];
   // Absolute tolerance
-  params.eps_abs = json_data["osqp_abs_tolerance"];
+  params.eps_abs = json_data["system_parameters"]["osqp_options"]["abs_tolerance"];
   // Primal infeasibility tolerance
-  params.eps_prim_inf = json_data["osqp_primal_infeasibility_tolerance"];
+  params.eps_prim_inf = json_data["system_parameters"]["osqp_options"]["primal_infeasibility_tolerance"];
   // Dual infeasibility tolerance
-  params.eps_dual_inf = json_data["osqp_dual_infeasibility_tolerance"];
+  params.eps_dual_inf = json_data["system_parameters"]["osqp_options"]["dual_infeasibility_tolerance"];
   // Runtime limit in seconds
-  params.time_limit = json_data["osqp_time_limit"];
-  params.maximum_iteration = json_data["osqp_maximum_iteration"];
-  params.enable_warm_start = json_data["enable_mpc_warm_start"];
-  params.verbose = json_data["osqp_verbose"];
+  params.time_limit = json_data["system_parameters"]["osqp_options"]["time_limit"];
+  params.maximum_iteration = json_data["system_parameters"]["osqp_options"]["maximum_iteration"];
+  params.verbose = json_data["system_parameters"]["osqp_options"]["verbose"];
+  params.enable_warm_start = json_data["system_parameters"]["mpc_options"]["enable_mpc_warm_start"];
   params.polish = true;
 
   PRINT_WITH_FILE_LOCATION("Set parameters...");
@@ -393,8 +393,8 @@ int main()
 
   // ======== Weights ========== //
 
-  double outputWeight = json_data["output_cost_weight"];
-  double inputWeight = json_data["input_cost_weight"];
+  double outputWeight = json_data["system_parameters"]["mpc_options"]["output_cost_weight"];
+  double inputWeight = json_data["system_parameters"]["mpc_options"]["input_cost_weight"];
 
   // Output Weights
   cvec<Tny> OutputW;
@@ -434,20 +434,21 @@ int main()
 
   // ======== Constraints ========== //
 
+  auto constraint_data = json_data["system_parameters"]["constraints"];
   // State constraints.
   cvec<Tnx> xmin, xmax;
-  loadMatrixValuesFromJson(xmin, json_data, "xmin");
-  loadMatrixValuesFromJson(xmax, json_data, "xmax");
+  loadMatrixValuesFromJson(xmin, constraint_data, "xmin");
+  loadMatrixValuesFromJson(xmax, constraint_data, "xmax");
 
   // Output constraints
   cvec<Tny> ymin, ymax;
-  loadMatrixValuesFromJson(ymin, json_data, "ymin");
-  loadMatrixValuesFromJson(ymax, json_data, "ymax");
+  loadMatrixValuesFromJson(ymin, constraint_data, "ymin");
+  loadMatrixValuesFromJson(ymax, constraint_data, "ymax");
 
   // Control constraints.
   cvec<Tnu> umin, umax;
-  loadMatrixValuesFromJson(umin, json_data, "umin");
-  loadMatrixValuesFromJson(umax, json_data, "umax");
+  loadMatrixValuesFromJson(umin, constraint_data, "umin");
+  loadMatrixValuesFromJson(umax, constraint_data, "umax");
 
   lmpc.setConstraints(xmin, umin, ymin, xmax, umax, ymax, {0, prediction_horizon});
 
@@ -455,7 +456,7 @@ int main()
 
   // Output reference point
   cvec<Tny> yRef;
-  loadMatrixValuesFromJson(yRef, json_data, "yref");
+  loadMatrixValuesFromJson(yRef, json_data["system_parameters"], "yref");
 
   lmpc.setReferences(yRef, cvec<Tnu>::Zero(), cvec<Tnu>::Zero(), {0, prediction_horizon});
 
@@ -510,8 +511,6 @@ int main()
   // State vector state.
   mpc::cvec<Tnx> modelX, modeldX;
   mpc::cvec<Tnx> x_predict;
-  // Set the initial value.
-  loadMatrixValuesFromJson(modelX, json_data, "x0");
   
   // Predicted time of finishing computation.
   double t_predict;
@@ -521,12 +520,15 @@ int main()
 
   // Create a vector for storing the control input from the previous time step.
   mpc::cvec<Tnu> u;
-  u = cvec<Tnu>::Zero();
+
+  // Set the initial values from JSON.
+  loadMatrixValuesFromJson(modelX, json_data, "x0");
+  loadMatrixValuesFromJson(u, json_data, "u0");
 
   // Store the delay time required to compute the previous controller value.
   double t_delay_prev = 0;
 
-  if (!json_data["use_fake_scarab_computation_times"] && !json_data["parallel_scarab_simulation"]) {
+  if (!json_data["Simulation Options"]["use_fake_scarab_computation_times"] && !json_data["Simulation Options"]["parallel_scarab_simulation"]) {
     scarab_begin(); // Tell Scarab to stop "fast forwarding". This is needed for '--pintool_args -fast_forward_to_start_inst 1'
   }
 
@@ -540,11 +542,12 @@ int main()
         PRINT_WITH_FILE_LOCATION("Starting DynamoRIO region of interest.")
         dr_app_setup_and_start();
     #else
-      if (!json_data["use_fake_scarab_computation_times"]) {
+      if (!json_data["Simulation Options"]["use_fake_scarab_computation_times"]) {
         PRINT_WITH_FILE_LOCATION("Starting Scarab region of interest.")
         scarab_roi_dump_begin(); 
       }
     #endif
+
     if (use_state_after_delay_prediction)
     {
       t_predict = t_delay_prev;
@@ -599,7 +602,7 @@ int main()
       PRINT("DynamoRIO Trace Files in " << folder.string())
 
       // Regex to match stings like "<path to sim dir>/drmemtrace.acc_controller_5_2_dynamorio.268046.6519.dir"
-      std::regex dynamorio_trace_filename_regex("(.*)drmemtrace\\.acc_controller_\\d_\\d_dynamorio\\.\\d{6}\\.\\d{4}\\.dir");
+      std::regex dynamorio_trace_filename_regex("(.*)drmemtrace\\.acc_controller_\\d_\\d_dynamorio\\.\\d+\\.\\d+\\.dir");
       
       bool is_first_dir_found = true;
       for (const auto& folder_entry : std::filesystem::directory_iterator(folder)) {
@@ -613,30 +616,22 @@ int main()
             PRINT("\t     " << folder_entry.path().string())
             PRINT("\t to: " << new_path)
             std::filesystem::rename(folder_entry.path().string(), new_dir_name);
-            // Check that we don't have multiple DynamoRIO trace files, which would indicate that we failed to rename them incrementally. 
+            // Check thfat we don't have multiple DynamoRIO trace files, which would indicate that we failed to rename them incrementally. 
             if (!is_first_dir_found) {
-              throw std::runtime_error("Multiple DynamoRIO trace files found in " + folder.string());
+              throw std::runtime_error("Multiple DynamoRIO trace folders found in " + folder.string());
             }
             is_first_dir_found = false;
-
-
           } else {
-            // PRINT("- Not a DyanmoRIO trace directory.")
+            // PRINT("- Not a DyanmoRIO trace directory: " << full_path)
           }
-
-          // if (folder_entry.is_regular_file())
-          // {
-          //   const auto base_name = folder_entry.path().filename().string();
-          //   /* Match the file, probably std::regex_match.. */
-          //   if(match)
-          //         file_list.push_back(full_path);
-          // }
       }
-
+      if (is_first_dir_found) {
+        throw std::runtime_error("No DynamoRIO trace folder found in " + folder.string());
+      }
 
       PRINT_WITH_FILE_LOCATION("Finished saving trace with DyanmoRIO")
     #else
-      if (!json_data["use_fake_scarab_computation_times"]) {
+      if (!json_data["Simulation Options"]["use_fake_scarab_computation_times"]) {
         // Save a batch of Scarab statistics
         PRINT_WITH_FILE_LOCATION("End of Scarab region of interest.")
         scarab_roi_dump_end();  

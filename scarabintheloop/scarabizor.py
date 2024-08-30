@@ -48,12 +48,26 @@ class ScarabData:
 
 class ScarabStatsReader:
   
-  def __init__(self, stats_dir_path):
+  def __init__(self, stats_dir_path, is_using_roi=True):
       self.stats_dir_path = stats_dir_path
-      self.stat_regex = re.compile(r"\s*(?P<key>[\w|\_| ]+),\s*(?P<value>\d+\.?\d*).*")
+      # Create a RegEx to match a line in the form
+      #   EXECUTION_TIME      294870700000000  <anything here is ignored>    
+      # or
+      #   EXECUTION_TIME_count,      294870700000000  <anything here is ignored>    
+      # and create two groups, key="EXECUTION_TIME" and value="294870700000000".
+      self.stat_regex = re.compile(r"\s*(?P<key>[\w\_]+)(?:_count,)?\s*(?P<value>[\d.]+).*")
+      
+      # Create a RegEx to match a line in the form
+      #   EXECUTION_TIME,             294870700000000  <anything here is ignored>             
+      # and create two groups, key="EXECUTION_TIME" and value="294870700000000".
+      # self.stat_regex = re.compile(r"\s*(?P<key>[\w|\_| ]+),\s*(?P<value>\d+\.?\d*).*")
+      self.is_using_roi = is_using_roi
 
   def getStatsFilePath(self, k) -> os.PathLike:
-    file_name = f"core.stat.0.csv.roi.{k}"
+    if self.is_using_roi:
+      file_name = f"core.stat.0.csv.roi.{k}"
+    else:
+      file_name = f"core.stat.{k}.out"
     file_path = os.path.join(self.stats_dir_path, file_name)
     return file_path
 
@@ -64,26 +78,30 @@ class ScarabStatsReader:
     time.sleep(0.1)
 
   def readStatistic(self, k: int, stat_key: str): 
-    with open(self.getStatsFilePath(k), 'r') as stats_file:
+    file_path = self.getStatsFilePath(k)
+    with open(file_path, 'r') as stats_file:
         for line in stats_file:
           regex_match = self.stat_regex.match(line)
           if regex_match and stat_key == regex_match.groupdict()['key']:
             value = regex_match.groupdict()['value']
+            # Cast value to either int or float.
             try: 
               return int(value)
             except ValueError:
               pass
-            return float
-        raise ValueError(f"key: \"{stat_key}\" was not found in stats file.")
+            return float(value)
+        raise ValueError(f"key: \"{stat_key}\" was not found in stats file {file_path}.")
               
   def readCyclesCount(self, k: int):  
-    return self.readStatistic(k, "NODE_CYCLE_count")
+    # return self.readStatistic(k, "NODE_CYCLE_count")
+    return self.readStatistic(k, "NODE_CYCLE")
 
   def readInstructionCount(self, k: int):  
-    return self.readStatistic(k, "NODE_INST_COUNT_count")
+    return self.readStatistic(k, "NODE_INST_COUNT")
 
   def readTime(self, k: int):  
-    time_in_femtosecs = self.readStatistic(k, "EXECUTION_TIME_count")
+    # time_in_femtosecs = self.readStatistic(k, "EXECUTION_TIME_count")
+    time_in_femtosecs = self.readStatistic(k, "EXECUTION_TIME")
     time_in_secs = float(time_in_femtosecs) * SECONDS_PER_FEMTOSECOND
     return time_in_secs
 

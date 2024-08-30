@@ -1,4 +1,3 @@
-gdown
 numpy
 scipy
 pandas

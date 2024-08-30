@@ -20,18 +20,18 @@ parser.add_argument(
 # Parse the arguments from the command line
 args = parser.parse_args()
 
-traceDir = args.trace_directory
+traceDir = path.abspath(args.trace_directory)
 
 if not path.exists(traceDir):
-  # TODO: Check if it is a directory too. 
   raise ValueError(f"The directory {traceDir} does not exist.")
 
-binPath = traceDir + '/bin/'
-if not path.exists(binPath):
-    mkdir(binPath)
+if not path.exists(traceDir + "/bin/modules.log"):
+  raise ValueError(f"The directory {traceDir} does not contain 'bin/modules.log'.")
 
+print(f'Portabilizing the DynamoRIO trace in "{traceDir}"')
 data = []
-with open(traceDir + '/bin/modules.log', 'r') as infile :
+with open(traceDir + '/bin/modules.log', 'r') as infile:
+    print(infile.readlines())
     separator = ', '
     first = 1
     col = 99
