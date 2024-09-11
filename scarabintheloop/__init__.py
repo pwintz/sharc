@@ -111,7 +111,7 @@ def run(example_dir):
   os.makedirs(experiment_list_dir)
 
   # Create or update the symlink to the latest folder.
-  latest_experiment_list_dir_symlink_path = experiments_dir + "latest"
+  latest_experiment_list_dir_symlink_path = experiments_dir + "/latest"
   if os.path.exists(latest_experiment_list_dir_symlink_path):
     os.remove(latest_experiment_list_dir_symlink_path)
   os.symlink(experiment_list_dir, latest_experiment_list_dir_symlink_path, target_is_directory=True)
@@ -229,27 +229,19 @@ def computeTimeStepsDelayed(sample_time: float, t_delay: List[float]):
 def findFirstExcessiveComputationDelay(time_steps_delayed):  
   for (i, steps_delayed) in enumerate(time_steps_delayed):
     if steps_delayed > 1:
-      # print(f"MISSED: index={i}, steps_delayed: {steps_delayed}")
       return (i, steps_delayed)
-  # print(f"OK: index={i}, steps_delayed: {steps_delayed}")
   return None, None
 
 def processBatchSimulationData(batch_config: dict, batch_simulation_data: dict):
-  sample_time = batch_config["system_parameters"]["sample_time"]
-  first_time_step = batch_config["first_time_step"]
-  last_time_step = batch_config["last_time_step"]
-
-  n_time_steps_in_batch = batch_config["n_time_steps"]
   checkBatchConfig(batch_config)
-  
-  # The states of the system at each t(0), t(1), etc. 
+  checkBatchSimulationData(batch_simulation_data, batch_config["n_time_steps"])
+
+  # x: The states of the system at each t(0), t(1), etc. 
+  # u: The control values applied. The first entry is the u0 previously computed. Subsequent entries are the computed values. The control u[i] is applied from t[i] to t[i+1], with u[-1] not applied during this batch. 
   x = batch_simulation_data["x"]
-  # The control values applied. The first entry is the u0 previously computed. Subsequent entries are the computed values. 
-  # The control u[i] is applied from t[i] to t[i+1], with u[-1] not applied during this batch. 
   u = batch_simulation_data["u"]
   t = batch_simulation_data["t"]
   t_delay = batch_simulation_data["t_delay"]
-  checkBatchSimulationData(batch_simulation_data, n_time_steps_in_batch)
 
   # The values of data from the batch, including values after missed computations.
   all_data_from_batch = {
@@ -257,22 +249,23 @@ def processBatchSimulationData(batch_config: dict, batch_simulation_data: dict):
     "u": u,
     "t": t, 
     "t_delay": t_delay,
-    "first_time_step": first_time_step,
-    "last_time_step": last_time_step
+    "first_time_step": batch_config["first_time_step"],
+    "last_time_step": batch_config["last_time_step"]
   }
 
+  sample_time = batch_config["system_parameters"]["sample_time"]
   time_steps_delayed = computeTimeStepsDelayed(sample_time, t_delay)
   first_excessive_delay_index, first_excessive_delay_n_of_time_steps = findFirstExcessiveComputationDelay(time_steps_delayed)
   has_missed_computation = first_excessive_delay_index is not None
 
   if has_missed_computation:
-    first_excessive_delay_time_step = first_time_step + first_excessive_delay_index
+    first_excessive_delay_time_step = batch_config["first_time_step"] + first_excessive_delay_index
     valid_data_from_batch = {
       "x":             x[0:first_excessive_delay_index + 1],
       "u":             u[0:first_excessive_delay_index + 1],
       "t":             t[0:first_excessive_delay_index + 1], 
       "t_delay": t_delay[0:first_excessive_delay_index + 1],
-      "first_time_step": first_time_step,
+      "first_time_step": batch_config["first_time_step"],
       "last_time_step": first_excessive_delay_time_step
     }
 
@@ -291,12 +284,16 @@ def processBatchSimulationData(batch_config: dict, batch_simulation_data: dict):
 
     # Values that are needed to start the next batch.
     next_batch_init = {
-      "first_time_step": last_time_step + 1,
+      "first_time_step": batch_config["last_time_step"] + 1,
       "x0": x[-1],
       "u0": u[-1],
       "u_pending": None,
       "next_u_update_time_step": 0
     }
+
+  # Check that the next_first_time_step doesn't skip over any timesteps.
+  if next_batch_init['first_time_step'] > all_data_from_batch['last_time_step'] + 1:
+    raise ValueError(F'next first_time_step={next_batch_init["first_time_step"]} > last_time_step_in_batch + 1={all_data_from_batch["last_time_step"] + 1}')
 
   return {
     "all_data_from_batch": all_data_from_batch, 
@@ -309,7 +306,7 @@ def run_experiment_sequential(experiment_dir, experiment_config, example_dir):
   sim_dir = experiment_dir
   sim_config = copy.deepcopy(experiment_config)
   sim_config["simulation_label"] = experiment_config["experiment_label"]
-  simulation_data = runSimulation(sim_dir, sim_config, example_dir)
+  simulation_data = runSimulation(sim_dir, sim_config)
   return simulation_data
 
 def run_experiment_parallelized(experiment_dir, experiment_config, example_dir):
@@ -355,7 +352,7 @@ def run_experiment_parallelized(experiment_dir, experiment_config, example_dir):
     writeJson(batch_dir + "/config.json", batch_config)
 
     # Run simulation
-    simulation_data = runSimulation(batch_dir, batch_config, example_dir)
+    simulation_data = runSimulation(batch_dir, batch_config)
     batch_data = processBatchSimulationData(batch_config, simulation_data)
     batch_data['label'] = batch_label
     batch_data['batch directory'] = batch_dir
@@ -390,7 +387,10 @@ def run_experiment_parallelized(experiment_dir, experiment_config, example_dir):
                      "t": ts_actual,
                      "computation_times": computation_times_actual,
                      "config": experiment_config}
-    writeJson(experiment_dir + "experiment_data_incremental.json", incremental_experiment_data)
+
+    experiment_data_incremental_path = os.path.abspath(experiment_dir + "/experiment_data_incremental.json")
+    writeJson(experiment_data_incremental_path, incremental_experiment_data)
+    print('Incremental experiment data: ' + experiment_data_incremental_path)
 
   experiment_data = {"batches": batch_data_list,
                      "x": xs_actual,
@@ -413,7 +413,7 @@ def portabalize_trace(trace_dir):
       raise e
   print(f"Finished portabilization of trace in {trace_dir}.")
 
-def runSimulation(sim_dir, sim_config, example_dir):
+def runSimulation(sim_dir, sim_config):
   print(f"Start of runSimulation in {sim_dir}")
   simulation_start_time = time.time()
   os.chdir(sim_dir)
@@ -426,152 +426,145 @@ def runSimulation(sim_dir, sim_config, example_dir):
   assertFileExists(chip_params_path)  
 
   controller_log_path = sim_dir + '/controller.log'
-  plant_dynamics_log_path = sim_dir + '/plant_dynamics.log'
+  plant_log_path = sim_dir + '/plant_dynamics.log'
   
   use_parallel_scarab_simulation = sim_config["Simulation Options"]["parallel_scarab_simulation"]
   
-  with openLog(plant_dynamics_log_path, f"Plant Log for \"{simulation_label}\"") as plant_dynamics_log, \
+  with openLog(plant_log_path, f"Plant Log for \"{simulation_label}\"") as plant_log, \
        openLog(controller_log_path, f"Controller Log for \"{simulation_label}\"") as controller_log:
 
-    with redirect_stdout(plant_dynamics_log):
-      evolveState_fnc = plant_dynamics.getDynamicsFunction(sim_config)
+    # with redirect_stdout(plant_log):
+    #   evolveState_fnc = plant_dynamics.getDynamicsFunction(sim_config)
 
     if "u_pending" in sim_config:
       # A computed control value is pending, so it should not be applied at the start of the simulation, but is instead delayed until a given time-step.
       pass
 
-
     # Create the pipe files in the current directory.
     run_shell_cmd("make_scarabintheloop_pipes.sh", log=controller_log)
     assertFileExists(sim_dir + "/x_c++_to_py")
 
-    controller_executable = controller_delegator.get_controller_executable(example_dir, sim_config)
-    assertFileExists(controller_executable)
+    controller_executor = getSimulationExecutor(sim_dir, sim_config, controller_log, plant_log)
 
-    def run_controller():
-      print(f'---- Starting controller for {simulation_label} ----\n'\
-            f'Simulation dir: {sim_dir} \n'\
-            f'Controller log: {controller_log_path}')
-      assertFileExists('config.json') # config.json is read by the controller.
-        
-      try:
-        if use_parallel_scarab_simulation or sim_config["Simulation Options"]["use_fake_scarab_computation_times"]:
-          # Run the controller.
-          print(f"Running controller exectuable {controller_executable}:")
-          run_shell_cmd(controller_executable, working_dir=sim_dir, log=controller_log)
-        else:
-          # Run Scarb using execution-driven mode.
-          cmd = " ".join([controller_executable])
-          scarab_cmd_argv = [sys.executable,
-                            scarab_paths.bin_dir + '/scarab_launch.py',
-                            '--program', cmd,
-                            '--param', 'PARAMS.generated',
-                            # '--simdir', '.', # Changes the working directory.
-                            '--pintool_args',
-                            '-fast_forward_to_start_inst 1',
-                            '--scarab_args',
-                            '--inst_limit 15000000000'
-                            #  '--heartbeat_interval 50', 
-                            # '--num_heartbeats 1'
-                            # '--power_intf_on 1']
-                          ]
-          # There is a bug in Scarab that causes it to crash when run in the terminal 
-          # when the terminal is resized. To avoid this bug, we run it in a different thread, 
-          # which appears to fix the problem.
-          with ThreadPoolExecutor() as executor:
-            future = executor.submit(lambda: run_shell_cmd(scarab_cmd_argv, working_dir=sim_dir, log=controller_log))
+    # Execute the simulation.
+    simulation_data = controller_executor.run_simulation()
 
-            # Wait for the background task to finish before exiting
-            future.result()
+#     controller_executable = controller_delegator.get_controller_executable(sim_config)
+#     assertFileExists(controller_executable)
+# 
+#     def run_controller():
+#       print(f'---- Starting controller for {simulation_label} ----\n'\
+#             f'Simulation dir: {sim_dir} \n'\
+#             f'Controller log: {controller_log_path}')
+#       assertFileExists('config.json') # config.json is read by the controller.
+#         
+#       try:
+#         if use_parallel_scarab_simulation or sim_config["Simulation Options"]["use_fake_scarab_computation_times"]:
+#           # Run the controller.
+#           print(f"Running controller exectuable {controller_executable}:")
+#           run_shell_cmd(controller_executable, working_dir=sim_dir, log=controller_log)
+#         else:
+#           # Run Scarb using execution-driven mode.
+#           cmd = " ".join([controller_executable])
+#           scarab_cmd_argv = [sys.executable, # The Python executable
+#                             scarab_paths.bin_dir + '/scarab_launch.py',
+#                             '--program', cmd,
+#                             '--param', 'PARAMS.generated',
+#                             # '--simdir', '.', # Changes the working directory.
+#                             '--pintool_args',
+#                             '-fast_forward_to_start_inst 1',
+#                             '--scarab_args',
+#                             '--inst_limit 15000000000' # Instruction limit
+#                             #  '--heartbeat_interval 50', 
+#                             # '--num_heartbeats 1'
+#                             # '--power_intf_on 1']
+#                           ]
+#           # There is a bug in Scarab that causes it to crash when run in the terminal 
+#           # when the terminal is resized. To avoid this bug, we run it in a different thread, which appears to fix the problem.
+#           with ThreadPoolExecutor() as executor:
+#             future = executor.submit(lambda: run_shell_cmd(scarab_cmd_argv, working_dir=sim_dir, log=controller_log))
+# 
+#             # Wait for the background task to finish before exiting
+#             future.result()
+# 
+#       except Exception as err:
+#         print(f'Error: Running the controller failed!')
+#         print(f"Error: {str(err)}")
+#         if hasattr(err, 'output') and err.output:
+#           warn(f'Error output: {err.output}')
+#         print(traceback.format_exc())
+#         raise err
+#       print('Controller thread finished.')
+# 
+#     def run_plant():
+#       print(f'---- Starting plant dynamics for {simulation_label} ----\n' \
+#             f'  Simulation dir: {sim_dir} \n' \
+#             f'       Plant log: {plant_log_path}\n')
+#       plant_log.write('Start of thread.\n')
+#       if DEBUG_CONFIGURATION_LEVEL >= 2:
+#         printJson(f"Simulation configuration", sim_config)
+# 
+#       try:
+#         with redirect_stdout(plant_log):
+#           plant_runner.run(sim_dir, sim_config, evolveState_fnc)
+#           assertFileExists('simulation_data.json')
+# 
+#       except Exception as e:
+#         print(f'Plant dynamics had an error: {e}')
+#         print(traceback.format_exc())
+#         raise e
+# 
+#       # Print the output in a single call to "print" so that it isn't interleaved with print statements in other threads.
+#       print('Plant thread finshed. \n' \
+#             f'  Simulation directory: {sim_dir} \n' \
+#             f'       Simulation data: {sim_dir}/simulation_data.json')
+# 
+    # if not sim_config["Simulation Options"]["use_external_dynamics_computation"]:
+    #   print("Running controller only -- No plant!")
+    #   run_controller()
+    #   return None # No data recorded
+    # else: # Run plant and controller in parallel, on separate threads.
+    #   N_TASKS = 2
+    #   with ThreadPoolExecutor(max_workers=N_TASKS) as executor:
+    #     # Create two tasks: One for the controller and another for the plant.
+    #     tasks = [executor.submit(run_controller), executor.submit(run_plant)]
+    #     for future in concurrent.futures.as_completed(tasks):
+    #       if future.exception(): # Waits until finished or failed.
+    #         print(f"Task {future} failed with exception: {future.exception()}")
+    #         raise future.exception()
+    #   simulation_data = readJson('simulation_data.json')
+# 
+#     if use_parallel_scarab_simulation:
+#       # Portabilize the trace files (in parallel) and then simulate with Scarab (in parallel).
+# 
+#       (dynamrio_trace_dir_dictionaries, trace_dirs, sorted_indices) = get_dynamorio_trace_directories()
+# 
+#       #? Do we need to portablize if we are just using the trace files in-place? We can save a few seconds on each loop by skipping this step.
+#       print(f"Starting portabilization of trace directories {trace_dirs} in {sim_dir}.")
+#       with ProcessPoolExecutor(max_workers = os.cpu_count()) as portabalize_executor:
+#         portabalize_executor.map(portabalize_trace, trace_dirs)
+# 
+#       print(f"Finished portabilizing traces for each directory in {dynamrio_trace_dir_dictionaries.values()} in {sim_dir}.")
+#       
+#       computation_time_list = [None] * len(sorted_indices)
+#       with ProcessPoolExecutor(max_workers = os.cpu_count()) as scarab_executor:
+#         scarab_data = scarab_executor.map(simulate_trace_in_scarab, sorted_indices)
+#         for datum in scarab_data:
+#           index = datum["index"]
+#           trace_dir = datum["trace_dir"]
+#           computation_time = datum["computation_time"]
+#           computation_time_list[index] = computation_time
+#           simulation_data["t_delay"][index] = computation_time
+#         print(f"Finished executing parallel simulations, scarab_data: {scarab_data}")
+# 
+#       simulation_data["t_delay"] = [None] + simulation_data["t_delay"]
+#       print(f"computation_time list: {computation_time_list}")
 
-      except Exception as err:
-        print(f'Error: Running the controller failed!')
-        print(f"Error: {str(err)}")
-        if hasattr(err, 'output') and err.output:
-          warn(f'Error output: {err.output}')
-        print(traceback.format_exc())
-        raise err
-      print('Controller thread finished.')
-
-    def run_plant():
-      print(f'---- Starting plant dynamics for {simulation_label} ----\n' \
-            f'  Simulation dir: {sim_dir} \n' \
-            f'       Plant log: {plant_dynamics_log_path}\n')
-      plant_dynamics_log.write('Start of thread.\n')
-      if DEBUG_CONFIGURATION_LEVEL >= 2:
-        printJson(f"Simulation configuration", sim_config)
-
-      try:
-        with redirect_stdout(plant_dynamics_log):
-          plant_runner.run(sim_dir, sim_config, evolveState_fnc)
-          assertFileExists('simulation_data.json')
-
-      except Exception as e:
-        print(f'Plant dynamics had an error: {e}')
-        print(traceback.format_exc())
-        raise e
-
-      # Print the output in a single call to "print" so that it isn't interleaved with 
-      # print statements in other threads.
-      print('Plant thread finshed. \n' \
-            f'  Simulation directory: {sim_dir} \n' \
-            f'       Simulation data: {sim_dir}/simulation_data.json')
-
-    if not sim_config["Simulation Options"]["use_external_dynamics_computation"]:
-      print("Running controller only -- No plant!")
-      run_controller()
-      return None # No data recorded
-    else: # Run plant and controller in parallel, on separate threads.
-      N_TASKS = 2
-      with ThreadPoolExecutor(max_workers=N_TASKS) as executor:
-        # Create two tasks: One for the controller and another for the plant.
-        tasks = [executor.submit(run_controller), executor.submit(run_plant)]
-        for future in concurrent.futures.as_completed(tasks):
-          if future.exception(): # Waits until finished or failed.
-            print(f"Task {future} failed with exception: {future.exception()}")
-            raise future.exception()
-      simulation_data = readJson('simulation_data.json')
-
-    if use_parallel_scarab_simulation:
-      print(f"Using parallel Scarab simulation.")
-      # Portabilize the trace files (in serial) and then simulate with Scarab (in parallel).
-
-      (dynamrio_trace_dir_dictionaries, trace_dirs, sorted_indices) = get_dynamorio_trace_directories()
-
-      #? Do we need to portablize if we are just using the trace files in-place? We can save a few seconds on each loop by skipping this step.
-      print(f"Starting portabilization of trace directories {trace_dirs} in {sim_dir}.")
-      with ProcessPoolExecutor(max_workers = os.cpu_count()) as portabalize_executor:
-        portabalize_executor.map(portabalize_trace, trace_dirs)
-
-      # for dir_index in sorted(dynamrio_trace_dir_dictionaries):
-      #   trace_dir = dynamrio_trace_dir_dictionaries[dir_index]
-      #   result = run_shell_cmd("run_portabilize_trace.sh", log=controller_log, working_dir=trace_dir)
-      print(f"Finished portabilizing traces for each directory in {dynamrio_trace_dir_dictionaries.values()} in {sim_dir}.")
-      
-      computation_time_list = [None] * len(sorted_indices)
-      with ProcessPoolExecutor(max_workers = os.cpu_count()) as scarab_executor:
-        scarab_data = scarab_executor.map(simulate_trace_in_scarab, sorted_indices)
-        
-        print(f"Finished executing parallel simulations, scarab_data: {scarab_data}")
-        for datum in scarab_data:
-          index = datum["index"]
-          trace_dir = datum["trace_dir"]
-          computation_time = datum["computation_time"]
-          computation_time_list[index] = computation_time
-          simulation_data["t_delay"][index] = computation_time
-
-      simulation_data["t_delay"] = [None] + simulation_data["t_delay"]
-      print(f"computation_time list: {computation_time_list}")
-
-      # # Check that we have loaded all of the computation times correctly.
-      # for i in sorted_indices:
-      #   if computation_time_list[i] != simulation_data["t_delay"][i]:
-      #     raise ValueError(f'computation_time[{i}]={computation_time[i]} != simulation_data["t_delay"][{i}]={simulation_data["t_delay"][i]}')
 
     print("End of runSimulation.")
     print(f'  Simulation dir: {sim_dir}')
     print(f'  Controller log: {controller_log_path}')
-    print(f'       Plant log: {plant_dynamics_log_path}')
+    print(f'       Plant log: {plant_log_path}')
     print(f"   Data out file: {os.path.abspath('simulation_data.json')}")
     
     simulation_end_time = time.time()
@@ -604,14 +597,13 @@ def simulate_trace_in_scarab(dir_index:int) -> dict:
   stats_file_index = 0 # We only simulate one timestep.
   computation_time = stats_reader.readTime(stats_file_index)
   if computation_time == 0:
-    raise ValueError(f'The computation time was zero (computation_time = {computation_time})')
+    raise ValueError(f'The computation time was zero (computation_time = {computation_time}). This typically indicates that Scarab did not find a PARAMS.in file.')
   data = {
           "index": dir_index, 
           "trace_dir": trace_dir, 
           "computation_time": computation_time
          }
   print(f"Finished Scarab simulation. Time to compute controller: {computation_time} seconds.")
-  # print(f"Return data for simulate_trace_in_scarab:\n\t{data}")
   return data
 
 def create_patched_PARAMS_file(sim_config: dict, PARAMS_src_filename: str, PARAMS_out_filename: str):
@@ -637,6 +629,7 @@ def create_patched_PARAMS_file(sim_config: dict, PARAMS_src_filename: str, PARAM
     params_out_file.writelines(PARAM_file_lines)
 
 
+# TODO: Write tests for this.
 def changeParamsValue(PARAM_lines: List[str], key, value):
   """
   Search through PARAM_lines and modify it in-place by updating the value for the given key. 
@@ -701,6 +694,190 @@ def get_dynamorio_trace_directories():
   return (trace_dir_dict, sorted_trace_dirs, sorted_indices)
 
 
+def getSimulationExecutor(sim_dir, sim_config, controller_log, plant_log):
+  """ 
+  This function implements the "Factory" design pattern, where it returns objects of various classes depending on the imputs.
+  """
+
+  use_parallel_scarab_simulation = sim_config["Simulation Options"]["parallel_scarab_simulation"]
+
+  fake_computation_time_simulation = sim_config["Simulation Options"]["use_fake_scarab_computation_times"]
+
+  if use_parallel_scarab_simulation:
+    print("Using ParallelSimulationExecutor.")
+    return ParallelSimulationExecutor(sim_dir, sim_config, controller_log, plant_log)
+  elif fake_computation_time_simulation:
+    return ModeledDelaysSimulationExecutor(sim_dir, sim_config, controller_log, plant_log)
+  else:
+    return SerialSimulationExecutor(sim_dir, sim_config, controller_log, plant_log)
+
+
+class SimulationExecutor:
+  
+  def __init__(self, sim_dir, sim_config, controller_log, plant_log):
+    self.sim_dir = sim_dir
+    self.sim_config = sim_config
+    self.controller_log = controller_log
+    self.plant_log = plant_log
+
+    # Create the executable.
+    self.controller_executable = controller_delegator.get_controller_executable(sim_config)
+    assertFileExists(self.controller_executable)
+    
+    # Get a function that defines the plant dynamics.
+    with redirect_stdout(plant_log):
+      self.evolveState_fnc = plant_dynamics.getDynamicsFunction(sim_config)
+
+    # Create the pipe files in the current directory.
+    run_shell_cmd("make_scarabintheloop_pipes.sh", log=controller_log)
+    assertFileExists(sim_dir + "/x_c++_to_py")
+
+  def run_controller(self):
+    raise RuntimeError("This function must be implemented by a subclass")
+
+  def _run_controller(self):
+    """
+    Run the controller via the run_controller() function defined in subclasses, but include some setup and tear-down beforehand.
+    """
+    print(f'---- Starting controller for {self.sim_config["simulation_label"]} ----\n'\
+          f'      Executable: {self.controller_executable} \n'\
+          f'  Simulation dir: {self.sim_dir} \n'\
+          f'  Controller log: {self.controller_log.name}')
+    assertFileExists('config.json') # config.json is read by the controller.
+    try:
+      self.run_controller()
+    except Exception as err:
+      print(f'Error: Running the controller failed!')
+      print(f"Error: {str(err)}")
+      if hasattr(err, 'output') and err.output:
+        print(f'Error output: {err.output}')
+      print(traceback.format_exc())
+      raise err
+    print('Controller finished.')
+
+  def _run_plant(self):
+    print(f'---- Starting plant dynamics for {self.sim_config["simulation_label"]} ----\n' \
+          f'  Simulation dir: {self.sim_dir} \n' \
+          f'       Plant log: {self.plant_log.name}\n')
+    self.plant_log.write('Start of thread.\n')
+    if DEBUG_CONFIGURATION_LEVEL >= 2:
+      printJson(f"Simulation configuration", self.sim_config)
+
+    try:
+      with redirect_stdout(self.plant_log):
+        plant_runner.run(self.sim_dir, self.sim_config, self.evolveState_fnc)
+        assertFileExists(self.sim_dir + '/simulation_data.json')
+
+    except Exception as e:
+      print(f'Plant dynamics had an error: {e}')
+      print(traceback.format_exc())
+      raise e
+
+    # Print the output in a single call to "print" so that it isn't interleaved with print statements in other threads.
+    if DEBUG_DYNAMICS_LEVEL >= 1:
+      print('-- Plant dynamics finshed -- \n' \
+            f'  Simulation directory: {self.sim_dir} \n' \
+            f'       Simulation data: {self.sim_dir}/simulation_data.json')
+
+  def run_simulation(self):
+    """ Run everything needed to simulate the plant and dynamics, in parallel."""
+    # Run plant and controller in parallel, on separate threads.
+    N_TASKS = 2
+    with ThreadPoolExecutor(max_workers=N_TASKS) as executor:
+      # Create two tasks: One for the controller and another for the plant.
+      tasks = [executor.submit(self.run_controller), executor.submit(self._run_plant)]
+      for future in concurrent.futures.as_completed(tasks):
+        if future.exception(): # Waits until finished or failed.
+          print(f"Task {future} failed with exception: {future.exception()}")
+          raise future.exception()
+    simulation_data = readJson('simulation_data.json')
+    simulation_data = self.postprocess_simulation_data(simulation_data)
+    return simulation_data
+
+  def postprocess_simulation_data(self, simulation_data):
+    return simulation_data
+
+
+class ModeledDelaysSimulationExecutor(SimulationExecutor):
+  """
+  Create a simulation executor that uses a model of the computation delays instead of simulating the controller using Scarab.
+  """
+  def run_controller(self):
+    run_shell_cmd(self.controller_executable, working_dir=self.sim_dir, log=self.controller_log)
+
+class SerialSimulationExecutor(SimulationExecutor):
+
+  def run_controller(self):
+    # Run Scarb using execution-driven mode.
+    cmd = " ".join([self.controller_executable])
+    scarab_cmd_argv = [sys.executable, # The Python executable
+                      scarab_paths.bin_dir + '/scarab_launch.py',
+                      '--program', cmd,
+                      '--param', 'PARAMS.generated',
+                      # '--simdir', '.', # Changes the working directory.
+                      '--pintool_args',
+                      '-fast_forward_to_start_inst 1',
+                      '--scarab_args',
+                      '--inst_limit 15000000000' # Instruction limit
+                      #  '--heartbeat_interval 50', 
+                      # '--num_heartbeats 1'
+                      # '--power_intf_on 1']
+                    ]
+    # There is a bug in Scarab that causes it to crash when run in the terminal 
+    # when the terminal is resized. To avoid this bug, we run it in a different thread, which appears to fix the problem.
+    with ThreadPoolExecutor() as executor:
+      future = executor.submit(lambda: run_shell_cmd(scarab_cmd_argv, working_dir=self.sim_dir, log=self.controller_log))
+
+      # Wait for the background task to finish before exiting
+      future.result()
+
+
+class ParallelSimulationExecutor(SimulationExecutor):
+
+  def run_controller(self):
+    run_shell_cmd(self.controller_executable, working_dir=self.sim_dir, log=self.controller_log)
+
+  def postprocess_simulation_data(self, simulation_data):
+
+    # Portabilize the trace files (in parallel) and then simulate with Scarab (in parallel).
+
+    (dynamrio_trace_dir_dictionaries, trace_dirs, sorted_indices) = get_dynamorio_trace_directories()
+
+    #? Do we need to portablize if we are just using the trace files in-place? We can save a few seconds on each loop by skipping this step.
+    print(f"Starting portabilization of trace directories {trace_dirs} in {self.sim_dir}.")
+    with ProcessPoolExecutor(max_workers = os.cpu_count()) as portabalize_executor:
+      portabalize_executor.map(portabalize_trace, trace_dirs)
+
+    print(f"Finished portabilizing traces for each directory in {dynamrio_trace_dir_dictionaries.values()} in {self.sim_dir}.")
+    
+    computation_time_list = [None] * len(sorted_indices)
+    with ProcessPoolExecutor(max_workers = os.cpu_count()) as scarab_executor:
+      scarab_data = scarab_executor.map(simulate_trace_in_scarab, sorted_indices)
+      for datum in scarab_data:
+        index = datum["index"]
+        trace_dir = datum["trace_dir"]
+        computation_time = datum["computation_time"]
+        computation_time_list[index] = computation_time
+        simulation_data["t_delay"][index] = computation_time
+      print(f"Finished executing parallel simulations, scarab_data: {scarab_data}")
+
+    simulation_data["t_delay"] = [None] + simulation_data["t_delay"]
+    print(f"computation_time list: {computation_time_list}")
+    return simulation_data
+    
+
+class InternalSimulationExecutor(SimulationExecutor):
+  """
+  Create a simulation executor that performs all of the plant dynamics calculations internally. This executor does not support simulating computation times with Scarab.
+  """
+  def __init__(self):
+    raise RuntimeError("This class is not tested and is not expected to work correctly as-is.")
+
+  def run_controller(self):
+    run_shell_cmd(self.controller_executable, working_dir=self.sim_dir, log=self.controller_log)
+
+  def run_simulation(self):
+    self.run_controller()
 
 # Ideas for experiments to run.
 # -> Run several iterations of Cache sizes

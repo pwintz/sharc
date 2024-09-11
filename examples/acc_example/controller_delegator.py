@@ -13,7 +13,9 @@ CMAKE_VERBOSITY_FROM_DEBUG_LEVEL = {
   2: "VERBOSE"
 }
 
-def get_controller_executable(example_dir:str, build_config:dict) -> str:
+example_dir = os.path.abspath('.')
+
+def get_controller_executable(build_config:dict) -> str:
   build_dir = example_dir + "/build" 
   os.makedirs(build_dir, exist_ok=True)
   # os.chdir(build_dir)

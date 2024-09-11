@@ -150,6 +150,7 @@
     "**/memory.stat.*": true,
     "**/power.stat.*": true,
     "**/pref.stat.*": true,
-    "**/stream.stat.*": true
+    "**/stream.stat.*": true,
+    "**/__pycache__": true
   }
 }
