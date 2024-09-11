@@ -141,5 +141,15 @@
       "binaryPath": "/workspaces/ros-docker/libmpc_example/acc_controller",
       "binaryArgs": []
     }
-  ]
+  ],
+  "files.exclude": {
+    "**/bp.stat.*": true,
+    "**/fetch.stat.*": true,
+    "**/inst.stat.*": true,
+    "**/l2l1pref.stat.*": true,
+    "**/memory.stat.*": true,
+    "**/power.stat.*": true,
+    "**/pref.stat.*": true,
+    "**/stream.stat.*": true
+  }
 }

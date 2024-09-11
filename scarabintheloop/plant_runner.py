@@ -10,7 +10,6 @@ import scipy.signal
 import numpy.linalg as linalg
 import copy
 # import argparse # Parsing of input args.
-import plant_dynamics
 
 import math
 import time
@@ -29,7 +28,7 @@ import os
 class DataNotRecievedViaFileError(IOError):
   pass
 
-def run(sim_dir: str, config_data) -> dict:
+def run(sim_dir: str, config_data, evolveState) -> dict:
   if not sim_dir.endswith("/"):
     sim_dir += "/"
   print(f"Start of plant_runner.run()  in {sim_dir}")
@@ -82,7 +81,6 @@ def run(sim_dir: str, config_data) -> dict:
   # Get the dynamics definition.
   n = config_data["system_parameters"]["state_dimension"]
   m = config_data["system_parameters"]["input_dimension"]
-  evolveState = plant_dynamics.getDynamicsFunction(config_data)
 
   xs_list = []
   us_list = []

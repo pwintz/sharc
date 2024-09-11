@@ -534,8 +534,9 @@ int main()
 
   for (int i = 0; i < n_time_steps; i++)
   {
-    PRINT(std::endl << "====== Starting loop #" << i << " ======");
-    PRINT("At x=" << modelX.transpose().format(fmt));
+    PRINT(std::endl << "====== Starting loop #" << i+1 << " of " << n_time_steps << " ======");
+    PRINT("x=" << modelX.transpose().format(fmt));
+    PRINT("u=" << u.transpose().format(fmt));
 
     // Begin a batch of Scarab statistics
     #ifdef USE_DYNAMORIO

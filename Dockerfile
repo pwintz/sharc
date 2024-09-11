@@ -248,8 +248,8 @@ COPY --chown=$USERNAME .profile /home/$USERNAME/.bashrc
 ARG WORKSPACE_ROOT
 ENV PYTHONPATH "${PYTHONPATH}:${WORKSPACE_ROOT}:${SCARAB_ROOT}/bin"
 ENV PATH "${PATH}:${WORKSPACE_ROOT}/scarabintheloop:${WORKSPACE_ROOT}/scarabintheloop/scripts:${SCARAB_ROOT}/bin"
-COPY scarabintheloop/requirements.txt sitl-requirements.txt
-RUN pip3 install -r sitl-requirements.txt && rm sitl-requirements.txt
+COPY scarabintheloop/requirements.txt scarabintheloop-requirements.txt
+RUN pip3 install -r scarabintheloop-requirements.txt && rm scarabintheloop-requirements.txt
 
 
 #####################################
@@ -289,22 +289,15 @@ ARG WORKSPACE_ROOT
 ENV LIBMPC_INCLUDE $WORKSPACE_ROOT/libmpc/include/
 
 RUN apt-get install --assume-yes --quiet=2 --no-install-recommends \
+    # CMake build toolchain
     cmake \
-    # binutils \
-    # libunwind-dev \
+    # Boost C++ general-purpose library
     libboost-dev \
-    # zlib1g-dev \
-    # libsnappy-dev \
-    # liblz4-dev \
+    # GNU Compiler
     g++-9 \
     g++-9-multilib \
     # SFML is used(?) by the inverted-pendulum example
     libsfml-dev
-    # # Debugger
-    # gdb \
-    # doxygen \
-    # libconfig++-dev \
-    # bc
 
 COPY examples/acc_example/requirements.txt acc-requirements.txt
 RUN pip3 install -r acc-requirements.txt && rm acc-requirements.txt
@@ -312,14 +305,8 @@ RUN pip3 install -r acc-requirements.txt && rm acc-requirements.txt
 ##############################
 # libMPC++
 ##############################
-# Downloads and unzips lipmpc into the home directory.
-# USER $USERNAME
-# RUN cd ~ && wget https://github.com/nicolapiccinelli/libmpc/archive/refs/tags/0.4.0.tar.gz \
-#     && tar -xzvf 0.4.0.tar.gz \
-#     && rm 0.4.0.tar.gz
-
 ADD https://github.com/pwintz/libmpc.git libmpc
-RUN libmpc/configure.sh
+RUN ./libmpc/configure.sh
 RUN mkdir libmpc/build && cd libmpc/build && cmake .. && cmake --install .
 
 
@@ -393,27 +380,29 @@ RUN mkdir libmpc/build && cd libmpc/build && cmake .. && cmake --install .
 
 USER $USERNAME
 
-#################################
-# DevContainer for mpc-examples #
-#################################
+###################################
+## DevContainer for mpc-examples ##
+###################################
 FROM mpc-examples-base as mpc-examples-dev
 ARG USERNAME
 
-# RUN cd $WORKSPACE_ROOT/libmpc && mkdir build && cd build && cmake .. && sudo cmake --install 
-
-###############################################
-# Stand-alone mpc-examples (no dev container) #
-###############################################
+#################################################
+## Stand-alone mpc-examples (no dev container) ##
+#################################################
 FROM mpc-examples-base as mpc-examples
 
+COPY --chown=$USERNAME scarabintheloop $RESOURCES_DIR/scarabintheloop
 COPY --chown=$USERNAME examples/acc_example /home/$USERNAME/examples/acc_example
 # COPY --chown=$USERNAME libmpc /home/$USERNAME/libmpc
 
-ENV LIBMPC_INCLUDE /home/$USERNAME/libmpc/include/
+# ENV LIBMPC_INCLUDE /home/$USERNAME/libmpc/include/
+
+ENV PYTHONPATH "${PYTHONPATH}:${RESOURCES_DIR}"
+ENV PATH "${PATH}:${RESOURCES_DIR}/scarabintheloop:${RESOURCES_DIR}/scarabintheloop/scripts"
 
 # Set the working directory
 WORKDIR /home/$USERNAME/examples/acc_example
 
 USER $USERNAME
 
-CMD run_scarabintheloop.py . && cd out/latest/default-settings && cat controller.log && cat plant_dynamics.log
+# CMD run_scarabintheloop.py . && cd out/latest/default-settings && cat controller.log && cat plant_dynamics.logdocker system df
