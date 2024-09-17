@@ -11,6 +11,9 @@ import numpy.linalg as linalg
 import copy
 # import argparse # Parsing of input args.
 
+# Import contextmanager to allow defining commands to be used to create "with" blocks.
+from contextlib import contextmanager 
+
 import math
 import time
 import datetime
@@ -28,7 +31,7 @@ import os
 class DataNotRecievedViaFileError(IOError):
   pass
 
-def run(sim_dir: str, config_data, evolveState) -> dict:
+def run(sim_dir: str, config_data: dict, evolveState) -> dict:
   if not sim_dir.endswith("/"):
     sim_dir += "/"
   print(f"Start of plant_runner.run()  in {sim_dir}")
@@ -61,21 +64,32 @@ def run(sim_dir: str, config_data, evolveState) -> dict:
 #       print(f"Changing only_update_control_at_sample_times={only_update_control_at_sample_times} to True because parallel_scarab_simulation=True.")
 #       only_update_control_at_sample_times = True
 
-  #  File names for the pipes we use for communicating with C++.
-  x_in_filename = sim_dir + 'x_c++_to_py'
-  u_in_filename = sim_dir + 'u_c++_to_py'
-  x_predict_in_filename = sim_dir + 'x_predict_c++_to_py'
-  t_predict_in_filename = sim_dir + 't_predict_c++_to_py'
-  iterations_in_filename = sim_dir + 'iterations_c++_to_py'
-  x_out_filename = sim_dir + 'x_py_to_c++'
-  t_delay_out_filename = sim_dir + 't_delay_py_to_c++'
+ 
+  @contextmanager
+  def open_in_file(filename):
+    LINE_BUFFERING = 1
+    filename = sim_dir + "/" + filename
 
-  # File names for recording values, to use in plotting.
-  x_data_filename = sim_dir + 'x_data.csv'
-  u_data_filename = sim_dir + 'u_data.csv'
-  t_data_filename = sim_dir + 't_data.csv'
+    try:
+      file = open(filename, 'r', buffering= LINE_BUFFERING)
+      yield file
+    finally:
+      # Clean up
+      file.close()
 
-  n_time_steps = config_data["n_time_steps"]
+  @contextmanager
+  def open_out_file(filename):
+    LINE_BUFFERING = 1
+    filename = sim_dir + "/" + filename
+
+    try:
+      file = open(filename, 'w', buffering= LINE_BUFFERING)
+      yield file
+    finally:
+      # Clean up
+      file.close()
+
+  max_time_steps = config_data["max_time_steps"]
   sample_time = config_data["system_parameters"]["sample_time"] # Discrete sample period.
 
   # Get the dynamics definition.
@@ -93,8 +107,7 @@ def run(sim_dir: str, config_data, evolveState) -> dict:
   cycles_counts_list = []
   walltimes_list = []
 
-  u_prev = np.zeros((m, 1)) 
-
+  u_prev = np.array(config_data["u0"]).reshape(m, 1)
 
   def convertStringToVector(vector_str: str):
       vector_str_list = vector_str.split(',') #.strip().split("\t")
@@ -121,6 +134,13 @@ def run(sim_dir: str, config_data, evolveState) -> dict:
     string = ', '.join(map(str, array.flatten()))
     return string
 
+  
+  def write_vec_to_file(file, x):
+    # Pass the string back to C++.
+    x_out_string = numpyArrayToCsv(x)
+    if debug_interfile_communication_level >= 1:
+      print("x output line:" + repr(x_out_string))
+    file.write(x_out_string + "\n")# Write to pipe to C++
 
   def checkAndStripInputLoopNumber(expected_k, input_line):
     """ Check that an input line, formatted as "Loop <k>: <data>" 
@@ -147,21 +167,25 @@ def run(sim_dir: str, config_data, evolveState) -> dict:
     # max_loops = 
     if debug_interfile_communication_level >= 1:
           print(f"Waiting for input_line from {file.name}.")
-    for i in range(0, 10):
-      input_line = file.readline()
-      # print(f'input line read i:{i}, input_line:{input_line}')
-      # print()
-      if input_line:
-        if debug_interfile_communication_level >= 1:
-          print(f"Recieved input_line from {file.name} on loop #{i}:")
-          print(input_line)
-        return input_line
+    #?? We were looping for a few iterations for some reason, but it is not clear why.
+    # for i in range(0, 10):
+    #   input_line = file.readline()
+    #   if input_line:
+    #     if debug_interfile_communication_level >= 1:
+    #       print(f'Recieved input_line from {os.path.basename(file.name)} on loop #{i}:')
+    #       print(f'input_line: {repr(input_line)}')
+    #     return input_line
+    input_line = file.readline()
+    if debug_interfile_communication_level >= 1:
+      print(f'Recieved input_line from {os.path.basename(file.name)}:')
+      print(f'input_line: {repr(input_line)}')
+    return input_line
 
     raise DataNotRecievedViaFileError(f"No input recieved from {file.name}.")
 
   def generateSimulationData() -> dict:
     # Create a JSON object for storing the data out, using all the values in config_data.
-    simulation_data = {} # copy.deepcopy(config_data)
+    simulation_data = {}
     simulation_data["datetime_of_run"] = datetime.datetime.now().isoformat()
     simulation_data["cause_of_termination"] = cause_of_termination
     simulation_data["x"] = xs_list;
@@ -175,6 +199,7 @@ def run(sim_dir: str, config_data, evolveState) -> dict:
     simulation_data["cycles_counts"] = cycles_counts_list
     simulation_data["execution_walltime"] = walltimes_list
     
+    # TODO: Move this PARAMS.out file processing out of plant_runner.py.
     if use_scarab_delays:
       # Save Scarab parameters from PARAMS.out into the data_out JSON object. 
       param_keys_to_save_in_data_out = ["chip_cycle_time", "l1_size", "dcache_size", "icache_size", "decode_cycles"]
@@ -234,16 +259,16 @@ def run(sim_dir: str, config_data, evolveState) -> dict:
   LINE_BUFFERING = 1
   if debug_interfile_communication_level >= 1:
     print("About to open files for interprocess communication. Will wait for readers...")
-  with open(x_in_filename, 'r', buffering= LINE_BUFFERING) as x_infile, \
-      open(u_in_filename, 'r', buffering= LINE_BUFFERING) as u_infile, \
-      open(x_predict_in_filename, 'r', buffering= LINE_BUFFERING) as x_predict_infile, \
-      open(t_predict_in_filename, 'r', buffering= LINE_BUFFERING) as t_predict_infile, \
-      open(iterations_in_filename, 'r', buffering= LINE_BUFFERING) as iterations_infile, \
-      open(x_out_filename, 'w', buffering= LINE_BUFFERING) as x_outfile, \
-      open(t_delay_out_filename, 'w', buffering= LINE_BUFFERING) as t_delay_outfile, \
-      open(x_data_filename, 'w', buffering= LINE_BUFFERING) as x_datafile, \
-      open(u_data_filename, 'w', buffering= LINE_BUFFERING) as u_datafile, \
-      open(t_data_filename, 'w', buffering= LINE_BUFFERING) as t_datafile :
+  with open_in_file('x_c++_to_py'         ) as x_infile, \
+       open_in_file('u_c++_to_py'         ) as u_infile, \
+       open_in_file('x_predict_c++_to_py' ) as x_predict_infile, \
+       open_in_file('t_predict_c++_to_py' ) as t_predict_infile, \
+       open_in_file('iterations_c++_to_py') as iterations_infile, \
+       open_out_file('x_py_to_c++'      ) as x_outfile, \
+       open_out_file('t_delay_py_to_c++') as t_delay_outfile, \
+       open_out_file('x_data.csv') as x_datafile, \
+       open_out_file('u_data.csv') as u_datafile, \
+       open_out_file('t_data.csv') as t_datafile :
     print('Pipes are open')
 
     def snapshotState(k: int, t: float, xarray: np.ndarray, uarray: np.ndarray, description: str):
@@ -259,13 +284,9 @@ def run(sim_dir: str, config_data, evolveState) -> dict:
         printIndented(f'u: {u_str}', 1)
         printIndented(f't: {t_str}', 1)
 
-      # x_datafile.write(x_str + "\n")
-      # u_datafile.write(u_str + "\n")
-      # t_datafile.write(t_str + "\n")
-
       # Add xarray and uarray to the cumulative lists. 
       # We want xarray to be stored as a single list of numbers, but the 
-      # tolist() function creates a nested lists, with the outter list containing
+      # tolist() function creates a nested lists, with the outer list containing
       # a single list. Thus, we use "[0]" to reference the inner list. 
       xs_list.append(xarray.transpose().tolist()[0])
       us_list.append(uarray.transpose().tolist()[0])
@@ -294,10 +315,14 @@ def run(sim_dir: str, config_data, evolveState) -> dict:
       t_predictions_list.append(t_prediction)
 
     t = 0.0
+    x0 = np.array(config_data['x0']).reshape(-1, 1)
+    # Send the initial state to the controller to initialize it.
+    write_vec_to_file(x_outfile, x0)
+    
     cause_of_termination = "In progress"
     try:
-      for k in range(0, n_time_steps+1):
-        print(f'(Loop {k}) - Waiting for state \'x\' from file.')
+      for k in range(0, max_time_steps):
+        print(f'(Loop {k}) - Waiting for state `\'x\' from file.')
         t_start_of_loop = t
         walltime_start_of_loop = time.time()
 
@@ -381,9 +406,8 @@ def run(sim_dir: str, config_data, evolveState) -> dict:
           t_start = t
           t_computation_update = t + (n_samples_without_finishing_computation+1)*sample_time
           t_end = t_computation_update
-          # TODO: This model of the delay is designed to match the one used by Yasin's parallelized scheme, but we should check that his model uses u_prev until the computation time passes.
           (t, x) = evolveState(t_start, x, u_prev, t_end)
-          snapshotState(k, t, x, u_prev, f"After full sample interval with {n_samples_without_finishing_computation} missed computation updates.")
+          snapshotState(k, t, x, u, f"After full sample interval with {n_samples_without_finishing_computation} missed computation updates.")
           u_prev = u
         else: # Update when the computation finishes, without waiting for the next sample time.
           t_start = t
@@ -406,11 +430,14 @@ def run(sim_dir: str, config_data, evolveState) -> dict:
         
           u_prev = u
 
-        # Pass the string back to C++.
-        x_out_string = numpyArrayToCsv(x)
-        if debug_interfile_communication_level >= 1:
-          print("x output line:" + repr(x_out_string))
-        x_outfile.write(x_out_string + "\n")# Write to pipe to C++
+
+
+        write_vec_to_file(x_outfile, x)
+        # # Pass the string back to C++.
+        # x_out_string = numpyArrayToCsv(x)
+        # if debug_interfile_communication_level >= 1:
+        #   print("x output line:" + repr(x_out_string))
+        # x_outfile.write(x_out_string + "\n")# Write to pipe to C++
         t_delay_outfile.write(f"{simulated_computation_time_str} \n")
         walltimes_list.append(time.time() - walltime_start_of_loop)
         t_delays_list.append(simulated_computation_time)
@@ -430,7 +457,7 @@ def run(sim_dir: str, config_data, evolveState) -> dict:
       cause_of_termination = "Finished."
 
   simulation_data = generateSimulationData()
-  writeJson(sim_dir + "simulation_data.json", simulation_data)
+  # writeJson(sim_dir + "simulation_data.json", simulation_data)
 
   # # Save the data_out to file (if enabled)
   # simulation_data_path = os.path.abspath(sim_dir + 'simulation_data.json')

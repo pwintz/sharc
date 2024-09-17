@@ -5,9 +5,10 @@
   "Simulation Options": {
     "use_external_dynamics_computation": true,
     "use_fake_scarab_computation_times": true,
-    "parallel_scarab_simulation": false
+    "parallel_scarab_simulation": false, 
+    "max_batches": 9999999
   },
-  "n_time_steps": 13,
+  "max_time_steps": 13,
   "==== Initial Condition ====": "",
   "x0":      [20, -2, 10, 0, 0],
   "u0":      [0],
@@ -18,7 +19,7 @@
     "computation_delay_y-intercept": 0.147
   },
   "==== Debgugging Levels ====": {
-    "debug_interfile_communication_level": 0,
+    "debug_interfile_communication_level": 2,
     "debug_optimizer_stats_level": 0,
     "debug_dynamics_level": 0,
     "debug_configuration_level": 0,

@@ -153,6 +153,31 @@ void sendDouble(std::string label, int i_loop, double x, std::ofstream& outfile)
   outfile << "Loop " << i_loop << ": " << x << std::endl;
 }
 
+
+template<int rows>
+void readVec(std::ifstream& x_infile, mpc::cvec<rows>& x) {
+    std::string x_in_line_from_py;
+
+    // Check debug level and print the appropriate message
+    if (debug_interfile_communication_level >= 2) {
+        PRINT_WITH_FILE_LOCATION("Getting 'x' line from Python: ");
+    }
+
+    // Get the line from the file
+    std::getline(x_infile, x_in_line_from_py);
+
+    if (debug_interfile_communication_level >= 2) {
+        PRINT_WITH_FILE_LOCATION("Getting 't_delays' line from Python: ");
+    }
+
+    // Parse the line into the x object
+    std::stringstream x_ss(x_in_line_from_py);
+    for (int j_entry = 0; j_entry < x.rows(); j_entry++) {
+        char comma; // to read and discard the comma
+        x_ss >> x(j_entry) >> comma;
+    }
+}
+
 int main()
 // int main(int argc, char *argv[])
 {
@@ -231,7 +256,11 @@ int main()
   json json_data = json::parse(config_json_file);
   config_json_file.close();
 
-  int n_time_steps = json_data["n_time_steps"];
+  int max_time_steps = json_data["max_time_steps"];
+  auto time_indices = json_data["time_indices"];
+  for (int time_index : time_indices){
+    PRINT("time_index" << time_index)
+  }
 
   auto debug_config = json_data["==== Debgugging Levels ===="];
   debug_interfile_communication_level = debug_config["debug_interfile_communication_level"];
@@ -522,7 +551,9 @@ int main()
   mpc::cvec<Tnu> u;
 
   // Set the initial values from JSON.
-  loadMatrixValuesFromJson(modelX, json_data, "x0");
+  // loadMatrixValuesFromJson(modelX, json_data, "x0");
+  readVec(x_infile, modelX);
+  
   loadMatrixValuesFromJson(u, json_data, "u0");
 
   // Store the delay time required to compute the previous controller value.
@@ -532,9 +563,9 @@ int main()
     scarab_begin(); // Tell Scarab to stop "fast forwarding". This is needed for '--pintool_args -fast_forward_to_start_inst 1'
   }
 
-  for (int i = 0; i < n_time_steps; i++)
+  for (int i = 0; i < max_time_steps; i++)
   {
-    PRINT(std::endl << "====== Starting loop #" << i+1 << " of " << n_time_steps << " ======");
+    PRINT(std::endl << "====== Starting loop #" << i+1 << " of " << max_time_steps << " ======");
     PRINT("x=" << modelX.transpose().format(fmt));
     PRINT("u=" << u.transpose().format(fmt));
 
@@ -678,41 +709,33 @@ int main()
       sendCVec("u", i, u, u_outfile);
 
       // Read and print the contents of the file from Python.
-      std::string x_in_line_from_py;
+      readVec(x_infile, modelX);
+
       std::string t_delay_in_line_from_py;
-      
-      if (debug_interfile_communication_level >= 2)
-      {
-        PRINT_WITH_FILE_LOCATION("Getting 'x' line from Python: ");
-      }
-      std::getline(x_infile, x_in_line_from_py);
-      if (debug_interfile_communication_level >= 2)
-      {
-        PRINT_WITH_FILE_LOCATION("Getting 't_delays' line from Python: ");
-      }
+
       std::getline(t_delays_infile, t_delay_in_line_from_py);
       if (debug_interfile_communication_level >= 2)
       {
         PRINT_WITH_FILE_LOCATION("Lines received from Python:")
-        PRINT_WITH_FILE_LOCATION("\t      x: " << x_in_line_from_py);
+        // PRINT_WITH_FILE_LOCATION("\t      x: " << x_in_line_from_py);
         PRINT_WITH_FILE_LOCATION("\tt_delay: " << t_delay_in_line_from_py);
       }
 
       // Create a stringstream to parse the string
-      std::stringstream x_ss(x_in_line_from_py);
       std::stringstream t_delay_ss(t_delay_in_line_from_py);
       
-      for (int j_entry = 0; j_entry < modelX.rows(); j_entry++) {
-        char comma; // to read and discard the comma
-        x_ss >> modelX(j_entry) >> comma;
+      if (debug_interfile_communication_level >= 2)
+      {
+        PRINT_WITH_FILE_LOCATION("Getting 't_delays' line from Python: ");
       }
+
       t_delay_ss >> t_delay_prev;
       if (debug_interfile_communication_level >= 1) 
       {
         PRINT_WITH_FILE_LOCATION("x (from Python): " << modelX.transpose().format(fmt));
         PRINT_WITH_FILE_LOCATION("t_delay_prev (from Python): " << t_delay_prev);
       }
-    } else {
+    } else { // If use internal dynamics computation
       printVector("modelX", modelX);
       printMat("optseq.state", optseq.state);
       modelX = Ad * modelX + Bd * u + Bd_disturbance*lead_car_input;
@@ -728,7 +751,7 @@ int main()
     }
     
   } 
-  PRINT_WITH_FILE_LOCATION("Finshed looping through " << n_time_steps << " time steps.")
+  PRINT_WITH_FILE_LOCATION("Finshed looping through " << max_time_steps << " time steps.")
   // printVector("y", y);
 
   if (use_external_dynamics_computation)

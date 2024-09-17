@@ -18,25 +18,16 @@ example_dir = os.path.abspath('.')
 def get_controller_executable(build_config:dict) -> str:
   build_dir = example_dir + "/build" 
   os.makedirs(build_dir, exist_ok=True)
-  # os.chdir(build_dir)
 
   debug_build_level = build_config["==== Debgugging Levels ===="]["debug_build_level"]
 
-  # if debug_build_level == 0:
-  #   cmake_verbosity = "ERROR"
-  # elif debug_build_level == 1:
-  #   cmake_verbosity = "NOTICE"
-  # elif debug_build_level == 2:
-  #   cmake_verbosity = "VERBOSE"
-  # else:
-  #   raise ValueError(f"Unexpected value: debug_build_level={debug_build_level}. Only 0, 1, and 2 are supported.")
-
-  use_dynamorio = build_config["Simulation Options"]["parallel_scarab_simulation"]
+  simulation_options = build_config["Simulation Options"]
+  use_dynamorio = simulation_options["parallel_scarab_simulation"] and not simulation_options["use_fake_scarab_computation_times"]
   prediction_horizon = build_config["system_parameters"]["mpc_options"]["prediction_horizon"]
   control_horizon = build_config["system_parameters"]["mpc_options"]["control_horizon"]
 
   executable_name = f"acc_controller_{prediction_horizon}_{control_horizon}"
-  # TODO: Change executable name if using DyanmoRio
+  
   if use_dynamorio:
     executable_name += "_dynamorio"
 

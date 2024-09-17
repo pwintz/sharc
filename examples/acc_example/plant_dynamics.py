@@ -70,7 +70,7 @@ def getDynamicsFunction(config_data: dict):
   D = np.zeros([5, 1], float)
 
   if debug_dynamics_level >= 1:
-    fake_computation_delay_times = config_data["use_fake_scarab_computation_times"]
+    fake_computation_delay_times = config_data["Simulation Options"]["use_fake_scarab_computation_times"]
     sample_time = config_data["system_parameters"]["sample_time"]
     (A_to_delay, B_to_delay, C_to_delay, D_to_delay, dt) = scipy.signal.cont2discrete((A, B, C, D), fake_computation_delay_times)
     (A_delay_to_sample, B_delay_to_sample, C_delay_to_sample, D_delay_to_sample, dt) = scipy.signal.cont2discrete((A, B, C, D), sample_time - fake_computation_delay_times)

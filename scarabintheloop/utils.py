@@ -32,9 +32,15 @@ def readJson(filename: str) -> Union[Dict,List]:
     json_data = json.load(json_file)
     return json_data
 
-def writeJson(filename: str, json_data: Union[Dict,List]):
+def writeJson(filename: str, json_data: Union[Dict,List], label:str=None):
+  """
+  Write a dictionary to a file in JSON format. 
+  If 'label' is given, then the path is printed to the stdout with the given label.
+  """
   with open(filename, 'w') as file:
     file.write(json.dumps(json_data, indent=2))
+  if label:
+    print(f'{label}: ' + os.path.abspath(filename))
 
     
 def printJson(label: str, json_data: Union[Dict,List]):
@@ -70,47 +76,82 @@ def patch_dictionary(base: dict, patch: dict) -> dict:
 
 def checkBatchConfig(batch_config):
   simulation_label = batch_config["simulation_label"]
-  n_time_steps = batch_config["n_time_steps"]
+  max_time_steps = batch_config["max_time_steps"]
   x0 = batch_config["x0"]
   u0 = batch_config["u0"]
-  first_time_step = batch_config["first_time_step"]
-  last_time_step = batch_config["last_time_step"]
+  first_time_index = batch_config["first_time_index"]
+  last_time_index = batch_config["last_time_index"]
 
-  n_time_steps_in_batch = batch_config["n_time_steps"]
+  max_time_steps_in_batch = batch_config["max_time_steps"]
+  n_time_indices_in_bath = max_time_steps_in_batch + 1
+  simulation_dir = batch_config["simulation_dir"]
   
-  if n_time_steps_in_batch > os.cpu_count():
-    raise ValueError(f"n_time_steps_in_batch={n_time_steps_in_batch} > os.cpu_count()")
+  if max_time_steps_in_batch > os.cpu_count():
+    raise ValueError(f"max_time_steps_in_batch={max_time_steps_in_batch} > os.cpu_count()")
 
-  if last_time_step - first_time_step + 1 != n_time_steps_in_batch:
-    raise ValueError(f"last_time_step - first_time_step = {last_time_step - first_time_step} != n_time_steps_in_batch = {n_time_steps_in_batch}")
+  if last_time_index - first_time_index != max_time_steps_in_batch:
+    raise ValueError(f"last_time_index - first_time_index = {last_time_index - first_time_index} != max_time_steps_in_batch = {max_time_steps_in_batch}")
 
-  if n_time_steps_in_batch < 0:
-    raise ValueError(f"A negative n_time_steps_in_batch was given: {n_time_steps_in_batch}")
+  if max_time_steps_in_batch < 0:
+    raise ValueError(f"A negative max_time_steps_in_batch was given: {max_time_steps_in_batch}")
+
+  if batch_config["time_indices"][0] != first_time_index or batch_config["time_indices"][-1] != last_time_index:
+    raise ValueError(f"time_indices doen't align.")
     
 
-def checkBatchSimulationData(batch_simulation_data, n_time_steps):
-  # The state
-  x = batch_simulation_data["x"]
+def checkSimulationData(batch_simulation_data, max_time_steps):
+  n_time_indices = max_time_steps + 1
+
+  def assert_len_equals_n_time_indices(name:str):
+    array = batch_simulation_data[name]
+    if len(array) != n_time_indices:
+      raise ValueError(f"the length of x ({len(array)}) is not equal to the number of time indices ({n_time_indices}).")
+
+  # There is one fewer time steps than time indices because each step is a step between indices.
+  def assert_len_equals_n_time_steps(name:str):
+    array = batch_simulation_data[name]
+    if len(array) != n_time_indices - 1:
+      raise ValueError(f"the length of {name} ({len(array)}) is not equal to the number of time steps ({n_time_indices - 1}).")
+
   # The control values applied. The first entry is the u0 previously computed. Subsequent entries are the computed values. The control u[i] is applied from t[i] to t[i+1], with u[-1] not applied during this batch. 
-  u = batch_simulation_data["u"]
-  # The time.
-  t = batch_simulation_data["t"]
-  # The computational delay.
-  t_delay = batch_simulation_data["t_delay"]
+  assert_len_equals_n_time_indices("x")
+  assert_len_equals_n_time_indices("u")
+  assert_len_equals_n_time_indices("t")
+  assert_len_equals_n_time_steps("t_delay")
 
-  # Arrays x and t should have one entry for the initial state plus <n_time_steps> entries for the number of time steps in the batch. 
-  if len(x) != n_time_steps + 1:
-    raise ValueError(f"n_time_steps={n_time_steps} is not equal to the length of x minus 1: {len(x) - 1}.")
-  if len(t) != n_time_steps + 1:
-    raise ValueError(f"n_time_steps={n_time_steps} is not equal to the length of t minus 1: {len(t) - 1}.")
 
-  # Arrays u should have one entry for the initial state plus <n_time_steps> entries for the number of time steps in the batch, minus one entry for the last step. 
-  if len(u) != n_time_steps + 1:
-    raise ValueError(f"n_time_steps+1={n_time_steps+1} is not equal to the length of u: {len(u)}.")
+def printHeader1(header: str):
+  """ 
+  Print a nicely formatted header box (level 1) to the console.
+  """
+  header = "|| " + header + " ||"
+  print()
+  print('=' * len(header))
+  print(header)
+  print('=' * len(header))
 
-  # Arrays t_delays should have <n_time_steps> entries, because there is one computation event for each timestep. 
-  if len(t_delay) != n_time_steps + 1:
-    raise ValueError(f"n_time_steps={n_time_steps + 1} is not equal to the length of t_delay: {len(t_delay)}.")
+
+def printHeader2(header: str):
+  """ 
+  Print a nicely formatted header box (level 2) to the console.
+  """
+  header = "| " + header + " |"
+  print()
+  print('-' * len(header))
+  print(header)
+  print('-' * len(header))
+
+def printHeader(header: str, level=1):
+  """ 
+  Print a nicely formatted header box to the console.
+  """
+  if level==1:
+    printHeader1(header)
+  elif level==2:
+    printHeader2(header)
+  else:
+    raise ValueError(f"Unexpected value of level = {level}")
+
 
 @contextmanager
 def openLog(filename, headerText=None):
@@ -212,3 +253,42 @@ def loadModuleFromPath(module_name, file_path):
   spec.loader.exec_module(module)
   return module
 
+
+
+from functools import wraps
+
+# Track current indent level globally
+CURRENT_INDENT_LEVEL = 0
+
+def indented_print(func):
+    """ 
+    This function defines a decorator that causes all of the print statements within a function to be indented. Nesting is supported.
+    This function was generated by ChatGPT. """
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        global CURRENT_INDENT_LEVEL
+        
+        # Increase the indent level for this function
+        original_indent_level = CURRENT_INDENT_LEVEL
+        CURRENT_INDENT_LEVEL += 1
+        
+        # Define custom print with indentation
+        original_print = print
+        indent = ' ' * (CURRENT_INDENT_LEVEL * 2)
+
+        def custom_print(*args, **kwargs):
+            # Prepend the indentation to the first argument
+            original_print(indent, *args, **kwargs)
+
+        # Override the built-in print function
+        builtins_print = sys.modules['builtins'].print
+        sys.modules['builtins'].print = custom_print
+        try:
+            result = func(*args, **kwargs)  # Call the original function
+        finally:
+            # Restore the original print function and indent level
+            sys.modules['builtins'].print = original_print
+            CURRENT_INDENT_LEVEL = original_indent_level  # Restore the indent level
+
+        return result
+    return wrapper
