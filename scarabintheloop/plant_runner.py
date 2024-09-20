@@ -20,7 +20,7 @@ import datetime
 import traceback # Provides pretty printing of exceptions (https://stackoverflow.com/a/1483494/6651650)
 
 import scarabintheloop.scarabizor as scarabizor
-from scarabintheloop.utils import assertFileExists, printIndented, writeJson, readJson
+from scarabintheloop.utils import assertFileExists, printIndented, writeJson, readJson, assertLength
 
 import json
 import csv
@@ -102,7 +102,8 @@ def run(sim_dir: str, config_data: dict, evolveState) -> dict:
   x_predictions_list = []
   t_predictions_list = [] # Absolute time
   t_delays_list = [] # Relative time interval
-  simulated_computation_times_list = []
+  time_indices_list = []
+  t_delays_list = []
   instruction_counts_list = []
   cycles_counts_list = []
   walltimes_list = []
@@ -157,8 +158,8 @@ def run(sim_dir: str, config_data: dict, evolveState) -> dict:
     input_loop_number = int(loop_input_str[len('Loop:'):])
 
     if input_loop_number != k:
+      # If the first piece of the input line doesn't give the correct loop number.
       raise ValueError(f'The input_loop_number="{input_loop_number}" does not match expected_k={expected_k}.')
-      # If the first piece of the input line doesn't give the correct loop numb
       
     # Return the part of the input line that doesn't contain the loop info.
     return split_input_line[1]
@@ -177,8 +178,7 @@ def run(sim_dir: str, config_data: dict, evolveState) -> dict:
     #     return input_line
     input_line = file.readline()
     if debug_interfile_communication_level >= 1:
-      print(f'Recieved input_line from {os.path.basename(file.name)}:')
-      print(f'input_line: {repr(input_line)}')
+      print(f'Recieved input_line from {os.path.basename(file.name)}: {repr(input_line)}')
     return input_line
 
     raise DataNotRecievedViaFileError(f"No input recieved from {file.name}.")
@@ -194,7 +194,8 @@ def run(sim_dir: str, config_data: dict, evolveState) -> dict:
     simulation_data["t_delay"] = t_delays_list;
     simulation_data["u"] = us_list;
     simulation_data["t"] = ts_list;
-    simulation_data["simulated_computation_times_list"] = simulated_computation_times_list;
+    simulation_data["time_indices"] = time_indices_list;
+    simulation_data["t_delays_list"] = t_delays_list;
     simulation_data["instruction_counts"] = instruction_counts_list;
     simulation_data["cycles_counts"] = cycles_counts_list
     simulation_data["execution_walltime"] = walltimes_list
@@ -319,12 +320,24 @@ def run(sim_dir: str, config_data: dict, evolveState) -> dict:
     # Send the initial state to the controller to initialize it.
     write_vec_to_file(x_outfile, x0)
     
+    first_time_index = config_data['first_time_index']
+    # Set t to start of this
+    t = first_time_index * sample_time
+
+    # Send the initial state to the controller to initialize it.
+    x = np.array(config_data['x0']).reshape(-1, 1)
+    u0 = np.array(config_data['u0']).reshape(-1, 1)
+
     cause_of_termination = "In progress"
+    time_index = first_time_index
+    time_indices_list.append(time_index)
     try:
       for k in range(0, max_time_steps):
         print(f'(Loop {k}) - Waiting for state `\'x\' from file.')
         t_start_of_loop = t
         walltime_start_of_loop = time.time()
+        time_index = first_time_index + k
+        time_indices_list.append(time_index)
 
         # Get the 'x' input line from the file.
         x_input_line = waitForLineFromFile(x_infile)
@@ -364,7 +377,7 @@ def run(sim_dir: str, config_data: dict, evolveState) -> dict:
           if debug_interfile_communication_level >= 2:
             print('Waiting for statistics from Scarab.')
           stats_reader.waitForStatsFile(k)
-          simulated_computation_time = stats_reader.readTime(k)
+          t_delay = stats_reader.readTime(k)
           instruction_count = stats_reader.readInstructionCount(k)
           cycles_count = stats_reader.readCyclesCount(k)
         else:
@@ -374,20 +387,20 @@ def run(sim_dir: str, config_data: dict, evolveState) -> dict:
           if delay_model_slope:
             if not delay_model_y_intercept:
               raise ValueError(f"delay_model_slope was set but delay_model_y_intercept was not.")
-            simulated_computation_time = delay_model_slope * iterations + delay_model_y_intercept
-            print(f"simulated_computation_time = {simulated_computation_time:.8g} = {delay_model_slope:.8g} * {iterations:.8g} + {delay_model_y_intercept:.8g}")
+            t_delay = delay_model_slope * iterations + delay_model_y_intercept
+            print(f"t_delay = {t_delay:.8g} = {delay_model_slope:.8g} * {iterations:.8g} + {delay_model_y_intercept:.8g}")
           else:
             print('Using constant delay times.')
-            simulated_computation_time = config_data["computation_delay_model"]["fake_computation_delay_times"]
+            t_delay = config_data["computation_delay_model"]["fake_computation_delay_times"]
           instruction_count = 0
           cycles_count = 0
 
-        simulated_computation_times_list.append(simulated_computation_time)
+        t_delays_list.append(t_delay)
         instruction_counts_list.append(instruction_count)
         cycles_counts_list.append(cycles_count)
         
-        simulated_computation_time_str = f"{simulated_computation_time:.8g}"
-        print(f"Delay time: {simulated_computation_time_str} seconds ({100*simulated_computation_time/sample_time:.3g}% of sample time).")
+        t_delay_str = f"{t_delay:.8g}"
+        print(f"Delay time: {t_delay_str} seconds ({100*t_delay/sample_time:.3g}% of sample time).")
 
         # Write the data for the first time step to the CSV files.
         if k == 0:
@@ -396,22 +409,22 @@ def run(sim_dir: str, config_data: dict, evolveState) -> dict:
         print("t_predict_input_line: " + t_predict_input_line)
         snapshotPrediction(t_prediction, x_prediction, "Prediction")
 
-        n_samples_without_finishing_computation = math.floor(simulated_computation_time/sample_time)
+        n_samples_without_finishing_computation = math.floor(t_delay/sample_time)
         n_samples_until_next_sample_after_computation_finishes = n_samples_without_finishing_computation + 1
 
         if debug_dynamics_level >= 1:
-          print(f"simulated_computation_time={simulated_computation_time_str}, sample_time={sample_time:.2f}.")
+          print(f"t_delay={t_delay_str}, sample_time={sample_time:.2f}.")
 
         if only_update_control_at_sample_times:
           t_start = t
-          t_computation_update = t + (n_samples_without_finishing_computation+1)*sample_time
-          t_end = t_computation_update
+          # Set t_end to the time when the computation finishes.
+          t_end = t + (n_samples_without_finishing_computation+1)*sample_time
           (t, x) = evolveState(t_start, x, u_prev, t_end)
           snapshotState(k, t, x, u, f"After full sample interval with {n_samples_without_finishing_computation} missed computation updates.")
           u_prev = u
         else: # Update when the computation finishes, without waiting for the next sample time.
           t_start = t
-          t_computation_update = t + simulated_computation_time
+          t_computation_update = t + t_delay
           t_end = t + (n_samples_without_finishing_computation + 1)*sample_time
 
           # Evolve x over the one or more sample periods where the control is not updated.
@@ -438,17 +451,12 @@ def run(sim_dir: str, config_data: dict, evolveState) -> dict:
         # if debug_interfile_communication_level >= 1:
         #   print("x output line:" + repr(x_out_string))
         # x_outfile.write(x_out_string + "\n")# Write to pipe to C++
-        t_delay_outfile.write(f"{simulated_computation_time_str} \n")
+        t_delay_outfile.write(f"{t_delay_str} \n")
         walltimes_list.append(time.time() - walltime_start_of_loop)
-        t_delays_list.append(simulated_computation_time)
         
         simulation_data_incremental = generateSimulationData()
         writeJson(sim_dir + "simulation_data_incremental.json", simulation_data_incremental)
-        # with open(sim_dir + 'simulation_data_incremental.json', 'w') as json_data_file:
-        #   json_data_file.write(json.dumps(simulation_data_incremental, allow_nan=False, indent=4))
         print('\n=====\n')
-    except NameError as err:
-      raise err
     except (DataNotRecievedViaFileError, BrokenPipeError) as err:
       cause_of_termination = repr(err)
       walltimes_list.append(time.time() - walltime_start_of_loop)
@@ -457,14 +465,6 @@ def run(sim_dir: str, config_data: dict, evolveState) -> dict:
       cause_of_termination = "Finished."
 
   simulation_data = generateSimulationData()
-  # writeJson(sim_dir + "simulation_data.json", simulation_data)
-
-  # # Save the data_out to file (if enabled)
-  # simulation_data_path = os.path.abspath(sim_dir + 'simulation_data.json')
-  # with open(simulation_data_path, 'w') as json_data_file:
-  #   json_data_file.write(json.dumps(simulation_data, allow_nan=False, indent=4))
-  # 
-  # print(f"There are now {len(simulation_data)} entries in {simulation_data_path}")
   return simulation_data
 
 if __name__ == "__main__":

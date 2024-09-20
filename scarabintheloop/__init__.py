@@ -222,10 +222,12 @@ def computeTimeStepsDelayed(sample_time: float, t_delay: List[float]):
   # if t_delay[0] is not None:
     # raise ValueError(f"The first entryf time_steps_delayed must be None. Instead it was {time_steps_delayed[0]}!")
   # time_steps_delayed[0] = 0
-  for i in range(len(time_steps_delayed)):
-    if time_steps_delayed[i] is None:
-      raise ValueError(f"Entry {i} of time_steps_delayed was None. Only the first entry can be None!")
-    time_steps_delayed[i] = math.ceil(t_delay[i] / sample_time)
+  for i in range(len(t_delay)):
+    if t_delay[i] is None or math.isnan(t_delay[i]):
+      time_steps_delayed[i] = -1
+      # raise ValueError(f"Entry {i} of time_steps_delayed was None. Only the first entry can be None!")
+    else:
+      time_steps_delayed[i] = math.ceil(t_delay[i] / sample_time)
   return time_steps_delayed
 
 def findFirstExcessiveComputationDelay(time_steps_delayed):  
@@ -279,19 +281,20 @@ def processBatchSimulationData(batch_config: dict, batch_init:dict, batch_simula
       "t_delay": t_delay[0:first_excessive_delay_local_index + 1],
       "time_steps_delayed": time_steps_delayed[0:first_excessive_delay_local_index + 1],
       "first_time_index": batch_config["first_time_index"],
-      "last_time_index": first_excessive_delay_time_index
+      "last_time_index": first_excessive_delay_time_index,
+      "time_indices": indices[0:first_excessive_delay_local_index + 1]
     }
 
     # Values that are needed to start the next batch.
     next_batch_init = {
       "i_batch": batch_init["i_batch"] + 1,
-      "first_time_index": first_excessive_delay_time_index + 1,
+      "first_time_index": first_excessive_delay_time_index,
       "x0": x[first_excessive_delay_local_index],
       # When there is a missed computation, we continue using u from the prior timestep.
       "u0": u[first_excessive_delay_local_index-1],
       # Record the value of u that is computed late so that the next batch can apply it at the approriate time
       "u_pending": u[first_excessive_delay_local_index],
-      "u_pending_time_index": first_excessive_delay_time_index  + first_excessive_delay_n_of_time_steps
+      "u_pending_time_index": first_excessive_delay_time_index  + first_excessive_delay_n_of_time_steps - 1
     }
   else: # -> No missed computations
     valid_data_from_batch = copy.deepcopy(all_data_from_batch)
@@ -311,6 +314,7 @@ def processBatchSimulationData(batch_config: dict, batch_init:dict, batch_simula
     raise ValueError(F'next first_time_index={next_batch_init["first_time_index"]} > last_time_index_in_batch + 1={all_data_from_batch["last_time_index"] + 1}')
 
   return {
+    "batch_init": batch_init,
     "all_data_from_batch": all_data_from_batch, 
     "valid_data_from_batch": valid_data_from_batch, 
     "next_batch_init": next_batch_init
@@ -331,13 +335,6 @@ def run_experiment_parallelized(experiment_config, example_dir):
   experiment_dir = experiment_config["experiment_dir"]
   max_time_steps = experiment_config["max_time_steps"]
   max_batch = experiment_config["Simulation Options"]["max_batches"]
-  # first_time_index_in_batch = 0
-  # i_batch = 0
-  # x0 = experiment_config["x0"]
-  # u0 = experiment_config["u0"]
-  # u_pending = None
-  # u_pending_time_index = None
-  # sample_time = experiment_config["system_parameters"]["sample_time"] 
 
   # Create lists for recording the true values (discarding values that erroneously use  missed computations as though were not missed).
   batch_data_list = []
@@ -413,7 +410,6 @@ def run_experiment_parallelized(experiment_config, example_dir):
     print(f'↳          "time_indices": {all_batch_data["time_indices"]}')
     print(f'↳          "max_time_steps": {batch_sim_config["max_time_steps"]}')
     print(f'↳ Next "first_time_index": {batch_data["next_batch_init"]["first_time_index"]}')
-    print('<<< Batch Time grid >>>')
 
     experiment_data = {"batches": batch_data_list,
                       "x": xs_actual,
@@ -425,35 +421,52 @@ def run_experiment_parallelized(experiment_config, example_dir):
     writeJson(experiment_dir + "/experiment_data_incremental.json", experiment_data, label="Incremental experiment data")
 
   # Print out all of the batches!  
-  printHeader2('                              All Batches                              ')
+  printHeader2(' '*60 + 'All Batches' + ' '*60)
   for batch_data in batch_data_list:
-    batch_init = batch_data["next_batch_init"]
+    # batch_data["next_batch_init"]
+    next_batch_init = batch_data["next_batch_init"]
     all_batch_data = batch_data["all_data_from_batch"]
-    batch_x = all_batch_data["x"]
-    batch_u = all_batch_data["u"]
-    batch_t = all_batch_data["t"]
-    def print_sample_time_values(label: str, values: list):
-      print(f"{label:>18}: " +  " ------- ".join(f"{v:^7.3g}" for v in values))
-
-    def print_time_step_values(label: str, values: list):
-      print(f"{label:>18}:    |    " +  "    |    ".join(f"{v:^7.3g}" for v in values))
-
+    valid_batch_data = batch_data["valid_data_from_batch"]
     # print(f"             u0: {u0[0]}")
+    printJson('batch init', batch_data["batch_init"])
     print_sample_time_values("k", all_batch_data["time_indices"])
-    print_time_step_values("time step", range(1, batch_sim_config["max_time_steps"]+1))
-    print_sample_time_values("t(k)", batch_t)
-    print_sample_time_values("x1(k)", [x[0] for x in batch_x])
-    # print_sample_time_values("x2(k)", [x[1] for x in batch_x])
-    # print_sample_time_values("x3(k)", [x[2] for x in batch_x])
-    print_sample_time_values("x4(k)", [x[3] for x in batch_x])
-    print_sample_time_values("u([k, k+1))", [u[0] for u in batch_u])
+    print_time_step_values("time step", all_batch_data["time_indices"][1:])
+    print_sample_time_values("t(k)", all_batch_data["t"])
+    print_sample_time_values("x1(k)", [x[0] for x in all_batch_data["x"]])
+    # print_sample_time_values("x2(k)", [x[1] for x in all_batch_data["x"]])
+    # print_sample_time_values("x3(k)", [x[2] for x in all_batch_data["x"]])
+    print_sample_time_values("x4(k)", [x[3] for x in all_batch_data["x"]])
+    print_sample_time_values("u([k, k+1))", [u[0] for u in all_batch_data["u"]])
     print_sample_time_values("t_delay", all_batch_data["t_delay"])
     print_sample_time_values("samples delayed", all_batch_data["time_steps_delayed"])
-    print('------------------')
+    
+    print('------- Actual data ---------')
+    print_sample_time_values("k", valid_batch_data["time_indices"])
+    print_time_step_values("time step", valid_batch_data["time_indices"][1:])
+    print_sample_time_values("t(k)", valid_batch_data["t"])
+    print_sample_time_values("x1(k)", [x[0] for x in valid_batch_data["x"]])
+    # print_sample_time_values("x2(k)", [x[1] for x in valid_batch_data["x"]])
+    # print_sample_time_values("x3(k)", [x[2] for x in valid_batch_data["x"]])
+    print_sample_time_values("x4(k)", [x[3] for x in valid_batch_data["x"]])
+    print_sample_time_values("u([k, k+1))", [u[0] for u in valid_batch_data["u"]])
+    print_sample_time_values("t_delay([k -> ??])", valid_batch_data["t_delay"])
+    print_sample_time_values("samples delayed)", valid_batch_data["time_steps_delayed"])
+    
+    printJson("next_batch_init", next_batch_init)
+
+    print('==============')
 
 
   writeJson(experiment_dir + "/experiment_data.json", experiment_data, label="Experiment data")
   return experiment_data
+
+
+def print_sample_time_values(label: str, values: list):
+  values = [float('nan') if v is None else v for v in values]
+  print(f"{label:>18}: " +  " ------- ".join(f"{v:^7.3g}" for v in values))
+
+def print_time_step_values(label: str, values: list):
+  print(f"{label:>18}:    |    " + "    |    ".join(f"{v:^7.3g}" for v in values))
 
 
 def create_batch_sim_config(experiment_config, batch_init):
@@ -477,6 +490,8 @@ def create_batch_sim_config(experiment_config, batch_init):
   batch_config["simulation_dir"]   = experiment_config["experiment_dir"] + "/" + batch_label
   batch_config["x0"]               = batch_init["x0"]
   batch_config["u0"]               = batch_init["u0"]
+  batch_config["u_pending"]            = batch_init["u_pending"]
+  batch_config["u_pending_time_index"] = batch_init["u_pending_time_index"]
   batch_config["first_time_index"] = batch_init["first_time_index"]
   batch_config["last_time_index"]  = last_time_index_in_batch
   batch_config["time_indices"]  = list(range(batch_config["first_time_index"], batch_config["last_time_index"]+1))
@@ -678,7 +693,6 @@ class SimulationExecutor:
     try:
       with redirect_stdout(self.plant_log):
         plant_result = plant_runner.run(self.sim_dir, self.sim_config, self.evolveState_fnc)
-        # assertFileExists(self.sim_dir + '/simulation_data.json')
 
     except Exception as e:
       print(f'Plant dynamics had an error: {e}')
@@ -775,10 +789,7 @@ class ParallelSimulationExecutor(SimulationExecutor):
     max_time_steps = len(simulation_data['x']) - 1 
     # Create a list of the correct length filled with None's.
     computation_time_list = [None] * max_time_steps
-    if self.use_fake_scarab_computation_times:
-      for i in range(max_time_steps):
-        computation_time_list[i] = 0.1 * (i + 1)
-    else: 
+    if not self.use_fake_scarab_computation_times:
       (dynamrio_trace_dir_dictionaries, trace_dirs, sorted_indices) = ParallelSimulationExecutor.get_dynamorio_trace_directories()
 
       # Portabilize the trace files (in parallel) and then simulate with Scarab (in parallel).
@@ -794,10 +805,10 @@ class ParallelSimulationExecutor(SimulationExecutor):
           trace_dir = datum["trace_dir"]
           computation_time = datum["computation_time"]
           computation_time_list[index] = computation_time
+      simulation_data["t_delay"] = computation_time_list
     print(f"Finished executing parallel simulations, computation_time_list: {computation_time_list}")
 
     # simulation_data["t_delay"] = [None] + computation_time_list
-    simulation_data["t_delay"] = computation_time_list
     # print(f'simulation_data["t_delay"]: {simulation_data["t_delay"]}')
     return simulation_data
     

@@ -88,7 +88,7 @@ def getDynamicsFunction(config_data: dict):
   def system_derivative(t, x, params):
     """ Give the value of f(x) for the system \dot{x} = f(x). """
     # Convert x into a 2D (nx1) array instead of 1D array (length n).
-    x = x[:,None]
+    x = x[:, None]
     u = params["u"]
     w = params["w"]
 
