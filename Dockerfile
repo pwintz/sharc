@@ -114,7 +114,7 @@ RUN apt-get install --assume-yes \
     libsnappy-dev \
     liblz4-dev \
     g++-9 \
-    g++-9-multilib \
+    # g++-9-multilib \
     # # Debugger
     # gdb \
     # doxygen \
@@ -295,7 +295,7 @@ RUN apt-get install --assume-yes --quiet=2 --no-install-recommends \
     libboost-dev \
     # GNU Compiler
     g++-9 \
-    g++-9-multilib \
+    # g++-9-multilib \
     # SFML is used(?) by the inverted-pendulum example
     libsfml-dev
 
@@ -392,6 +392,7 @@ ARG USERNAME
 FROM mpc-examples-base as mpc-examples
 
 COPY --chown=$USERNAME scarabintheloop $RESOURCES_DIR/scarabintheloop
+COPY --chown=$USERNAME dynamics $RESOURCES_DIR/dynamics
 COPY --chown=$USERNAME examples/acc_example /home/$USERNAME/examples/acc_example
 # COPY --chown=$USERNAME libmpc /home/$USERNAME/libmpc
 

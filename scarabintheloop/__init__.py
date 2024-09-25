@@ -31,6 +31,7 @@ from scarab_globals import scarab_paths
 import scarabintheloop.scarabizor as scarabizor
 
 from slugify import slugify
+import importlib
 
 import scarabintheloop.plant_runner as plant_runner
 
@@ -496,8 +497,7 @@ def runSimulation(sim_config: dict):
 
   writeJson(sim_config["simulation_dir"] + "/config.json", sim_config)
 
-  os.chdir(sim_dir)
-
+  # os.chdir(sim_dir)
   # Get human-readable label for this simulation.
   simulation_label = sim_config["simulation_label"]
 
@@ -635,7 +635,14 @@ class SimulationExecutor:
     
     # Get a function that defines the plant dynamics.
     with redirect_stdout(plant_log):
-      self.evolveState_fnc = plant_dynamics.getDynamicsFunction(sim_config)
+        # add parent directory to the path
+        sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))) 
+        # add dynamics directory to the path
+        sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'dynamics')))
+        dynamics_class = getattr(importlib.import_module(sim_config["dynamics_module_name"]),  sim_config["dynamics_class_name"])
+        dynamics_instance = dynamics_class(sim_config)
+        self.evolveState_fnc = dynamics_instance.getDynamicsFunction()
+
 
     # Create the pipe files in the current directory.
     run_shell_cmd("make_scarabintheloop_pipes.sh", log=controller_log, working_dir=self.sim_dir)
