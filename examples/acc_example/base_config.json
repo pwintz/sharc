@@ -8,6 +8,8 @@
     "parallel_scarab_simulation": false, 
     "max_batches": 9999999
   },
+  "dynamics_module_name": "dynamics.dynamics",
+  "dynamics_class_name": "ACCDynamics",
   "max_time_steps": 13,
   "==== Initial Condition ====": "",
   "x0":      [20, -2, 10, 0, 0],
