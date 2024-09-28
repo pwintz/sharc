@@ -3,6 +3,7 @@ import subprocess
 import re
 import shutil
 import time
+from typing import List, Set, Dict, Tuple
 
 params_in_dir = 'docker_user_home'
 log_dir_regex = re.compile(r"\nLog directory is (.*?)\n")
@@ -45,6 +46,88 @@ class ScarabData:
         self.simulated_time_seconds = SECONDS_PER_FEMTOSECOND*float(simulated_time_femtoseconds)
         self.cmd_stdout = cmd_stdout
         self.cmd_stderr = cmd_stderr
+
+
+class ScarabPARAMSReader:
+  
+  def __init__(self, sim_dir=None):
+    if sim_dir:
+      if not sim_dir.endswith("/"):
+        sim_dir += "/"
+        
+      self.params_in_file_path = sim_dir + 'PARAMS.in'
+      self.params_out_file_path = sim_dir + 'PARAMS.out'
+
+    self.param_keys_to_save_in_data_out = ["chip_cycle_time", "l1_size", "dcache_size", "icache_size", "decode_cycles"]
+    # Regex to find text in the form of "--name value"
+    self.param_regex_pattern = re.compile(r"--(?P<param_name>[\w|\_]+)\s*(?P<param_value>\d+).*")
+
+  def params_in_to_dictionary(self):
+    return params_file_to_dictionary(self.params_in_file_path)
+
+  def params_out_to_dictionary(self):
+    return params_file_to_dictionary(self.params_out_file_path)
+
+  def params_file_to_dictionary(self, filename):
+    params_lines = self.read_params_file(filename)
+    return self.params_lines_to_dict(params_lines)
+
+  def read_params_file(self, filename):
+    with open(filename) as params_file:
+      params_lines = params_file.readlines()
+    return params_lines
+
+  def params_lines_to_dict(self, params_lines: List[str]):
+    param_dict = {}
+    for line in params_lines: 
+      regex_match = self.param_regex_pattern.match(line)
+      if regex_match:
+        param_name = regex_match.groupdict()['param_name']
+        param_value = regex_match.groupdict()['param_value']
+        if param_name in param_keys_to_save_in_data_out:
+          param_dict[param_name] = int(param_value)
+
+  # TODO: Write tests for this.
+  def changeParamsValue(self,PARAM_lines: List[str], key, value):
+    """
+    Search through PARAM_lines and modify it in-place by updating the value for the given key. 
+    If the key is not found, then an error is raised.
+    """
+    for line_num, line in enumerate(PARAM_lines):
+      regex_match = self.param_regex_pattern.match(line)
+      if not regex_match:
+        continue
+      if key == regex_match.groupdict()['param_name']:
+        # If the regex matches, then we replace the line.
+        new_line_text = param_str_fmt.format(key, value)
+        PARAM_lines[line_num] = new_line_text
+        # print(f"Replaced line number {line_num} with {new_line_text}")
+        return PARAM_lines
+      
+    # After looping through all of the lines, we didn't find the key.
+    raise ValueError(f"Key \"{key}\" was not found in PARAM file lines.")
+
+  def create_patched_PARAMS_file(sim_config: dict, PARAMS_src_filename: str, PARAMS_out_filename: str):
+    """
+    Read the baseline PARAMS file at the location given by the PARAMS_base_file option in the simulation configuration (sim_config).
+    Then, modify the values for keys listed in PARAMS_file_keys to values taken from sim_config. 
+    Write the resulting PARAMS data to a file at PARAMS_out_filename in the simulation directory (sim_dir).
+    Returns the absolute path to the PARAMS file.
+    """
+    print(f'Creating chip parameter file.')
+    print(f'\tSource: {PARAMS_src_filename}.')
+    print(f'\tOutput: {PARAMS_out_filename}.')
+    with open(PARAMS_src_filename) as params_out_file:
+      PARAM_file_lines = params_out_file.readlines()
+    
+    for (key, value) in sim_config.items():
+      if key in PARAMS_file_keys:
+        PARAM_file_lines = changeParamsValue(PARAM_file_lines, key, value)
+
+    # Create PARAMS file with the values from the base file modified
+    # based on the values in sim_config.
+    with open(PARAMS_out_filename, 'w') as params_out_file:
+      params_out_file.writelines(PARAM_file_lines)
 
 class ScarabStatsReader:
   

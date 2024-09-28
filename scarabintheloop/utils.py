@@ -10,6 +10,7 @@ import subprocess
 import copy
 
 import importlib.util
+import numpy as np
 
 from typing import List, Set, Dict, Tuple
 from typing import Union
@@ -33,26 +34,53 @@ def readJson(filename: str) -> Union[Dict,List]:
     json_data = json.load(json_file)
     return json_data
 
+# # Define a custom JSON encoder for the class
+# class MyJsonEncoder(json.JSONEncoder):
+#   def default(self, obj):
+#     if isinstance(obj, np.ndarray):
+#       return 
+#     if isinstance(obj, MyClass):
+#       # Convert the object to a dictionary
+#       return obj.__dict__
+#     # For other objects, use the default serialization
+#     return super().default(obj)
+
+
+# # Define a custom JSON encoder for the class
+# class MyJsonEncoder(json.JSONEncoder):
+#   def default(self, obj):
+#     if isinstance(obj, np.ndarray):
+#       return numpy_vec_to_list(obj)
+#     elif str(type(obj)) == "TimeStepSeries":
+#       # Convert the object to a dictionary
+#       return obj.__dict__
+#     # For other objects, use the default serialization
+#     return super().default(obj)
+
+def _create_json_string(json_data):
+  # Use "default=vars" to automatically convert many objects to JSON data.
+  json_string = json.dumps(json_data, indent=2, default=vars)
+  json_string = _remove_linebreaks_in_json_dump_between_number_list_items(json_string)
+  return json_string
+
 def writeJson(filename: str, json_data: Union[Dict,List], label:str=None):
   """
   Write a dictionary to a file in JSON format. 
   If 'label' is given, then the path is printed to the stdout with the given label.
   """
-  
-  json_string = json.dumps(json_data, indent=2)
-  json_string = _remove_linebreaks_in_json_dump_between_number_list_items(json_string)
+  json_string = _create_json_string(json_data)
+
   with open(filename, 'w') as file:
     file.write(json_string)
   if label:
     print(f'{label}: ' + os.path.abspath(filename))
-
     
+
 def printJson(label: str, json_data: Union[Dict,List]):
   """
   Pretty-print JSON to standard out. Loses percision, so do not parse this output to recove data!
   """
-  json_string = json.dumps(json_data, indent=2)
-  json_string = _remove_linebreaks_in_json_dump_between_number_list_items(json_string)
+  json_string = _create_json_string(json_data)
   
   max_replacements = 0
   double_regex = r"(-?\d+(?:\.\d{1,2})?)\d*"
@@ -80,7 +108,6 @@ def _remove_linebreaks_in_json_dump_between_number_list_items(json_string:str):
 
   return json_string
 
-
 def patch_dictionary(base: dict, patch: dict) -> dict:
   """
   Create a new config dictionary by copying the the base dictionary and replacing any keys with the values in the patch dictionary. The base and patch dictionaries are not modified. All keys in the patch dictionary must already exist in base. If any value is itself a dictionary, then patching is done recursively.
@@ -104,6 +131,27 @@ def patch_dictionary(base: dict, patch: dict) -> dict:
     patched[key] = value
     
   return patched
+
+# TODO: Define a function for finding any numpy arrays in a dictionary and converting them to lists.
+# def sanitize_np_arrays_in_dictionary(dictionary):
+#   dictionary = copy.deepcopy(dictionary)
+#   
+
+#############################
+#####  NUMPY FUNCTIONS ######
+#############################
+def numpy_vec_to_list(array: np.ndarray) -> List[float]:
+  return array.transpose().tolist()[0]
+
+def list_to_numpy_vec(list_vec: List[float]) -> np.ndarray:
+  return np.array(list_vec).reshape(-1, 1)
+
+def nump_vec_to_csv_string(array: np.ndarray) -> str:
+  if not isinstance(array, np.ndarray):
+    raise ValueError(f'Expected array={array} to be an np.array but instead it is a {type(array)}')
+  string = ', '.join(map(str, array.flatten()))
+  return string
+
 
 def checkBatchConfig(batch_config):
   simulation_label = batch_config["simulation_label"]
@@ -130,25 +178,25 @@ def checkBatchConfig(batch_config):
     raise ValueError(f"time_indices doen't align.")
     
 
-def checkSimulationData(batch_simulation_data, max_time_steps):
-  n_time_indices = len(batch_simulation_data['time_indices']) #max_time_steps + 1
-
-  def assert_len_equals_n_time_indices(name:str):
-    array = batch_simulation_data[name]
-    if len(array) != n_time_indices:
-      raise ValueError(f'the length of {name} ({len(array)}) is not equal to the number of time indices ({n_time_indices}). The time indices are {batch_simulation_data["time_indices"]}')
-
-  # There is one fewer time steps than time indices because each step is a step between indices.
-  def assert_len_equals_n_time_steps(name:str):
-    array = batch_simulation_data[name]
-    if len(array) != n_time_indices - 1:
-      raise ValueError(f"the length of {name} ({len(array)}) is not equal to the number of time steps ({n_time_indices - 1}).")
-
-  # The control values applied. The first entry is the u0 previously computed. Subsequent entries are the computed values. The control u[i] is applied from t[i] to t[i+1], with u[-1] not applied during this batch. 
-  assert_len_equals_n_time_indices("x")
-  assert_len_equals_n_time_indices("u")
-  assert_len_equals_n_time_indices("t")
-  assert_len_equals_n_time_steps("t_delay")
+# def checkSimulationData(batch_simulation_data, max_time_steps):
+#   n_time_indices = len(batch_simulation_data['time_indices']) #max_time_steps + 1
+# 
+#   def assert_len_equals_n_time_indices(name:str):
+#     array = batch_simulation_data[name]
+#     if len(array) != n_time_indices:
+#       raise ValueError(f'the length of {name} ({len(array)}) is not equal to the number of time indices ({n_time_indices}). The time indices are {batch_simulation_data["time_indices"]}')
+# 
+#   # There is one fewer time steps than time indices because each step is a step between indices.
+#   def assert_len_equals_n_time_steps(name:str):
+#     array = batch_simulation_data[name]
+#     if len(array) != n_time_indices - 1:
+#       raise ValueError(f"the length of {name} ({len(array)}) is not equal to the number of time steps ({n_time_indices - 1}).")
+# 
+#   # The control values applied. The first entry is the u0 previously computed. Subsequent entries are the computed values. The control u[i] is applied from t[i] to t[i+1], with u[-1] not applied during this batch. 
+#   assert_len_equals_n_time_indices("x")
+#   assert_len_equals_n_time_indices("u")
+#   assert_len_equals_n_time_indices("t")
+#   assert_len_equals_n_time_steps("t_delay")
 
 
 def printHeader1(header: str):
