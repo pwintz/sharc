@@ -48,6 +48,7 @@
       "ymin": [ 10,    -1e2], 
       "ymax": [1e9,    1e2]
     }, 
+    "controller_type": "LMPCController",
     "mpc_options":{
       "enable_mpc_warm_start": true,
       "use_state_after_delay_prediction": false,

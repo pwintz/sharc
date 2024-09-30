@@ -10,6 +10,11 @@
 #include <unsupported/Eigen/MatrixFunctions>
 #include <boost/algorithm/string/predicate.hpp>
 #include <regex> // Used to find and rename Dynamorio trace directories.
+#include "controller.h"
+
+#include "nlohmann/json.hpp"
+using json = nlohmann::json;
+using namespace mpc;
 
 // #define USE_DYNAMORIO
 
@@ -30,17 +35,6 @@
 #define PRINT(x) std::cout << x << std::endl;
 #define PRINT_WITH_FILE_LOCATION(x) std::cout << __FILE__  << ":" << __LINE__ << ": " << x << std::endl;
 
-#ifdef PREDICTION_HORIZON
-#else
-  // Provide a default value
-  #define PREDICTION_HORIZON 5
-#endif
-#ifdef CONTROL_HORIZON
-#else 
-  // Provide a default value
-  #define CONTROL_HORIZON 3
-#endif
-
 // Load a header file for parsing and generating JSON files.
 #include "nlohmann/json.hpp"
 using json = nlohmann::json;
@@ -48,8 +42,6 @@ using json = nlohmann::json;
 // fstream provides I/O to file pipes.
 #include <fstream>
  
-using namespace mpc;
-
 Eigen::IOFormat fmt(3, // precision
                     0, // flags
                     ", ", // coefficient separator
@@ -275,221 +267,14 @@ int main()
   const int Tndu = 1; // Exogenous control (disturbance) dimension
   const int Tny = 2;  // Output dimension
 
-  // Check values.
-  if (Tnx != json_data["system_parameters"]["state_dimension"]) {
-    throw  std::runtime_error("state_dimension (compiled) does not match the value in the JSON.");
-  }
-  if (Tnu != json_data["system_parameters"]["input_dimension"]) {
-    throw  std::runtime_error("input_dimension (compiled) does not match the value in the JSON.");
-  }
-  if (Tny != json_data["system_parameters"]["output_dimension"]) {
-    throw  std::runtime_error("output_dimension (compiled) does not match the value in the JSON.");
-  }
-
-  // MPC options.
-  const int prediction_horizon = PREDICTION_HORIZON;
-  const int control_horizon = CONTROL_HORIZON;
-  if (prediction_horizon != json_data["system_parameters"]["mpc_options"]["prediction_horizon"]) {
-    throw  std::runtime_error("prediction_horizon (compiled) does not match the value in the JSON.");
-  }
-  if (control_horizon != json_data["system_parameters"]["mpc_options"]["control_horizon"]) {
-    throw  std::runtime_error("control_horizon (compiled) does not match the value in the JSON.");
-  }
-
-  // Convergence termination tolerance: How close to the reference do we need to be stop?
-  double convergence_termination_tol = json_data["system_parameters"]["convergence_termination_tol"];
-
-  // Discretization Options.
-  double sample_time = json_data["system_parameters"]["sample_time"];
+  Controller* controller = Controller::createController(json_data["system_parameters"]["controller_type"], json_data);
 
   // Set whether the evolution of the dyanmics are computed extenally 
   // (with Python) or are done within this process, using libmpc.
   bool use_external_dynamics_computation = json_data["Simulation Options"]["use_external_dynamics_computation"];
 
-  PRINT_WITH_FILE_LOCATION("Creating Matrices");
-  // Continuous-time Matrices for \dot{x} = Ax + bu. 
-  // Model is the HCW equations for relative satellite motion.
-  mat<Tnx, Tnx> Ac;
-  mat<Tnx, Tnu> Bc;
-  mat<Tny, Tnx> C;
-  mat<Tnx, Tndu> Bc_disturbance;
-  
-  double lead_car_input = json_data["system_parameters"]["lead_car_input"];
-  double tau = json_data["system_parameters"]["tau"];
-
-  // TODO: Read the matrix values from the JSON data.
-  // Define continuous-time state matrix A_c
-  Ac << 0,      1, 0,  0,      0, // v1
-        0, -1/tau, 0,  0,      0, // a1
-        1,      0, 0, -1,      0, // d2
-        0,      0, 0,  0,      1, // v2
-        0,      0, 0,  0, -1/tau; // a2
-
-  // Define continuous-time input matrix B_c
-  Bc <<    0,
-           0,
-           0, 
-           0, 
-        -1/tau;
-
-  // State to output matrix
-  C << 0, 0, 1, 0, 0, 
-       1, 0, 0,-1, 0;
-
-  // Set input disturbance matrix.
-  Bc_disturbance << 0, 1/tau, 0, 0, 0;
-
-  // json system_dynamics_json_out_data;
-  // system_dynamics_json_out_data["state_dimension"] = Tnx;
-  // system_dynamics_json_out_data["input_dimension"] = Tnu;
-  // std::vector<double> Ac_entries = matToStdVector(Ac);
-  // std::vector<double> Bc_entries = matToStdVector(Bc);
-  // std::vector<double> Bc_disturbances_entries = matToStdVector(Bc);
-  // Insert computed values.
-  // system_dynamics_json_out_data["Ac_entries"] = Ac_entries;
-  // system_dynamics_json_out_data["Bc_entries"] = Bc_entries;
-  // system_dynamics_json_out_data["Bc_disturbances_entries"] = Bc_disturbances_entries;
-  // Insert values loaded from 
-  // system_dynamics_json_out_data["prediction_horizon"] = prediction_horizon;
-  // system_dynamics_json_out_data["control_horizon"] = control_horizon;
-  
   std::ofstream optimizer_info_out_file(optimizer_info_out_filename);
   optimizer_info_out_file << "num_iterations,cost,primal_residual,dual_residual" << std::endl;
-
-  // write prettified JSON to another file
-  // std::ofstream { system_dyanmics_lock_filename };
-  // std::ofstream system_dynamics_json_outfile(system_dynamics_filename);
-  // system_dynamics_json_outfile 
-  //   << std::setw(4) // Makes the JSON file better formatted.
-  //   << system_dynamics_json_out_data 
-  //   << std::endl;
-  // std::remove(system_dyanmics_lock_filename.c_str());
-
-  mat<Tnx, Tnx> Ad;
-  mat<Tnx, Tnu> Bd;
-  mat<Tnx, Tndu> Bd_disturbance;
-  // Compute the discretization of Ac and Bc, storing them in Ad and Bd.
-  discretization<Tnx, Tnu, Tndu>(Ac, Bc, Bc_disturbance, sample_time, Ad, Bd, Bd_disturbance);
-
-  if (debug_dynamics_level >= 1)
-  {
-    PRINT_WITH_FILE_LOCATION("=== Discretization Output ===")
-    PRINT_WITH_FILE_LOCATION("Ad:")
-    PRINT_WITH_FILE_LOCATION(Ad)
-    PRINT_WITH_FILE_LOCATION("Bd:")
-    PRINT_WITH_FILE_LOCATION(Bd)
-    PRINT_WITH_FILE_LOCATION("Bd_disturbance:")
-    PRINT_WITH_FILE_LOCATION(Bd_disturbance)
-  }
-
-  mat<Tnx, Tnx> Ad_predictive;
-  mat<Tnx, Tnu> Bd_predictive;
-  mat<Tnx, Tndu> Bd_disturbance_predictive;
-
-  PRINT_WITH_FILE_LOCATION("Finished creating Matrices");
-
-  PRINT_WITH_FILE_LOCATION("Creating LMPC object...");
-  LMPC<Tnx, Tnu, Tndu, Tny, prediction_horizon, control_horizon> lmpc;
-  PRINT_WITH_FILE_LOCATION("Finished creating LMPC object.");
-
-  LParameters params;
-  // ADMM relaxation parameter (see https://osqp.org/docs/solver/index.html#algorithm)
-  params.alpha = 1.6;
-  // ADMM rho step (see https://osqp.org/docs/solver/index.html#algorithm)
-  params.rho = 1e-6;
-  params.adaptive_rho = true;
-  // Relative tolerance
-  params.eps_rel = json_data["system_parameters"]["osqp_options"]["rel_tolerance"];
-  // Absolute tolerance
-  params.eps_abs = json_data["system_parameters"]["osqp_options"]["abs_tolerance"];
-  // Primal infeasibility tolerance
-  params.eps_prim_inf = json_data["system_parameters"]["osqp_options"]["primal_infeasibility_tolerance"];
-  // Dual infeasibility tolerance
-  params.eps_dual_inf = json_data["system_parameters"]["osqp_options"]["dual_infeasibility_tolerance"];
-  // Runtime limit in seconds
-  params.time_limit = json_data["system_parameters"]["osqp_options"]["time_limit"];
-  params.maximum_iteration = json_data["system_parameters"]["osqp_options"]["maximum_iteration"];
-  params.verbose = json_data["system_parameters"]["osqp_options"]["verbose"];
-  params.enable_warm_start = json_data["system_parameters"]["mpc_options"]["enable_mpc_warm_start"];
-  params.polish = true;
-
-  PRINT_WITH_FILE_LOCATION("Set parameters...");
-  lmpc.setOptimizerParameters(params);
-  PRINT_WITH_FILE_LOCATION("Finished setting optimizer parameters");
-
-  lmpc.setStateSpaceModel(Ad, Bd, C);
-  lmpc.setDisturbances(Bd_disturbance, mat<Tny, Tndu>::Zero());
-
-  // ======== Weights ========== //
-
-  double outputWeight = json_data["system_parameters"]["mpc_options"]["output_cost_weight"];
-  double inputWeight = json_data["system_parameters"]["mpc_options"]["input_cost_weight"];
-
-  // Output Weights
-  cvec<Tny> OutputW;
-  OutputW.setOnes();
-  OutputW *= outputWeight;
-
-  // Input Weights
-  cvec<Tnu> InputW;
-  InputW.setOnes();
-  InputW *= inputWeight;
-
-  if ( outputWeight < 0 )
-  {
-    throw std::invalid_argument( "The output weight was negative." );
-  }
-
-  // Input change weights
-  cvec<Tnu> DeltaInputW;
-  DeltaInputW.setZero();
-
-  lmpc.setObjectiveWeights(OutputW, InputW, DeltaInputW, {0, prediction_horizon});
-
-  PRINT_WITH_FILE_LOCATION("Finished setting weights.");
-
-  // Set disturbances
-  mat<Tndu, prediction_horizon> disturbance_input;
-  disturbance_input.setOnes();
-  disturbance_input *= lead_car_input;
-  lmpc.setExogenuosInputs(disturbance_input);
-  // printMat("Disturbance input", disturbance_input);
-  // printMat("Disturbance matirx", Bd_disturbance);
-  auto disturbance_vec = Bd_disturbance;
-  disturbance_vec *= disturbance_input(0);
-  // printMat("Disturbance vector", disturbance_vec);
-
-  PRINT_WITH_FILE_LOCATION("Finished setting disturbances.");
-
-  // ======== Constraints ========== //
-
-  auto constraint_data = json_data["system_parameters"]["constraints"];
-  // State constraints.
-  cvec<Tnx> xmin, xmax;
-  loadMatrixValuesFromJson(xmin, constraint_data, "xmin");
-  loadMatrixValuesFromJson(xmax, constraint_data, "xmax");
-
-  // Output constraints
-  cvec<Tny> ymin, ymax;
-  loadMatrixValuesFromJson(ymin, constraint_data, "ymin");
-  loadMatrixValuesFromJson(ymax, constraint_data, "ymax");
-
-  // Control constraints.
-  cvec<Tnu> umin, umax;
-  loadMatrixValuesFromJson(umin, constraint_data, "umin");
-  loadMatrixValuesFromJson(umax, constraint_data, "umax");
-
-  lmpc.setConstraints(xmin, umin, ymin, xmax, umax, ymax, {0, prediction_horizon});
-
-  PRINT_WITH_FILE_LOCATION("Finished setting constraints.");
-
-  // Output reference point
-  cvec<Tny> yRef;
-  loadMatrixValuesFromJson(yRef, json_data["system_parameters"], "yref");
-
-  lmpc.setReferences(yRef, cvec<Tnu>::Zero(), cvec<Tnu>::Zero(), {0, prediction_horizon});
-
-  PRINT_WITH_FILE_LOCATION("Finished setting references.");
 
   // I/O Setup
   std::ofstream x_outfile;
@@ -582,31 +367,20 @@ int main()
 
     if (use_state_after_delay_prediction)
     {
-      t_predict = t_delay_prev;
-      discretization<Tnx, Tnu, Tndu>(Ac, Bc, Bc_disturbance, t_predict, Ad_predictive, Bd_predictive, Bd_disturbance_predictive);
+      // t_predict = t_delay_prev;
+      // discretization<Tnx, Tnu, Tndu>(Ac, Bc, Bc_disturbance, t_predict, Ad_predictive, Bd_predictive, Bd_disturbance_predictive);
       
-      x_predict = Ad_predictive * modelX + Bd_predictive * u + Bd_disturbance_predictive*lead_car_input;
+      // x_predict = Ad_predictive * modelX + Bd_predictive * u + Bd_disturbance_predictive*lead_car_input;
       
-      if (debug_dynamics_level >= 1)
-      {
-        PRINT("====== Ad_predictive: ")
-        PRINT(Ad_predictive)
-        PRINT("====== Bd_predictive: ")
-        PRINT(Bd_predictive)
-        PRINT("====== Bd_disturbance_predictive: ")
-        PRINT(Bd_disturbance_predictive)
-      }
-      // int n_time_step_division = 1000;
-      // double delta_t = t_delay_prev / double(n_time_step_division);
-      // x_predict = modelX;
-      // for (int i = 0; i < n_time_step_division; i++)
+      // if (debug_dynamics_level >= 1)
       // {
-      //   // Do Euler's forward method for computing predicted state.
-      //   x_predict += delta_t * (Ac * modelX + Bc * u + Bc_disturbance*lead_car_input);
-      //   t_predict += delta_t;
-      //   PRINT_WITH_FILE_LOCATION("t_predict: " << t_predict << ", after i=" << i << " Euler Forward steps. (delta_t=" << delta_t <<")")
+      //   PRINT("====== Ad_predictive: ")
+      //   PRINT(Ad_predictive)
+      //   PRINT("====== Bd_predictive: ")
+      //   PRINT(Bd_predictive)
+      //   PRINT("====== Bd_disturbance_predictive: ")
+      //   PRINT(Bd_disturbance_predictive)
       // }
-      // x_predict = modelX + t_predict * (Ac * modelX + Bc * u);
     } else {
       x_predict = modelX;
       t_predict = 0;
@@ -619,7 +393,12 @@ int main()
     }
 
     // Compute a step of the MPC controller. This does NOT change the value of modelX.
-    Result res = lmpc.step(x_predict, u);
+    // Result res = lmpc.step(x_predict, u);
+
+    // // Update internal state and calculate control
+    controller->update_internal_state(x_predict);
+    controller->calculateControl();
+    u = controller->control;
 
     #ifdef USE_DYNAMORIO
       PRINT_WITH_FILE_LOCATION("End of DynamoRIO region of interest.")
@@ -670,34 +449,25 @@ int main()
       }
     #endif
 
-    u = res.cmd;
+    // u = res.cmd;
     
-    if (debug_optimizer_stats_level >= 1) 
-    {
-      PRINT_WITH_FILE_LOCATION("Optimizer Info")
-      PRINT_WITH_FILE_LOCATION("         Return code: " << res.retcode)
-      PRINT_WITH_FILE_LOCATION("       Result status: " << res.status)
-      PRINT_WITH_FILE_LOCATION("Number of iterations: " << res.num_iterations)
-      PRINT_WITH_FILE_LOCATION("                Cost: " << res.cost)
-      PRINT_WITH_FILE_LOCATION("    Constraint error: " << res.primal_residual)
-      PRINT_WITH_FILE_LOCATION("          Dual error: " << res.dual_residual)
-    }
-
-    optimizer_info_out_file << res.num_iterations << "," << res.cost << "," << res.primal_residual << "," << res.dual_residual << std::endl;  
-
-    // if ( res.num_iterations == 0 )
+    // if (debug_optimizer_stats_level >= 1) 
     // {
-    //   throw std::range_error( "Number of iterations was zero." );
+    //   PRINT_WITH_FILE_LOCATION("Optimizer Info")
+    //   PRINT_WITH_FILE_LOCATION("         Return code: " << res.retcode)
+    //   PRINT_WITH_FILE_LOCATION("       Result status: " << res.status)
+    //   PRINT_WITH_FILE_LOCATION("Number of iterations: " << res.num_iterations)
+    //   PRINT_WITH_FILE_LOCATION("                Cost: " << res.cost)
+    //   PRINT_WITH_FILE_LOCATION("    Constraint error: " << res.primal_residual)
+    //   PRINT_WITH_FILE_LOCATION("          Dual error: " << res.dual_residual)
     // }
-    // if ( res.cost < 0)
-    // {
-    //   throw std::range_error( "The cost was negative." );
-    // }
+
+    // optimizer_info_out_file << res.num_iterations << "," << res.cost << "," << res.primal_residual << "," << res.dual_residual << std::endl;  
 
     // OptSequence has three properties: state, input, and output. 
     // Each predicted time step is stored in one row.
     // There are <prediction_horizon> many rows. 
-    OptSequence optseq = lmpc.getOptimalSequence();
+    // OptSequence optseq = lmpc.getOptimalSequence();
 
     if (use_external_dynamics_computation) {
       // Format the numerical arrays into strings (single lines) that we pass to Python.     
@@ -705,7 +475,7 @@ int main()
       sendCVec("x", i, modelX, x_outfile);
       sendCVec("x prediction", i, x_predict, x_predict_outfile);
       sendDouble("t prediction ", i, t_predict, t_predict_outfile);
-      sendDouble("iterations ", i, res.num_iterations, iterations_outfile);
+      sendDouble("iterations ", i, 100, iterations_outfile); //revert this back later to res.num_iterations
       sendCVec("u", i, u, u_outfile);
 
       // Read and print the contents of the file from Python.
@@ -736,19 +506,19 @@ int main()
         PRINT_WITH_FILE_LOCATION("t_delay_prev (from Python): " << t_delay_prev);
       }
     } else { // If use internal dynamics computation
-      printVector("modelX", modelX);
-      printMat("optseq.state", optseq.state);
-      modelX = Ad * modelX + Bd * u + Bd_disturbance*lead_car_input;
-      printVector("modelX", modelX);
+      // printVector("modelX", modelX);
+      // printMat("optseq.state", optseq.state);
+      // modelX = Ad * modelX + Bd * u + Bd_disturbance*lead_car_input;
+      // printVector("modelX", modelX);
     }
     
     // Set the model state to the next value of x from the optimal sequence. 
-    y = C * modelX;
-    if ((y-yRef).norm() < convergence_termination_tol)
-    {
-      PRINT_WITH_FILE_LOCATION("Converged to the origin after " << i << " steps.");
-      break;
-    }
+    // y = C * modelX;
+    // if ((y-controller.yRef).norm() < controller.convergence_termination_tol)
+    // {
+    //   PRINT_WITH_FILE_LOCATION("Converged to the origin after " << i << " steps.");
+    //   break;
+    // }
     
   } 
   PRINT_WITH_FILE_LOCATION("Finshed looping through " << max_time_steps << " time steps.")
@@ -766,7 +536,7 @@ int main()
     t_delays_infile.close();
   }
 
-  optimizer_info_out_file.close();
+  // optimizer_info_out_file.close();
 
   return 0;
 }

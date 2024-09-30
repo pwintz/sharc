@@ -28,8 +28,20 @@ message("\tPREDICTION_HORIZON=${PREDICTION_HORIZON}")
 message("\tCONTROL_HORIZON=${CONTROL_HORIZON}")
 message("\tUSE_DYNAMORIO=${USE_DYNAMORIO}")
 
+# Define the base directories (set this to where the controllers folder is)
+set(RESOURCES_DIR $ENV{RESOURCES_DIR})
+set(CONTROLLER_DIR "${RESOURCES_DIR}/controllers")
+# Include directories
+include_directories(${CONTROLLER_DIR})
+# Add source files dynamically
+file(GLOB CONTROLLERS_SRC "${CONTROLLER_DIR}/*.cpp")
+
+set(SOURCES
+    src/acc_controller.cpp
+    ${CONTROLLERS_SRC}
+)
 # Add executable
-add_executable(${EXECUTABLE_NAME} src/acc_controller.cpp)
+add_executable(${EXECUTABLE_NAME} ${SOURCES})
 
 # Include directories
 target_include_directories(
