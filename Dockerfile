@@ -393,6 +393,7 @@ FROM mpc-examples-base as mpc-examples
 
 COPY --chown=$USERNAME scarabintheloop $RESOURCES_DIR/scarabintheloop
 COPY --chown=$USERNAME dynamics $RESOURCES_DIR/dynamics
+COPY --chown=$USERNAME controllers $RESOURCES_DIR/controllers
 COPY --chown=$USERNAME examples/acc_example /home/$USERNAME/examples/acc_example
 # COPY --chown=$USERNAME libmpc /home/$USERNAME/libmpc
 
