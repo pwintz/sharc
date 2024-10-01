@@ -22,7 +22,7 @@ from abc import abstractmethod, ABC
 
 import scarabintheloop.scarabizor as scarabizor
 from scarabintheloop.scarabizor import ScarabPARAMSReader
-from scarabintheloop.utils import assertFileExists, printIndented, writeJson, readJson, printJson, assertLength, numpy_vec_to_list, list_to_numpy_vec, nump_vec_to_csv_string
+from scarabintheloop.utils import *
 
 import json
 import csv
@@ -104,7 +104,7 @@ class ScarabDelayProvider(DelayProvider):
     self._stats_file_number += 1
 
     delay_metadata = {}
-    params_out = self.scarab_params_reader.read_params_out()
+    params_out = self.scarab_params_reader.params_out_to_dictionary()
     delay_metadata.update(params_out)
     delay_metadata["instruction_count"] = instruction_count
     delay_metadata["cycles_count"] = cycles_count
@@ -163,8 +163,11 @@ class LinearBasedOnIteraionsDelayProvider(DelayProvider):
     return t_delay, metadata
 
 
-
 class ControllerInterface(ABC):
+  """ 
+  Create an Abstract Base Class (ABC) for a controller interface. 
+  This handles communication to and from the controller, whether that is an executable or (for testing) a mock controller.
+  """
 
   def __init__(self, computational_delay_provider: DelayProvider):
     self.computational_delay_provider = computational_delay_provider
@@ -299,8 +302,7 @@ class PipesControllerInterface(ControllerInterface):
     
   def _read_iterations(self):
     return self.iterations_infile.read()
-    
-    
+      
 
 def write_vec_to_file(file, x: np.ndarray):
   # Pass the string back to C++.
@@ -310,8 +312,73 @@ def write_vec_to_file(file, x: np.ndarray):
   file.write(x_out_string + "\n")# Write to pipe to C++
 
 
+
+class ComputationData:
+
+  def __init__(self, t_start, delay, u, metadata={}):
+    self.t_start = t_start
+    self.delay = delay
+    self.t_end = t_start + delay
+    self.u = u
+    self.metadata = metadata
+
+  def __bool__(self):
+    return True
+
+  def __str__(self):
+    if self.metadata:
+      # return f'ComputationData(t_start={self.t_start}, delay={self.delay}, t_end={self.t_end}, u<{type(self.u)}>={self.u}, metadata={self.metadata})'
+      return f'ComputationData(t_start={self.t_start}, delay={self.delay})'
+    else:
+      # return f'ComputationData(t_start={self.t_start}, delay={self.delay}, t_end={self.t_end}, u<{type(self.u)}>={self.u})'
+      return f'ComputationData(t_start={self.t_start}, delay={self.delay})'
+
+
+  def __repr__(self):
+    if self.metadata:
+      # return f'ComputationData(t_start={self.t_start}, delay={self.delay}, t_end={self.t_end}, u<{type(self.u)}>={self.u}, metadata={self.metadata})'
+      return f'ComputationData(t_start={self.t_start}, delay={self.delay})'
+    else:
+      # return f'ComputationData(t_start={self.t_start}, delay={self.delay}, t_end={self.t_end}, u<{type(self.u)}>={self.u})'
+      return f'ComputationData(t_start={self.t_start}, delay={self.delay})'
+
+  
+  # def toJSON(self):
+  #     return json.dumps(
+  #         self,
+  #         default=lambda o: o.__dict__, 
+  #         sort_keys=True,
+  #         indent=4)
+
+  # def __dict__(self):
+  #   return {"t_start": self.t_start,
+  #           "delay": self.delay,
+  #           "t_end": self.t_end,
+  #           "u": self.u,
+  #           "metadata": self.metadata
+  #         }      
+
+  def copy(self):
+    return ComputationData(self.t_start, self.delay, copy.deepcopy(self.u), copy.deepcopy(self.metadata))
+
+  def __eq__(self, other):
+    """ Check the equality of the *data* EXCLUDING metadata. """
+    return self.t_start == other.t_start \
+       and self.delay == other.delay     \
+       and self.t_end == other.t_end     \
+       and self.u == other.u #            \
+      #  and self.metadata == other.metadata 
+
+  def next_batch_initialization_summary(self) -> str:
+    if isinstance(self.u, np.ndarray):
+      return f't_end={self.t_end}, u[0]={self.u[0][0]}'
+    else:
+      return f't_end={self.t_end}, u[0]={self.u[0]}'
+
+
 class TimeStepSeries:
-  def __init__(self, k0, t0, x0):
+
+  def __init__(self, k0, t0, x0, pending_computation_prior=None):
     if k0 is None:
       raise ValueError("k0 is None")
     if t0 is None:
@@ -319,43 +386,70 @@ class TimeStepSeries:
     if x0 is None:
       raise ValueError("x0 is None")
     
+    # Initial values
     self.k0 = k0
     self.t0 = t0
     self.x0 = self.cast_vector(x0)
+
+    # Unlike k0, t0, and x0, "pending_computation_prior" is not stored in the data arrays. 
+    # Instead, it simple is used to record what the 'incoming' computation was, if any.
+    self.pending_computation_prior = pending_computation_prior
     
     ### Time-index aligned values ###
     self.x = []
     self.u = []
     self.t = []
-    self.k = [] 
-    self.x_predictions = []
-    self.t_predictions = [] # Absolute time
+    self.k = [] # Time step number
+    self.i = [] # Sample index number
 
-    ### Time-step aligned values (the intervals between indices) ###
-    self.step_k = []
-    self.step_t_start = []
-    self.step_t_end = []
-    self.step_u_pending = []
-    self.step_u_delay = []
-    self.metadata = [] # TODO: Should be step_metadata
+    # Note: self.pending_computation[j] is the computation that was either started at self.t[j] 
+    #       or previously started and is still continuing at self.t[j].
+    self.pending_computation = []
+    
+    # Some Metadata for the simulation
+    self._walltime_start: float = time.time()
+    self.walltime = None
+    self.cause_of_termination: str = "In Progress"
+    self.datetime_of_run = datetime.datetime.now().isoformat()
+
+
+  def finish(self, cause_of_termination=None):
+    self.walltime = time.time() - self.walltime_start
+    if not cause_of_termination:
+      self.cause_of_termination = "Finished"
+    else:
+      self.cause_of_termination = repr(cause_of_termination)
+
+  def get_pending_computation_for_time_step(self, k):
+    ndx = self.k.index(k)
+    return self.pending_computation[ndx]
+
+  def get_pending_computation_started_at_sample_time_index(self, i):
+    ndx = self.i.index(i)
+    if ndx > 0:
+      # If not the very first entry, then we need to increment the ndx by one because the value of 'i' increments (in the array) on entry before pending_computation "increments" (gets a new value).
+      ndx += 1
+    print(f'ndx from i={i}: {ndx}. (self.i: {self.i})')
+    # if self.pending_computation[ndx] is None:
+      # return self.pending_computation[ndx + 1]
+    if self.i[ndx] != i:
+      raise ValueError("self.i[ndx] != i")
+    
+    return self.pending_computation[ndx]
+
 
   def __repr__(self):
       return (f"{self.__class__.__name__}("
               f"k0={self.k0},\n "
               f"t0={self.t0},\n "
               f"x0={self.x0},\n "
-              f"x={self.x},\n "
-              f"u={self.u},\n "
-              f"t={self.t},\n "
-              f"k={self.k},\n "
-              f"x_predictions={self.x_predictions},\n "
-              f"t_predictions={self.t_predictions},\n "
-              f"step_k={self.step_k},\n "
-              f"step_t_start={self.step_t_start},\n "
-              f"step_t_end={self.step_t_end},\n "
-              f"step_u_pending={self.step_u_pending},\n "
-              f"step_u_delay={self.step_u_delay},\n "
-              f"metadata={self.metadata})")
+              f"pending_computation_prior={self.pending_computation_prior},\n"
+              f" x={self.x},\n "
+              f" u={self.u},\n "
+              f" t={self.t},\n "
+              f" k={self.k},\n "
+              f" i={self.i},\n "
+              f"pending_computation={self.pending_computation})")
 
   def cast_vector(self, x):
     if x is None:
@@ -368,35 +462,30 @@ class TimeStepSeries:
     
 
   def copy(self):
-    copied = TimeStepSeries(self.k0, self.t0, self.x0)
+    copied = TimeStepSeries(self.k0, self.t0, self.x0, self.pending_computation_prior)
 
     # Copy values.
-    copied.x              = self.x.copy()
-    copied.u              = self.u.copy()
-    copied.t              = self.t.copy()
-    copied.k              = self.k.copy()
-    copied.x_predictions  = self.x_predictions.copy()
-    copied.t_predictions  = self.t_predictions.copy()
-    copied.step_k         = self.step_k.copy()
-    copied.step_t_start   = self.step_t_start.copy()
-    copied.step_t_end     = self.step_t_end.copy()
-    copied.step_u_pending = self.step_u_pending.copy()
-    copied.step_u_delay   = self.step_u_delay.copy()
-    copied.metadata       = self.metadata.copy()
+    copied.x                   = self.x.copy()
+    copied.u                   = self.u.copy()
+    copied.t                   = self.t.copy()
+    copied.k                   = self.k.copy()
+    copied.i                   = self.i.copy()
+    copied.pending_computation = self.pending_computation.copy()
     return copied
 
-  def append(self, t_end, x_end, u, u_pending, u_delay, t_mid=None, x_mid=None, metadata:dict=None):
-
-    
+  def append(self, t_end, x_end, u, pending_computation: ComputationData, t_mid=None, x_mid=None, ):
 
     # is_x_end_None = x_end is None
     x_end     = self.cast_vector(x_end)
     u         = self.cast_vector(u)
-    u_pending = self.cast_vector(u_pending)
     x_mid     = self.cast_vector(x_mid)
 
     if x_end is None:
       raise ValueError(f'x_end is None')
+
+    if pending_computation.t_end > t_end:
+      raise ValueError("pending_computation.t_end > t_end")
+    
 
     if len(self.t) == 0:
       k       = self.k0
@@ -409,47 +498,48 @@ class TimeStepSeries:
 
     if t_mid is None != x_mid is None:
       raise ValueError("t_mid is None != x_mid is None")
-    # if t_mid is None != u_mid is None:
-    #   raise ValueError("t_mid is None != u_mid is None")
     if t_start >= t_end:
       raise ValueError(f't_start={t_start} >= t_end={t_end}. self:{self}')
     if t_mid and (t_start > t_mid or t_mid > t_end):
       raise ValueError(f't_mid and (t_start > t_mid or t_mid > t_end)')
 
     if t_mid is None:
+      #         [ Before, After] interval
+      self.k += [      k,     k] # Step number
+      self.i += [      k, k + 1] # Sample index
       self.t += [t_start, t_end]
       self.x += [x_start, x_end]
       self.u += [      u,     u]
-      self.k += [      k,     k]
+      self.pending_computation += [pending_computation, pending_computation]
 
     else: # A mid point was given, indicating an update to u part of the way through.
-      self.t += [t_start, t_mid,     t_mid,     t_end]
-      self.x += [x_start, x_mid,     x_mid,     x_end]
-      self.u += [       u,    u, u_pending, u_pending]
-      self.k += [       k,    k,          k,        k]
+      u_mid = pending_computation.u
+      self.t += [t_start, t_mid, t_mid, t_end]
+      self.x += [x_start, x_mid, x_mid, x_end]
+      self.u += [       u,    u, u_mid, u_mid]
+      self.k += [       k,    k,     k,     k]
+      self.i += [       k,    k,     k, k + 1] # Sample index
       # The value of u_pending was applied, starting at t_mid, so it is no longer pending 
       # at the end of the sample. Thus, we set it to None.
-      u_pending = None
-      
-      # if u_delay > t_mid - t_start:
-      #   raise ValueError(f"u_delay={u_delay} > t_mid - t_start = {t_mid - t_start}")
-      
+      self.pending_computation += [pending_computation, pending_computation, None, None]
 
-    # TODO: Update predictions code.
-    # self.x_predictions
-    # self.t_predictions
+  def append_multiple(self, 
+                      t_end: List, 
+                      x_end: List, 
+                      u: List, 
+                      pending_computation: List, 
+                      t_mid=None, 
+                      x_mid=None):
+    if len(t_end) != len(x_end):
+      raise ValueError("len(t_end) != len(x_end)")
 
-    # The time-step aligned data all only has on
-    self.step_k.append(k)
-    self.step_t_start.append(t_start)
-    self.step_t_end.append(t_end)
-    self.step_u_pending.append(u_pending)
-    self.step_u_delay.append(u_delay)
-    self.metadata.append(metadata)
+    if len(t_end) != len(u):
+      raise ValueError("len(t_end) != len(u)")
+    
+    if len(t_end) != len(pending_computation):
+      raise ValueError("len(t_end) != len(pending_computation)")
 
-  def append_multiple(self, t_end, x_end, u, u_pending, u_delay, t_mid=None, x_mid=None, metadata=None):
     for i in range(len(t_end)):
-
       if t_mid is None:
         i_t_mid = None
       else:
@@ -460,7 +550,27 @@ class TimeStepSeries:
       else:
         i_x_mid = x_mid[i]
 
-      self.append(t_end[i], x_end[i], u[i], u_pending[i], u_delay[i], t_mid=i_t_mid, x_mid=i_x_mid, metadata=metadata)
+      self.append(t_end[i], x_end[i], u[i], pending_computation=pending_computation[i], t_mid=i_t_mid, x_mid=i_x_mid)
+
+  def overwrite_computation_times(self, computation_times):
+    if len(computation_times) != self.n_time_indices():
+      raise ValueError(f"len(computation_times) = {len(computation_times)} != self.n_time_indices = {self.n_time_indices()}. self: {self}")
+      
+    print(f'Overwriting computation times. computation_times={computation_times}, self.pending_computation={self.pending_computation}.')
+    i_pending_computation = 0
+    i_computation_time = 0
+    while i_pending_computation < len(self.pending_computation):
+      pc = self.pending_computation[i_pending_computation]
+      print()
+      print(f'pc: ', pc)
+      delay = computation_times[i_computation_time]
+      print(f'computation_times[{i_computation_time}]', delay)
+      new_pending_computation = ComputationData(t_start=pc.t_start, delay=delay, u=pc.u, metadata=pc.metadata)
+      
+      self.pending_computation[i_pending_computation] = new_pending_computation
+      self.pending_computation[i_pending_computation+1] = new_pending_computation
+      i_pending_computation += 2
+      i_computation_time += 1
 
   # Override the + operator
   def __add__(self, other):
@@ -481,40 +591,32 @@ class TimeStepSeries:
         raise ValueError("Initial state does not match: self.x[-1] != other.x0")
 
     concatenated = self.copy()
-    concatenated.x              += other.x
-    concatenated.u              += other.u
-    concatenated.t              += other.t
-    concatenated.k              += other.k
-    concatenated.x_predictions  += other.x_predictions
-    concatenated.t_predictions  += other.t_predictions
-    concatenated.step_k         += other.step_k
-    concatenated.step_t_start   += other.step_t_start
-    concatenated.step_t_end     += other.step_t_end
-    concatenated.step_u_pending += other.step_u_pending
-    concatenated.step_u_delay   += other.step_u_delay
-    concatenated.metadata       += other.metadata
-    # concatenated.instruction_counts_list += other.instruction_counts_list
-    # concatenated.cycles_counts_list += other.cycles_counts_list
-    # concatenated.walltimes_list += other.walltimes_list
+    concatenated.x                   += other.x
+    concatenated.u                   += other.u
+    concatenated.t                   += other.t
+    concatenated.k                   += other.k # Time step index
+    concatenated.i                   += other.i # Sample time index
+    concatenated.pending_computation += other.pending_computation
 
     return concatenated
 
-  def truncate(self, n_timesteps=None, last_k=None):
+  def truncate(self, last_k):
     """
     Truncate this object to either have n_timesteps or to end at the index last_k.
     """
 
-    if n_timesteps is None and last_k is None:
-      raise ValueError("n_timesteps is None and last_k is None. Exactly one must be given!")
+    # if n_timesteps is None and last_k is None:
+    #   raise ValueError("n_timesteps is None and last_k is None. Exactly one must be given!")
     
-    if n_timesteps is None:
-      n_timesteps = last_k - self.k0 + 1
-    elif last_k is None:
-      last_k = self.k0 + n_timesteps - 1
-    else:
-      raise ValueError("Either n_timesteps or last_k must be None.")
+    # if n_timesteps is None:
+    n_timesteps = last_k - self.k0
+    n_timeindices = last_k - self.k0 + 1
+    # elif last_k is None:
+    #   last_k = self.k0 + n_timesteps
+    # else:
+    #   raise ValueError("Either n_timesteps or last_k must be None.")
 
-    if last_k < self.step_k[0]:
+    if last_k < self.k[0]:
       raise ValueError("last_k was less than the first time step.")
 
     if self.n_time_steps() <= n_timesteps:
@@ -525,37 +627,30 @@ class TimeStepSeries:
     # Time-index aligned values
     last_index_of_last_k = max(ndx for ndx, k in enumerate(self.k) if k == last_k)
     ndxs = slice(0, last_index_of_last_k+1)
-    truncated.x             = self.x[ndxs]
-    truncated.u             = self.u[ndxs]
-    truncated.t             = self.t[ndxs]
-    truncated.k             = self.k[ndxs]
-    truncated.x_predictions = self.x_predictions[ndxs]
-    truncated.t_predictions = self.t_predictions[ndxs]
+    truncated.x                    = self.x[ndxs]
+    truncated.u                    = self.u[ndxs]
+    truncated.t                    = self.t[ndxs]
+    truncated.k                    = self.k[ndxs]
+    truncated.pending_computation  = self.pending_computation[ndxs]
 
-    # Time-step aligned values
-    truncated.step_k         = self.step_k[:n_timesteps]
-    truncated.step_t_start   = self.step_t_start[:n_timesteps]
-    truncated.step_t_end     = self.step_t_end[:n_timesteps]
-    truncated.step_u_pending = self.step_u_pending[:n_timesteps]
-    truncated.step_u_delay   = self.step_u_delay[:n_timesteps]
-    truncated.metadata       = self.metadata[:n_timesteps]
-    # truncated.instruction_counts_list = self.instruction_counts_list[:n_timesteps]
-    # truncated.cycles_counts_list      = self.cycles_counts_list[:n_timesteps]
-    # truncated.walltimes_list          = self.walltimes_list[:n_timesteps]
     return truncated 
 
   def is_empty(self):
-    return self.n_time_indices() == 0
+    return len(self.t) == 0
 
   def n_time_indices(self):
-    return len(self.t)
+    if self.is_empty():
+      return 0
+    return self.i[-1] - self.i[0]
 
   def n_time_steps(self):
-    return len(self.step_k)
+    if self.is_empty():
+      return 0
+    return self.k[-1] - self.k[0]
 
   def find_first_late_timestep(self, sample_time):
-    for (i_step, delay) in enumerate(self.step_u_delay):
-      if delay is not None and delay > sample_time:
+    for (i_step, pc) in enumerate(self.pending_computation):
+      if pc.delay is not None and pc.delay > sample_time:
         has_missed_computation_time = True
         first_late_timestep = self.step_k[i_step]
         print(f'first_late_timestep: {first_late_timestep}')
@@ -570,30 +665,34 @@ class TimeStepSeries:
       "k0": self.k0,
       "t": self.t,
       "k": self.k,
-      "step_k": self.step_k,
-      "step_t_start": self.step_t_start,
-      "step_t_end": self.step_t_end,
+      "i": self.i
     }
     printJson(label, timing_data)
     
     print(f'{label}')
-    TimeStepSeries.print_sample_time_values("k", self.k)
-    TimeStepSeries.print_time_step_values("time step", self.step_k)
+    TimeStepSeries.print_sample_time_values("k_time_step", self.k)
+    TimeStepSeries.print_sample_time_values("i_sample_ndx", self.k)
+    # TimeStepSeries.print_time_step_values("time step", self.step_k)
     TimeStepSeries.print_sample_time_values("t(k)", self.t)
-    TimeStepSeries.print_time_step_values("delay", self.step_u_delay)
+    # TimeStepSeries.print_time_step_values("delay", self.pending_computation)
 
   def print(self, label):
-    print(f'{label}')
+    print(f'{label}: )')
+    if self.pending_computation_prior:
+      print("pending_computation_prior", self.pending_computation_prior.next_batch_initialization_summary())
+    else:
+      print("No prior pending computation.")
     TimeStepSeries.print_sample_time_values("k", self.k)
-    TimeStepSeries.print_time_step_values("time step", self.step_k)
+    # TimeStepSeries.print_time_step_values("time step", self.step_k)
     TimeStepSeries.print_sample_time_values("t(k)", self.t)
     TimeStepSeries.print_sample_time_values("x1(k)", [x[0] for x in self.x])
     # TimeStepSeries.print_sample_time_values("x2(k)", [x[1] for x in self.x])
     # TimeStepSeries.print_sample_time_values("x3(k)", [x[2] for x in self.x])
     TimeStepSeries.print_sample_time_values("x4(k)", [x[3] for x in self.x])
     TimeStepSeries.print_sample_time_values("u([k, k+1))", [u[0] for u in self.u])
-    TimeStepSeries.print_time_step_values("delay", self.step_u_delay)
-    TimeStepSeries.print_time_step_values("u_pending", [u[0] for u in self.step_u_pending])
+    TimeStepSeries.print_sample_time_values("comp delay", [pc.delay for pc in self.pending_computation])
+    TimeStepSeries.print_sample_time_values("comp u", [pc.u[0][0] for pc in self.pending_computation])
+    TimeStepSeries.print_sample_time_values("comp t_end", [pc.t_end for pc in self.pending_computation])
 
   @staticmethod
   def print_sample_time_values(label: str, values: list):
@@ -618,25 +717,6 @@ class TimeStepSeries:
       raise err
 
 
-#   def to_dictionary(self) -> dict:
-#     
-#     if len(self.t) != len(self.x):
-#       raise ValueError("len(t) != len(x)")
-# 
-#     # Create a JSON object for storing the data out, using all the values in config_data.
-#     simulation_dictionary = {}
-#     # simulation_dictionary["datetime_of_run"] = self.datetime_of_run
-#     # simulation_dictionary["cause_of_termination"] = self.cause_of_termination
-#     simulation_dictionary["x"] = self.x;
-#     simulation_dictionary["u"] = self.u;
-#     simulation_dictionary["t"] = self.t;
-#     # simulation_dictionary["x_prediction"] = self.x_predictions;
-#     # simulation_dictionary["t_prediction"] = self.t_predictions;
-#     simulation_dictionary["time_indices"] = self.k;
-#     simulation_dictionary["metadata"]     = self.metadata;
-#     
-#     simulation_dictionary["last_time_index"] = max(self.step_k) + 1
-#         
 #     # Read optimizer info.
 #     # # TODO: Move the processing of the optimizer info out of "run_plant.py"
 #     # with open(sim_dir + 'optimizer_info.csv', newline='') as csvfile:
@@ -664,289 +744,72 @@ class TimeStepSeries:
 #     # simulation_dictionary["cost"]            = costs_list
 #     # simulation_dictionary["primal_residual"] = primal_residuals_list
 #     # simulation_dictionary["dual_residual"]   = dual_residuals_list
-# 
-#     if not isinstance(simulation_dictionary, dict):
-#       raise ValueError(f"Expected simulation_dictionary to be a dictionary, but instead it was a {type(simulation_dictionary)}.")
-# 
-#     return simulation_dictionary
 
-class SimulationDataBuilder:
-  def __init__(self):
-    # scarab_params_reader may be None, in which case Scarab PARAMS are not read.
-    # self.scarab_params_reader = scarab_params_reader
-    self.time_step_series = None # initialized in start_of_simulation
-
-    # # Data lists
-    # self.xs_list = []
-    # self.us_list = []
-    # self.ts_list = []
-    # self.x_predictions_list = []
-    # self.t_predictions_list = [] # Absolute time
-    # self.t_delays_list = [] # Relative time interval
-    # self.time_indices_list = []
-    # self.t_delays_list = []
-    # self.instruction_counts_list = []
-    # self.cycles_counts_list = []
-    # self.walltimes_list = []
-
-    # The cause_of_termination property records the simulation status and, ultimately, what caused the simulation to terminate. 
-    # If there is an error during the simulation, cause_of_termination is set to its representation value.
-    self.cause_of_termination = "Not started"
-
-  # def snapshot_time_step(self, time_index: int, 
-  #                       t: float, 
-  #                       x: np.ndarray, 
-  #                       u: np.ndarray, )
-
-#   def snapshotState(self, k: int, t: float, xarray: np.ndarray, uarray: np.ndarray, description: str):
-#     """ Define a function for printing the current state of the system to 
-#     the console and saving the state to the data files. """
-#     if uarray is None:
-#       raise ValueError("uarray was None.")
-#     # x_str = nump_vec_to_csv_string(xarray)
-#     # u_str = nump_vec_to_csv_string(uarray)
-# 
-#     if debug_interfile_communication_level >= 1:
-#       print(f'Snapshotting State k={k}, t={t} s, ({description}):')
-#       printIndented(f'x: {xarray}', 1)
-#       printIndented(f'u: {uarray}', 1)
-# 
-#     # Add xarray and uarray to the cumulative lists. 
-#     # We want xarray to be stored as a single list of numbers, but the 
-#     # tolist() function creates a nested lists, with the outer list containing
-#     # a single list. Thus, we use "[0]" to reference the inner list. 
-# 
-#       
-#     self.time_indices_list.append(k)
-#     self.xs_list.append(numpy_vec_to_list(xarray))
-#     self.us_list.append(numpy_vec_to_list(uarray))
-#     self.ts_list.append(t)
-#     
-#     if len(self.time_indices_list) != len(self.xs_list):
-#       raise ValueError("len(time_indices_list) != len(xs_list)")
-# 
-#   def snapshotDelay(self, k: int, t_delay: float, instruction_count: int, cycles_count: int, description: str=""):
-#     """ Define a function for recording delays. """
-# 
-#     if debug_interfile_communication_level >= 1:
-#       print(f'Snapshotting Delays k={k}, ({description}):')
-#       printIndented(f't_delay: {t_delay}', 1)
-#       printIndented(f'instruction_count: {instruction_count}', 1)
-#       printIndented(f'cycles_count: {cycles_count}', 1)
-# 
-#     self.t_delays_list.append(t_delay)
-#     self.instruction_counts_list.append(instruction_count)
-#     self.cycles_counts_list.append(cycles_count)
-# 
-#     # if len(self.time_indices_list) != len(self.xs_list):
-#       # raise ValueError("len(time_indices_list) != len(xs_list)")
-# 
-#   def snapshotPrediction(self, t_prediction: float, x_prediction_array: np.ndarray, description: str):
-#     """ Define a function for printing the prediction to 
-#     the console and saving the state to the data files. """
-#     x_predict_str = nump_vec_to_csv_string(x_prediction_array)
-#     t_predict_str = f"{t_prediction:.8}"
-# 
-#     if debug_interfile_communication_level >= 1:
-#       print(f'Snapshotting Prediction ({description})')
-#       printIndented(f'x prediction: {x_predict_str}', 1)
-#       printIndented(f't prediction: {t_predict_str}', 1)
-# 
-#     # Add xarray and uarray to the cumulative lists. 
-#     # We want xarray to be stored as a single list of numbers, but the 
-#     # tolist() function creates a nested lists, with the outter list containing
-#     # a single list. Thus, we use "[0]" to reference the inner list. 
-#     self.x_predictions_list.append(x_prediction_array.transpose().tolist()[0])
-#     self.t_predictions_list.append(t_prediction)
-
-  def start_of_simulation(self, k0, t0, x0):
-    self.walltime_start_of_loop = time.time()
-    self.cause_of_termination = "In Progress"
-    self.datetime_of_run = datetime.datetime.now().isoformat()
-    self.time_step_series = TimeStepSeries(k0=k0, t0=t0, x0=x0)
-  
-  def end_of_simulation(self, cause_of_termination=None):
-    self.walltimes_list.append(time.time() - self.walltime_start_of_loop)
-    if not cause_of_termination:
-      self.cause_of_termination = "Finished"
-    else:
-      self.cause_of_termination = cause_of_termination
-
-#   def update_u(self, 
-#                 k_old: int, # Time index.
-#                 k_new: int, # Time index.
-#                 t: float, 
-#                 x: np.ndarray, 
-#                 u_old: np.ndarray, 
-#                 u_new: np.ndarray, 
-#                 description: str = ""):
-#     # Check arguments
-#     if k_old == None != u_old == None:
-#       raise ValueError("update_u(): k_old == None != u_old == None. They should both be None or neither be None!")
-#     
-#     if k_new == None != u_new == None:
-#       raise ValueError("update_u(): k_new == None != u_new == None. They should both be None or neither be None!")
-#     
-#     def assert_is_np_array(array):
-#       if not isinstance(array, np.ndarray) and array is not None:
-#         raise ValueError(f'Expected {array} to be an np.array but instead it is a {type(array)}')
-#     
-#     # Check that x, u_new, and u_old are numpy arrays (or empty)
-#     assert_is_np_array(x)
-#     assert_is_np_array(u_new)
-#     assert_is_np_array(u_old)
-#     
-#     if u_old == None: # No old -> Setting the initial u value.
-#       self.snapshotState(k_new, t, x, u_new, f'(time index={k_new} {description} - initial')
-#     else: # Old and new -> Don't compute the next control value.
-#       self.snapshotState(k_old, t, x, u_old, f'(time index={k_old} {description} - before')
-#       if u_new:
-#         self.snapshotState(k_new, t, x, u_new, f'(time index={k_new} {description} - after')
-# 
-#     return u_new, k_new
-# 
-#   def set_initial_u(self, 
-#                     k: int, # Time index.
-#                     t: float, 
-#                     x: np.ndarray, 
-#                     u: np.ndarray):
-#     print(f'k={k}, t={t}, x={x}, u={u}, Initial value')
-#     return self.update_u(k_old=None, k_new = k, t=t, x=x, u_old=None, u_new=u, description="Initial value")
-# 
-#   def update_u_at_sample_time(self, 
-#                               k: int, # Time index.
-#                               t: float, 
-#                               x: np.ndarray, 
-#                               u_old: np.ndarray, 
-#                               u_new: np.ndarray, 
-#                               description: str = None):
-#     print(f'k={k}, t={t}, x={x}, u_old={u_old}, u_new={u_new}, description={description}')
-#     # If no "old" given, then keep the current time step.
-#     if u_old is None: 
-#       raise ValueError('u_old is None')
-#     
-#     if u_new is None:
-#       k_new = None
-#     else:
-#       k_new = k+1
-# 
-#     return self.update_u(k_old=k, k_new = k_new, t=t, x=x, u_old=u_old, u_new=u_new, description=description)
-# 
-#   def update_u_between_sample_times(self, 
-#                                     k: int, # Time index.
-#                                     t: float, 
-#                                     x: np.ndarray, 
-#                                     u_old: np.ndarray, 
-#                                     u_new: np.ndarray, 
-#                                     description: str = None):
-#     raise ValueError("I don't expect this case right now.")
-#     # We keep the same 'k' because we have not reached the new sample time.
-#     return self.update_u(k_old=k, k_new = k, t=t, x=x, u_old=u_old, u_new=u_new, description=description)
-#   
-#   def build(self):
-# 
-#     time_series = TimeSeries(
-#       xs_list = self.xs_list,
-#       us_list = self.us_list,
-#       ts_list = self.ts_list,
-#       time_indices_list = self.time_indices_list,
-#       t_delays_list = self.t_delays_list,
-#       instruction_counts_list = self.instruction_counts_list,
-#       cycles_counts_list = self.cycles_counts_list,
-#       walltimes_list = self.walltimes_list,
-#       x_predictions_list = self.x_predictions_list,
-#       t_predictions_list = self.t_predictions_list
-#     )
-
-class ComputationData:
-
-  def __init__(self, t_start, delay, u):
-    self.t_start = t_start
-    self.delay = delay
-    self.t_end = t_start + delay
-    self.u
-
-def get_u(t, x, u_current, u_pending, u_pending_time, controller_interface):
+def get_u(t, x, u_before, pending_computation_before: ComputationData, controller_interface):
   """ 
   Get an (possibly) updated value of u. 
-  Returns: u_current, u_delay, u_pending, u_pending_time, metadata,
-  where u_current is the value of u that should start being applied immediately (at t). 
+  Returns: u, u_delay, u_pending, u_pending_time, metadata,
+  where u is the value of u that should start being applied immediately (at t). 
   
   If the updated value requires calling the controller, then u_delay  
 
   This function is tested in <root>/tests/test_scarabintheloop_plant_runner.py/Test_get_u
   """
-
-  if u_pending is None != u_pending_time is None:
-    raise ValueError(f'u_pending={u_pending} is None != u_pending_time={u_pending_time} is None')
   
-  # If no u_pending...
-  if u_pending is None:
-    # There is no u_pending, then we run the computation of the next control value. The current u does not update, because it takes time for the control to be computed.
-    u = u_current
-    u_pending, u_delay, metadata = controller_interface.get_next_control_from_controller(x)
-    u_pending_time = t + u_delay
-    return u, u_delay, u_pending, u_pending_time, metadata
-  else: # Otherwise, no computation: u_pending and u_pending_time are given...
-    # no computation, so no delay or metadata.
-    u_delay = None
-    metadata = None
+  print('pending_computation_before is None?', pending_computation_before is None)
+  if pending_computation_before:
+    print("NOT pending_computation_before. pending_computation_before: ", pending_computation_before)
+  else:
+    print("IS pending_computation_before. pending_computation_before: ", pending_computation_before)
 
-    # Sanity check.
-    if u_pending_time is None:
-      raise ValueError(f"u_pending_time is None. u_pending: {u_pending}")
-  
-    # If before the time when u_pending is 'ready', then keep u_current and u_pending unchanged.
-    if t < u_pending_time:
-      u = u_current
-      return u, u_delay, u_pending, u_pending_time, metadata
+  printHeader2('----- get_u (BEFORE) ----- ')
+  print(f'u_before[0]: {u_before[0][0]}')
+  print("pending_computation_before", pending_computation_before)
+  printJson("pending_computation_before", pending_computation_before)
+
+  did_start_computation = False
+  if pending_computation_before is not None and pending_computation_before.t_end > t:
+    # If last_computation is provided and the end of the computation is after the current time then we do not update anything. 
+    # print(f'Keeping the same pending_computation: {pending_computation_before}')
+    print(f'Set u_after = u_before = {u_before}. (Computation pending)')
+    u_after = u_before
+    pending_computation_after = pending_computation_before
+    did_start_computation = False
     
-    if t >= u_pending_time:
-      u = u_pending
-      u_pending = None
-      u_pending_time = None
-      return u, u_delay, u_pending, u_pending_time, metadata
+    printHeader2('----- get_u (AFTER - no update) ----- ')
+    print(f'u_after[0]: {u_after[0][0]}')
+    printJson("pending_computation_after", pending_computation_after)
+    print("pending_computation_after", pending_computation_after)
+    return u_after, pending_computation_after, did_start_computation
 
-    raise ValueError('Unexpected case.') 
+  if pending_computation_before is not None and pending_computation_before.t_end <= t:
+    # If the last computation data is "done", then we set u_after to the pending value of u.
+    print(f'Set u_after = pending_computation_before.u = {pending_computation_before.u}. (computation finished)')
+    u_after = pending_computation_before.u
+  elif pending_computation_before is None:
+    print(f'Set u_after = u_before = {u_before} (no pending computation).')
+    u_after = u_before
+  else:
+    raise ValueError(f'Unexpected case.')
+    
+
+  # If there is not pen         ding_computation_before or the given pending_computation_before finishes before the current time t, then we run the computation of the next control value.
+  u_pending, u_delay, metadata = controller_interface.get_next_control_from_controller(x)
+  did_start_computation = True
+  pending_computation_after = ComputationData(t, u_delay, u_pending, metadata)
 
 
-
-# 
-# class PlantRunner:
-# 
-#   def __init__(self, computational_delay_provider, 
-# only_update_control_at_sample_times
-# is_parallelized):
-# 
-#               #  evolveState,
-#               #  simulation_data_builder, 
-#               #  controller_interface, 
-#               #  computational_delay_provider,
-#               #  n_controller_computations,
-#               #  first_time_step,
-#               #  sample_time):
-#     self.evolveState = evolveState
-#     self.simulation_data_builder = simulation_data_builder
-#     self.controller_interface = controller_interface
-#     self.computational_delay_provider = computational_delay_provider
-#     self.n_controller_computations = n_controller_computations
-#     self.first_time_step = first_time_step
-#     self.sample_time = sample_time
-# 
-#   def run(first_time_step, sample_time, x0)
-
-# def run_with_configured_objs(evolveState,
-#                              simulation_data_builder, 
-#                              controller_interface, 
-#                              computational_delay_provider,
-#                              n_controller_computations,
-#                              first_time_step,
-#                              sample_time,
-#                              x0,
-#                              u0,
-#                              t0
-#                              ):
-#     pass
+  printHeader2('----- get_u (AFTER - With update) ----- ')
+  print(f'u_after[0]: {u_after[0][0]}')
+  printJson("pending_computation_after", pending_computation_after)
+  # if u_delay == 0:
+  #   # If there is no delay, then we update immediately.
+  #   return u_pending, None
+  if u_delay > 0:
+    # print(f'Updated pending_computation: {pending_computation_after}')
+    return u_after, pending_computation_after, did_start_computation
+  else:
+    raise ValueError(f'Expected a positive value.')
   
 
 def computation_delay_provider_factory(computation_delay_name: str, sim_dir, sample_time):
@@ -956,14 +819,14 @@ def computation_delay_provider_factory(computation_delay_name: str, sim_dir, sam
     return NoneDelayProvider()
   elif computation_delay_name == "gaussian":
     computational_delay_provider = GaussianDelayProvider(mean=0.24, std_dev=0.05)
-  elif computation_delay_name == "scarab":
+  elif computation_delay_name == "execution-driven scarab":
     return ScarabDelayProvider(sim_dir)
   elif computation_delay_name == "onestep":
     return OneTimeStepDelayProvider(sample_time)
   elif isinstance(computation_delay_name, DelayProvider):
     return computation_delay_name
   else:
-    raise ValueError(f'Unexpected computation_delay_name: {computation_delay_name}')
+    raise ValueError(f'Unexpected computation_delay_name: {computation_delay_name}.')
     
 @contextmanager
 def controller_interface_factory(controller_interface_selection, computation_delay_provider, sim_dir):
@@ -994,187 +857,99 @@ def controller_interface_factory(controller_interface_selection, computation_del
   finally:
     controller_interface.close()
 
-
 def run(sim_dir: str, config_data: dict, evolveState) -> dict:
   if not sim_dir.endswith("/"):
     sim_dir += "/"
   print(f"Start of plant_runner.run()  in {sim_dir}")
 
-  # Settings
-  only_update_control_at_sample_times = config_data["only_update_control_at_sample_times"]
-  use_scarab_delays = not config_data["Simulation Options"]["use_fake_scarab_computation_times"]
-  is_parallelized = config_data["Simulation Options"]["parallel_scarab_simulation"]
-
-  # Update some setting to make sure 
-  if is_parallelized:
-    use_scarab_delays = False
-    only_update_control_at_sample_times = True
-
+  # use_fake_scarab_computation_times = config_data["Simulation Options"]["use_fake_scarab_computation_times"]
   max_time_steps = config_data["max_time_steps"]
   sample_time = config_data["system_parameters"]["sample_time"] # Discrete sample period.
   first_time_index = config_data['first_time_index']
 
-  computation_delay_provider = computation_delay_provider_factory(config_data["Simulation Options"]["computation_delay_provider"], sim_dir, sample_time)
-
-  # Get the dynamics definition.
-  n = config_data["system_parameters"]["state_dimension"]
-  m = config_data["system_parameters"]["input_dimension"]
+  computation_delay_provider = computation_delay_provider_factory(config_data["Simulation Options"]["in-the-loop_delay_provider"], sim_dir, sample_time)
 
   # Read the initial control value.
   x0 = list_to_numpy_vec(config_data['x0'])
   u0 = list_to_numpy_vec(config_data['u0'])
-  u_prev = u0
-
-  simulation_data_builder = SimulationDataBuilder()
   
-  if config_data["u_pending"]:
-    u_pending            = list_to_numpy_vec(config_data["u_pending"])
-    # u_pending_time_index = config_data["u_pending_time_index"]
-    u_pending_time       = config_data["u_pending_time"]
-  else:
-    u_pending            = None
-    # u_pending_time_index = None
-    u_pending_time       = None
+  # pending_computation may be None.
+  pending_computation0 = config_data["pending_computation"]
+  print(f"                  u0: {u0}")
+  printJson(f"pending_computation0", pending_computation0)
+  print(f"pending_computation0", pending_computation0)
 
   with controller_interface_factory("pipes", computation_delay_provider, sim_dir) as controller_interface:
 
     # computational_delay_provider = ScarabDelayProvider(sim_dir)
-    computational_delay_provider = OneTimeStepDelayProvider(sample_time)
+    # computational_delay_provider = OneTimeStepDelayProvider(sample_time)
     # computational_delay_provider = GaussianDelayProvider(mean=0.24, std_dev=0.05)
 
     try:
       x = x0
-      u_current = u0
+      u_before = u0
+      u_before_str = repr(u_before)
+      pending_computation_before = pending_computation0
       time_index = first_time_index
-      t = time_index * sample_time
-      # TODO: simulation_data_builder.start_of_simulation(k0=first_time_index, t0=t, x0=x0)
-      # u, time_index = simulation_data_builder.set_initial_u(time_index, t, x, u0)
 
       # The number of time steps that the controller has been computed. 
-      # When there is a pending 'u' value, there may be several time steps that don't compute new control values.
+      # When there is a pending 'u_before' value, there may be several time steps that don't compute new control values.
       n_new_u_values_computed = 0
 
-      time_step_series = TimeStepSeries(k0=first_time_index, t0=t, x0=x0)
+      time_step_series = TimeStepSeries(k0=first_time_index, t0=time_index * sample_time, x0=x0, pending_computation_prior=pending_computation0)
       while n_new_u_values_computed < max_time_steps:
-        u_current, u_delay, u_pending, u_pending_time, metadata = get_u(t, x, u_current, u_pending, u_pending_time, controller_interface)
-
         t_start = time_index * sample_time
         t_mid = None
         t_end = (time_index + 1) * sample_time
         x_start = x
         x_mid = None
-        
-        u_mid   = None
-        u_end   = None
 
-        if u_delay and u_delay > 2*sample_time:
+        u_after, pending_computation_after, did_start_computation = get_u(t_start, x_start, u_before, pending_computation_before, controller_interface)
+        
+        if pending_computation_before is None and (u_before != u_after):
+          raise ValueError(f'There was no pending computation, but u changed from u_before={u_before} to u_after={u_after}.')
+          
+        if pending_computation_after is None:
+          raise ValueError(f'pending_computation_after is None')
+
+        if pending_computation_after.delay and pending_computation_after.delay > 2*sample_time:
           raise ValueError("Missing computation by multiple time steps is not supported, yet.")
 
-        if u_pending is None:
-          # Evolve state for entire time step without updating u.
-          (t_end, x_end) = evolveState(t_start, x_start, u_current, t_end)
-        elif u_delay and u_delay < sample_time:
+        if pending_computation_after.delay < sample_time:
           # Evolve the state halfway and then update u.
-          t_mid = t + u_delay
-          (t_mid, x_mid) = evolveState(t_start, x_start, u_current, t_mid)
-          (t_end, x_end) = evolveState(t_mid,   x_mid,   u_pending, t_end)
+          t_mid = pending_computation_after.t_end
+          u_mid = pending_computation_after.u
+          (t_mid, x_mid) = evolveState(t_start, x_start, u_after, t_mid)
+          (t_end, x_end) = evolveState(t_mid,   x_mid,     u_mid, t_end)
         else: #u_delay and u_delay == sample_time:
-          # Evolve state for entire time step and then update u
-          (t_end, x_end) = evolveState(t_start, x_start, u_current, t_end)
+          # Evolve state for entire time step and then update u_after
+          (t_end, x_end) = evolveState(t_start, x_start, u_after, t_end)
 
         # elif u_delay and u_delay > sample_time:
-        #   # Evolve the state for entire time step without updating u. 
-        #   (t_end, x_end) = evolveState(t_start, x_start, u_current, t_end)
+        #   # Evolve the state for entire time step without updating u_after. 
+        #   (t_end, x_end) = evolveState(t_start, x_start, u_after, t_end)
         
         # if u_delay is not None:
         #   u_pending_time = t_start + u_delay
           
-        print(f'time_index={time_index}, t_start={t_start}, t_mid={t_mid}, t_end={t_end}, u_delay={u_delay}')
+        print(f'time_index={time_index}, t_start={t_start}, t_mid={t_mid}, t_end={t_end}, pending_computation_after={pending_computation_after}')
+        print(f'u_before={u_before}, u_after={u_after}')
 
         # Save the data.
         time_step_series.append(t_end=t_end, 
                                 x_end=x_end, 
-                                u=u_current, 
-                                u_pending=u_pending, 
-                                u_delay=u_delay, 
+                                u=u_after, 
+                                pending_computation=pending_computation_after, 
                                 t_mid=t_mid, 
-                                x_mid=x_mid, 
-                                metadata=metadata)
+                                x_mid=x_mid)
 
-        if u_pending_time and u_pending_time <= t_end:
-          u = u_pending
-          u_pending = None
-
-        if u_delay is not None:
+        if did_start_computation:
           n_new_u_values_computed += 1
 
         time_index += 1
-
-#         if u_pending:
-#           if first_time_index >= u_pending_time_index:
-#             raise ValueError(f"When u_pending is given, u_pending_time_index must be larger than the first time index, but instead u_pending_time_index = {u_pending_time_index} and first_time_index = {first_time_index}.")
-#           while time_index < u_pending_time_index - 1:
-#             u, time_index = simulation_data_builder.update_u_at_sample_time(time_index, t, x, u_old=u, u_new=u, 
-#                               description=f"Keeping initial u while waiting to apply u_pending at k={u_pending_time_index}.")
-#             
-#             t_start = time_index * sample_time
-#             t_end = (time_index + 1) * sample_time
-#             (t, x) = evolveState(t_start, x, u, t_end)
-#             simulation_data_builder.snapshotDelay(time_index, math.nan, math.nan, math.nan)
-# 
-#           u, time_index = simulation_data_builder.update_u_at_sample_time(time_index, t, x, u_old=u, u_new=u_pending)
-#           t_start = time_index * sample_time
-#           # Set t_end to the time when the computation finishes.
-#           t_end = (time_index + 1) * sample_time
-#           (t, x) = evolveState(t_start, x, u, t_end)
-# 
-#         for time_step in range(0, max_time_steps):
-#           print(f'Start of time step {time_index}.')
-#           
-#           u, x_prediction, t_prediction, iterations = controller_interface.get_next_control_from_controller(time_index, x)
-#           t_delay, instruction_count, cycles_count = computational_delay_provider.get_delay(time_index, iterations)
-#           controller_interface._write_t_delay(t_delay)
-# 
-#           simulation_data_builder.snapshotDelay(time_index, t_delay, instruction_count, cycles_count)
-#           simulation_data_builder.snapshotDelay(time_index, math.nan, math.nan, math.nan)
-#           
-#           print(f"Delay time: {t_delay:.8g} seconds ({100*t_delay/sample_time:.3g}% of sample time).")
-#           simulation_data_builder.snapshotPrediction(t_prediction, x_prediction, "Prediction")
-# 
-#           n_samples_without_finishing_computation = math.floor(t_delay/sample_time)
-#           n_samples_until_next_sample_after_computation_finishes = n_samples_without_finishing_computation + 1
-# 
-#           if debug_dynamics_level >= 1:
-#             print(f"t_delay={t_delay}, sample_time={sample_time:.2f}.")
-# 
-#           if only_update_control_at_sample_times:
-#             t_start = t
-#             # Set t_end to the time when the computation finishes.
-#             t_end = t + (n_samples_without_finishing_computation+1)*sample_time
-#             (t, x) = evolveState(t_start, x, u_prev, t_end)
-#             u, time_index = simulation_data_builder.update_u_at_sample_time(k=time_index, t=t, x=x, u_old=u_prev, u_new=u)
-#             # simulation_data_builder.snapshotState(-1, t, x, u, f"After full sample interval with {n_samples_without_finishing_computation} missed computation updates.")
-#             u_prev = u
-#         else: # Update when the computation finishes, without waiting for the next sample time.
-#           t_start = t
-#           t_computation_update = t + t_delay
-#           t_end = t + (n_samples_without_finishing_computation + 1)*sample_time
-# 
-#           # Evolve x over the one or more sample periods where the control is not updated.
-#           (t_mid, x_mid) = evolveState(t_start, x, u_prev, t_computation_update)
-# 
-#           # Snapshot at the computation time with the old control value.
-#           snapshotState(time_index, t, x, u_prev, f"After delay - Previous control. Missed {n_samples_without_finishing_computation} samples without updating controller.")
-#           
-#           # Snapshot at the computation time with the new control value.
-#           snapshotState(time_index, t, x, u, f"After delay - New control. Missed {n_samples_without_finishing_computation} samples without updating controller.")
-# 
-#           (t, x) = evolveState(t_computation_update, x, u, t_end)
-# 
-#           # Save the state at the end of the sample period.
-#           snapshotState(time_index, t, x, u, f"End of sample period. Missed {n_samples_without_finishing_computation} samples without updating controller.")
-#         
-#           u_prev = u
+        if time_index > 100:
+          raise ValueError(f'time_index > 1000')
+          
 
         # TODO: simulation_data_builder.end_of_simulation()
         # TODO: simulation_data_incremental = simulation_data_builder.to_dictionary()
@@ -1182,7 +957,11 @@ def run(sim_dir: str, config_data: dict, evolveState) -> dict:
         print(f'time_step_series: {time_step_series}')
         writeJson(sim_dir + "simulation_data_incremental.json", time_step_series)
         print('\n=====\n')
-      # simulation_data_builder.update_u_at_sample_time(k=time_index, t=t, x=x, u_old=u, u_new=None)
+
+        # Update values:
+        u_before = u_after
+        pending_computation_before = pending_computation_after
+      # simulation_data_builder.update_u_at_sample_time(k=time_index, t=t, x=x, u_old=u, u_after=None)
     except (DataNotRecievedViaFileError, BrokenPipeError) as err:
       # TODO: simulation_data_builder.mark_end_of_simulation(repr(err))
       traceback.print_exc()
@@ -1204,8 +983,6 @@ def convertStringToVector(vector_str: str):
     printIndented(repr(v), 1)
 
   return v
-
-
 
 
 def checkAndStripInputLoopNumber(input_line):

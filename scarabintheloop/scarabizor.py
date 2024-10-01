@@ -63,10 +63,10 @@ class ScarabPARAMSReader:
     self.param_regex_pattern = re.compile(r"--(?P<param_name>[\w|\_]+)\s*(?P<param_value>\d+).*")
 
   def params_in_to_dictionary(self):
-    return params_file_to_dictionary(self.params_in_file_path)
+    return self.params_file_to_dictionary(self.params_in_file_path)
 
   def params_out_to_dictionary(self):
-    return params_file_to_dictionary(self.params_out_file_path)
+    return self.params_file_to_dictionary(self.params_out_file_path)
 
   def params_file_to_dictionary(self, filename):
     params_lines = self.read_params_file(filename)
@@ -84,8 +84,12 @@ class ScarabPARAMSReader:
       if regex_match:
         param_name = regex_match.groupdict()['param_name']
         param_value = regex_match.groupdict()['param_value']
-        if param_name in param_keys_to_save_in_data_out:
+        if param_name in self.param_keys_to_save_in_data_out:
           param_dict[param_name] = int(param_value)
+    if not param_dict:
+      raise ValueError(f'param_dict is expected to have values, but instead param_dict={param_dict}')
+      
+    return param_dict
 
   # TODO: Write tests for this.
   def changeParamsValue(self,PARAM_lines: List[str], key, value):
@@ -99,7 +103,7 @@ class ScarabPARAMSReader:
         continue
       if key == regex_match.groupdict()['param_name']:
         # If the regex matches, then we replace the line.
-        new_line_text = param_str_fmt.format(key, value)
+        new_line_text = self.param_str_fmt.format(key, value)
         PARAM_lines[line_num] = new_line_text
         # print(f"Replaced line number {line_num} with {new_line_text}")
         return PARAM_lines

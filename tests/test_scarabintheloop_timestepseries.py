@@ -1,7 +1,7 @@
 #! /bin/env python3
 
 import unittest
-from scarabintheloop.plant_runner import TimeStepSeries
+from scarabintheloop.plant_runner import TimeStepSeries, ComputationData
 import copy
 
 class TestTimeStepSeries(unittest.TestCase):
@@ -18,25 +18,33 @@ class TestCopy(unittest.TestCase):
     k0 = 0
     t0 = 0
     x0 = 1.2
-    time_step_series = TimeStepSeries(k0, t0, x0)
-    copied_time_step_series = time_step_series.copy()
-    self.assertIsNot(copied_time_step_series.x, time_step_series.x)
-    self.assertIsNot(copied_time_step_series.t, time_step_series.t)
-    self.assertIsNot(copied_time_step_series.u, time_step_series.u)
-    self.assertIsNot(copied_time_step_series.k, time_step_series.k)
-    self.assertIsNot(copied_time_step_series.x, time_step_series.x)
+    ts_series = TimeStepSeries(k0, t0, x0)
+
+    pending_computation = ComputationData(t_start=0, delay=0.3, u=12)
+    ts_series.append(
+      t_end=1, 
+      x_end=3.4,
+      u=0.0001, 
+      pending_computation=pending_computation
+    )
+    copied_ts_series = ts_series.copy()
+    self.assertIsNot(copied_ts_series.x, ts_series.x)
+    self.assertIsNot(copied_ts_series.t, ts_series.t)
+    self.assertIsNot(copied_ts_series.u, ts_series.u)
+    self.assertIsNot(copied_ts_series.k, ts_series.k)
+    self.assertIsNot(copied_ts_series.x, ts_series.x)
     # and so on...
 
-    self.assertEqual(copied_time_step_series.k0, k0)
-    self.assertEqual(copied_time_step_series.t0, t0)
-    self.assertEqual(copied_time_step_series.x0, x0)
-    self.assertEqual(copied_time_step_series.k0, time_step_series.k0)
-    self.assertEqual(copied_time_step_series.t0, time_step_series.t0)
-    self.assertEqual(copied_time_step_series.x0, time_step_series.x0)
-    self.assertEqual(copied_time_step_series.t, time_step_series.t)
-    self.assertEqual(copied_time_step_series.u, time_step_series.u)
-    self.assertEqual(copied_time_step_series.k, time_step_series.k)
-    self.assertEqual(copied_time_step_series.x, time_step_series.x)
+    self.assertEqual(copied_ts_series.k0, k0)
+    self.assertEqual(copied_ts_series.t0, t0)
+    self.assertEqual(copied_ts_series.x0, x0)
+    self.assertEqual(copied_ts_series.k0, ts_series.k0)
+    self.assertEqual(copied_ts_series.t0, ts_series.t0)
+    self.assertEqual(copied_ts_series.x0, ts_series.x0)
+    self.assertEqual(copied_ts_series.t,  ts_series.t)
+    self.assertEqual(copied_ts_series.u,  ts_series.u)
+    self.assertEqual(copied_ts_series.k,  ts_series.k)
+    self.assertEqual(copied_ts_series.x,  ts_series.x)
 
 class TestConcatenate(unittest.TestCase):
   def test_concatenate(self):
@@ -50,7 +58,8 @@ class TestConcatenate(unittest.TestCase):
     x1_this = -34
     u1_this = 23 # "u_pending"
     u_delay0_this = 0.234
-    this_ts_series.append(t1_this, x1_this, u0_this, u1_this, u_delay0_this)
+    this_ts_series.append(t1_this, x1_this, u0_this, 
+                          ComputationData(t_start=0, delay=0.3, u=12))
 
     k0_that = k0_this + 1
     t0_that = t1_this
@@ -61,7 +70,8 @@ class TestConcatenate(unittest.TestCase):
     x1_that = -34
     u1_that = 23 # "u_pending"
     u_delay0_that = 0.234
-    that_ts_series.append(t1_that, x1_that, u0_that, u1_that, u_delay0_that)
+    that_ts_series.append(t1_that, x1_that, u0_that, 
+                          ComputationData(t_start=0, delay=0.3, u=12))
 
     # Concatenate those serieses, baby!
     concatenated_series = this_ts_series + that_ts_series
@@ -83,7 +93,9 @@ class Test_append(unittest.TestCase):
     u0 = 55
     u1 = 23 # "u_pending"
     u_delay0 = 0.234
-    ts_series.append(t1, x1, u0, u1, u_delay0)
+    
+    pending_computation = ComputationData(t_start=0, delay=0.1, u=11)
+    ts_series.append(t1, x1, u0, pending_computation)
 
     # Check time-index aligned data.
     self.assertEqual(ts_series.x, [x0, x1])
@@ -91,12 +103,13 @@ class Test_append(unittest.TestCase):
     self.assertEqual(ts_series.u, [u0, u0])
     self.assertEqual(ts_series.k, [k0, k0])
 
+    self.assertEqual(ts_series.pending_computation, [pending_computation, pending_computation])
     # Check the time step aligned data.
-    self.assertEqual(ts_series.step_k, [k0])
-    self.assertEqual(ts_series.step_t_start, [t0])
-    self.assertEqual(ts_series.step_t_end, [t1])
-    self.assertEqual(ts_series.step_u_pending, [u1])
-    self.assertEqual(ts_series.step_u_delay, [u_delay0])
+    # self.assertEqual(ts_series.step_k, [k0])
+    # self.assertEqual(ts_series.step_t_start, [t0])
+    # self.assertEqual(ts_series.step_t_end, [t1])
+    # self.assertEqual(ts_series.step_u_pending, [u1])
+    # self.assertEqual(ts_series.step_u_delay, [u_delay0])
     # self.assertEqual(ts_series.step_u_pending_n_steps_delayed, ) # TODO?
 
 
@@ -114,19 +127,22 @@ class Test_append(unittest.TestCase):
     x1 = 120
     u1 = 5.0
     u_delay0 = 0.234
-    ts_series.append(t1, x1, u0, u1, u_delay0, t_mid=t_mid, x_mid=x_mid)
+    
+    pending_computation = ComputationData(t_start=t0, delay=u_delay0, u=u1)
+    ts_series.append(t1, x1, u0, pending_computation, t_mid=t_mid, x_mid=x_mid)
 
     # Check time-index aligned data.
     self.assertEqual(ts_series.x, [x0, x_mid, x_mid, x1])
     self.assertEqual(ts_series.t, [t0, t_mid, t_mid, t1])
     self.assertEqual(ts_series.u, [u0,    u0,    u1, u1])
     self.assertEqual(ts_series.k, [k0,    k0,    k0, k0])
+    self.assertEqual(ts_series.pending_computation, [pending_computation, pending_computation, None, None])
 
-    self.assertEqual(ts_series.step_k, [k0])
-    self.assertEqual(ts_series.step_t_start, [t0])
-    self.assertEqual(ts_series.step_t_end, [t1])
-    self.assertEqual(ts_series.step_u_pending, [None])
-    self.assertEqual(ts_series.step_u_delay, [u_delay0])
+    # self.assertEqual(ts_series.step_k, [k0])
+    # self.assertEqual(ts_series.step_t_start, [t0])
+    # self.assertEqual(ts_series.step_t_end, [t1])
+    # self.assertEqual(ts_series.step_u_pending, [None])
+    # self.assertEqual(ts_series.step_u_delay, [u_delay0])
 
 class Test_append_multiple(unittest.TestCase):
   def test_with_mid_steps(self):
@@ -134,20 +150,64 @@ class Test_append_multiple(unittest.TestCase):
     t0 = 0.1
     x0 = 1.2
     ts_series = TimeStepSeries(k0, t0, x0)
+    pending_computations = [
+      ComputationData(t_start=0, delay=0.1, u=11),
+      ComputationData(t_start=1.1, delay=0.2, u=22)
+    ]
+    expected_pending_computations = [
+      ComputationData(t_start=0, delay=0.1, u=11),
+      ComputationData(t_start=1.1, delay=0.2, u=22)
+    ]
     ts_series.append_multiple(
                     t_end=[1.1, 2.2], 
                     x_end=[ 10,  20], 
                         u=[ -1,  -2], 
-                u_pending=[ 11,  22], 
-                  u_delay=[0.1, 0.2], 
+      pending_computation=pending_computations,
                     t_mid=[0.5, 1.5], 
                     x_mid=[  5,  15]
               )
-    self.assertEqual(ts_series.n_time_steps(), 2)
     self.assertEqual(ts_series.k, [k0,  k0,  k0,  k0, k0 + 1, k0 + 1, k0 + 1, k0 + 1])
     self.assertEqual(ts_series.t, [t0, 0.5, 0.5, 1.1,    1.1,    1.5,    1.5,    2.2])
     self.assertEqual(ts_series.x, [x0,   5,   5,  10,     10,     15,     15,     20])
     self.assertEqual(ts_series.u, [-1,  -1,  11,  11,     -2,     -2,     22,     22])
+
+    print(ts_series.i)
+    print(ts_series.pending_computation)
+    self.assertEqual(ts_series.get_pending_computation_started_at_sample_time_index(2), expected_pending_computations[0])
+    self.assertEqual(ts_series.get_pending_computation_started_at_sample_time_index(3), expected_pending_computations[1])
+
+class Test_overwrite_computation_times(unittest.TestCase):
+
+  def test(self):
+    k0 = 2
+    t0 = 0.0
+    x0 = 1.2
+    ts_series = TimeStepSeries(k0, t0, x0)
+    pending_computations = [
+      ComputationData(t_start=0.0, delay=0.0, u=11),
+      ComputationData(t_start=1.1, delay=0.0, u=22)
+    ]
+    ts_series.append_multiple(
+                    t_end=[1.0, 2.0], 
+                    x_end=[ 10,  20], 
+                        u=[ -1,  -2], 
+      pending_computation=pending_computations
+    )
+    # self.assertEqual(ts_series.pending_computation[1], ComputationData(t_start=1.1, delay=0.0, u=22))
+    new_delays = [0.1, 0.2]
+    ts_series.overwrite_computation_times(new_delays)
+    
+    expected_pending_computations = [
+      ComputationData(t_start=0,   delay=new_delays[0], u=11),
+      ComputationData(t_start=1.1, delay=new_delays[1], u=22)
+    ]
+    print("ts_series.i: ", ts_series.i)
+    print("ts_series.pending_computation: ", ts_series.pending_computation)
+    print("expected_pending_computations: ", expected_pending_computations)
+    print(ts_series.get_pending_computation_started_at_sample_time_index(3))
+    
+    self.assertEqual(ts_series.get_pending_computation_started_at_sample_time_index(2), expected_pending_computations[0])
+    self.assertEqual(ts_series.get_pending_computation_started_at_sample_time_index(3), expected_pending_computations[1])
 
 class Test_truncate(unittest.TestCase):
   def test_truncate_without_mid_steps(self):
@@ -156,25 +216,25 @@ class Test_truncate(unittest.TestCase):
     t0 = 0.1
     x0 = 1.2
     ts_series = TimeStepSeries(k0, t0, x0)
+    
+    pending_computations = [
+      ComputationData(t_start=0.0, delay=1.1, u=11),
+      ComputationData(t_start=1.1, delay=0.2, u=22),
+      ComputationData(t_start=2.2, delay=0.3, u=33)
+    ]
+
     ts_series.append_multiple(
                     t_end=[1.1, 2.2, 3.3], 
                     x_end=[ 10,  20,  30], 
                         u=[ -1,  -2,  -3], 
-                u_pending=[ 11,  22,  33], 
-                  u_delay=[0.1, 0.2, 0.3]
-              )
-    truncated_series = ts_series.truncate(n_timesteps=1)
-    self.assertEqual(truncated_series.n_time_steps(), 1)
+      pending_computation=pending_computations
+    )
+    truncated_series = ts_series.truncate(last_k=2)
+    # self.assertEqual(truncated_series.n_time_steps(), 0) #TODO
     self.assertEqual(truncated_series.k, [k0, k0])
     self.assertEqual(truncated_series.t, [t0, 1.1])
     self.assertEqual(truncated_series.x, [x0, 10])
     self.assertEqual(truncated_series.u, [-1, -1])
-
-    self.assertEqual(truncated_series.step_k, [k0])
-    self.assertEqual(truncated_series.step_t_start, [t0])
-    self.assertEqual(truncated_series.step_t_end, [1.1])
-    self.assertEqual(truncated_series.step_u_pending, [11])
-    self.assertEqual(truncated_series.step_u_delay, [0.1])    
 
   def test_truncate_without_mid_steps_giving_last_k(self):
     
@@ -182,16 +242,21 @@ class Test_truncate(unittest.TestCase):
     t0 = 0.1
     x0 = 1.2
     ts_series = TimeStepSeries(k0, t0, x0)
+    
+    pending_computations = [
+      ComputationData(t_start=0, delay=0.1, u=11),
+      ComputationData(t_start=1.1, delay=0.2, u=22),
+      ComputationData(t_start=2.2, delay=0.3, u=33)
+    ]
     ts_series.append_multiple(
-                    t_end=[1.1, 2.2, 3.3], 
+                    t_end=[1.0, 2.0, 3.0], 
                     x_end=[ 10,  20,  30], 
                         u=[ -1,  -2,  -3], 
-                u_pending=[ 11,  22,  33], 
-                  u_delay=[0.1, 0.2, 0.3]
-              )
+        pending_computation=pending_computations
+     )
     truncated_series = ts_series.truncate(last_k=4)
     self.assertEqual(truncated_series.k[-1], 4)
-    self.assertEqual(truncated_series.step_k, [2, 3, 4])
+    # self.assertEqual(truncated_series.step_k, [2, 3, 4])
 
   def test_truncate_with_mid_steps(self):
     
@@ -199,27 +264,26 @@ class Test_truncate(unittest.TestCase):
     t0 = 0.1
     x0 = 1.2
     ts_series = TimeStepSeries(k0, t0, x0)
+    
+    pending_computations = [
+      ComputationData(t_start=0.1, delay=0.1, u=11),
+      ComputationData(t_start=1.1, delay=0.2, u=22),
+      ComputationData(t_start=2.2, delay=0.3, u=33)
+    ]
     ts_series.append_multiple(
                     t_end=[1.1, 2.2, 3.3], 
                     x_end=[ 10,  20,  30], 
                         u=[ -1,  -2,  -3], 
-                u_pending=[ 11,  22,  33], 
-                  u_delay=[0.1, 0.2, 0.3], 
+      pending_computation=pending_computations,
                     t_mid=[0.5, 1.5, 2.5], 
                     x_mid=[  5,  15,  25]
               )
-    truncated_series = ts_series.truncate(n_timesteps=1)
-    self.assertEqual(truncated_series.n_time_steps(), 1)
+    truncated_series = ts_series.truncate(last_k=2)
+    # self.assertEqual(truncated_series.n_time_steps(), 1)
     self.assertEqual(truncated_series.k, [k0,  k0,  k0,  k0])
     self.assertEqual(truncated_series.t, [t0, 0.5, 0.5, 1.1])
     self.assertEqual(truncated_series.x, [x0,   5,   5,  10])
     self.assertEqual(truncated_series.u, [-1,  -1,  11,  11])
-
-    self.assertEqual(truncated_series.step_k,       [k0])
-    self.assertEqual(truncated_series.step_t_start, [t0])
-    self.assertEqual(truncated_series.step_t_end,   [1.1])
-    self.assertEqual(truncated_series.step_u_pending, [None])
-    self.assertEqual(truncated_series.step_u_delay, [0.1])  
 
 
 

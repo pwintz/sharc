@@ -30,9 +30,12 @@ def printIndented(string_to_print:str, indent: int=1):
 
 def readJson(filename: str) -> Union[Dict,List]:
   assertFileExists(filename)
-  with open(filename, 'r') as json_file:
-    json_data = json.load(json_file)
-    return json_data
+  try:
+    with open(filename, 'r') as json_file:
+      json_data = json.load(json_file)
+      return json_data
+  except json.decoder.JSONDecodeError as err:
+    raise ValueError(f'An error occured while parsing {filename}.') from err
 
 # # Define a custom JSON encoder for the class
 # class MyJsonEncoder(json.JSONEncoder):
@@ -59,9 +62,22 @@ def readJson(filename: str) -> Union[Dict,List]:
 
 def _create_json_string(json_data):
   # Use "default=vars" to automatically convert many objects to JSON data.
-  json_string = json.dumps(json_data, indent=2, default=vars)
-  json_string = _remove_linebreaks_in_json_dump_between_number_list_items(json_string)
-  return json_string
+  try:
+    def encode_objs(obj):
+      if hasattr(obj, "__dict__"):
+        # print(obj.__dict__())
+        return vars(obj)
+      elif isinstance(obj, np.ndarray):
+        return nump_vec_to_csv_string(obj)
+      else:
+        return repr(obj)
+    json_string = json.dumps(json_data, indent=2, default=encode_objs)
+    # json_string = json.dumps(json_data, indent=2, default=vars)
+    # json_string = json.dumps(json_data, indent=2)
+    json_string = _remove_linebreaks_in_json_dump_between_number_list_items(json_string)
+    return json_string
+  except Exception as err:
+    raise ValueError(f"Failed to create JSON string for:\n{json_data}") from err
 
 def writeJson(filename: str, json_data: Union[Dict,List], label:str=None):
   """
@@ -154,29 +170,27 @@ def nump_vec_to_csv_string(array: np.ndarray) -> str:
 
 
 def checkBatchConfig(batch_config):
-  simulation_label = batch_config["simulation_label"]
-  max_time_steps = batch_config["max_time_steps"]
-  x0 = batch_config["x0"]
-  u0 = batch_config["u0"]
-  first_time_index = batch_config["first_time_index"]
-  last_time_index = batch_config["last_time_index"]
-
-  max_time_steps_in_batch = batch_config["max_time_steps"]
-  n_time_indices_in_bath = max_time_steps_in_batch + 1
-  simulation_dir = batch_config["simulation_dir"]
-  
-  if max_time_steps_in_batch > os.cpu_count():
-    raise ValueError(f"max_time_steps_in_batch={max_time_steps_in_batch} > os.cpu_count()")
-
-  if last_time_index - first_time_index != max_time_steps_in_batch:
-    raise ValueError(f"last_time_index - first_time_index = {last_time_index - first_time_index} != max_time_steps_in_batch = {max_time_steps_in_batch}")
-
-  if max_time_steps_in_batch < 0:
-    raise ValueError(f"A negative max_time_steps_in_batch was given: {max_time_steps_in_batch}")
-
-  if batch_config["time_indices"][0] != first_time_index or batch_config["time_indices"][-1] != last_time_index:
-    raise ValueError(f"time_indices doen't align.")
-    
+  pass
+#   simulation_label = batch_config["simulation_label"]
+#   max_time_steps = batch_config["max_time_steps"]
+#   x0 = batch_config["x0"]
+#   u0 = batch_config["u0"]
+#   first_time_index = batch_config["first_time_index"]
+#   # last_time_index = batch_config["last_time_index"]
+# 
+#   max_time_steps_in_batch = batch_config["max_time_steps"]
+#   n_time_indices_in_bath = max_time_steps_in_batch + 1
+#   simulation_dir = batch_config["simulation_dir"]
+# 
+#   if last_time_index - first_time_index != max_time_steps_in_batch:
+#     raise ValueError(f"last_time_index - first_time_index = {last_time_index - first_time_index} != max_time_steps_in_batch = {max_time_steps_in_batch}")
+# 
+#   if max_time_steps_in_batch < 0:
+#     raise ValueError(f"A negative max_time_steps_in_batch was given: {max_time_steps_in_batch}")
+# 
+#   if batch_config["time_indices"][0] != first_time_index or batch_config["time_indices"][-1] != last_time_index:
+#     raise ValueError(f"time_indices doen't align.")
+#     
 
 # def checkSimulationData(batch_simulation_data, max_time_steps):
 #   n_time_indices = len(batch_simulation_data['time_indices']) #max_time_steps + 1

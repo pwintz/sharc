@@ -741,16 +741,30 @@ int main()
   } 
   PRINT_WITH_FILE_LOCATION("Finished looping through " << max_time_steps << " time steps. Closing files...")
 
-  x_outfile << "Done" << std::endl;
+  // x_outfile << "Done" << std::endl;
+  PRINT_WITH_FILE_LOCATION("Closing x_outfile...")
   x_outfile.close();
+  
+  PRINT_WITH_FILE_LOCATION("Closing u_outfile...")
   u_outfile.close();
+  
+  PRINT_WITH_FILE_LOCATION("Closing t_predict_outfile...")
   t_predict_outfile.close();
+  
+  PRINT_WITH_FILE_LOCATION("Closing x_predict_outfile...")
   x_predict_outfile.close();
+  
+  PRINT_WITH_FILE_LOCATION("Closing iterations_outfile...")
   iterations_outfile.close();
+  
+  PRINT_WITH_FILE_LOCATION("Closing x_infile...")
   x_infile.close();
+  
+  PRINT_WITH_FILE_LOCATION("Closing t_delays_infile...")
   t_delays_infile.close();
 
-  optimizer_info_out_file.close();
+  // PRINT_WITH_FILE_LOCATION("Closing optimizer_info_out_file...")
+  // optimizer_info_out_file.close();
   PRINT_WITH_FILE_LOCATION("Finished closing files. All done!.")
 
   return 0;

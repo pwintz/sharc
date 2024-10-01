@@ -261,12 +261,12 @@ def processBatchSimulationData(batch_init:dict, batch_simulation_data: dict, sam
   # Values that are needed to start the next batch.
   next_batch_init = {
     "i_batch": batch_init["i_batch"] + 1,
-    "first_time_index": valid_batch_simulation_data.k[-1] + 1,
-    "x0":               valid_batch_simulation_data.x[-1],
-    "u0":               valid_batch_simulation_data.u[-1],
-    "u_pending":        valid_batch_simulation_data.step_u_pending[-1],
+    "first_time_index":     valid_batch_simulation_data.k[-1] + 1,
+    "x0":                   valid_batch_simulation_data.x[-1],
+    "u0":                   valid_batch_simulation_data.u[-1],
+    "pending_computation":  valid_batch_simulation_data.pending_computation[-1],
     # "u_pending_time_index": first_excessive_delay_time_index  + first_excessive_delay_n_of_time_steps - 1,
-    "u_pending_time": valid_batch_simulation_data.t[-1] + valid_batch_simulation_data.step_u_delay[-1]
+    # "u_pending_time": valid_batch_simulation_data.t[-1] + valid_batch_simulation_data.step_u_delay[-1]
   }
 #   else: # -> No missed computations
 #     # valid_data_from_batch = copy.deepcopy(all_data_from_batch)
@@ -348,8 +348,9 @@ def run_experiment_sequential(experiment_config, example_dir):
   print(f'Running "{experiment_config["experiment_label"]}" sequentially')
   sim_dir = experiment_config["experiment_dir"]
   sim_config = copy.deepcopy(experiment_config)
-  sim_config["simulation_label"] = experiment_config["experiment_label"]
-  sim_config["simulation_dir"] = experiment_config["experiment_label"]
+  # sim_config["simulation_label"] = experiment_config["experiment_label"]
+  # sim_config["simulation_dir"] = experiment_config["experiment_label"]
+  sim_config = create_simulation_config(experiment_config)
   simulation_data = runSimulation(sim_config)
   return simulation_data
 
@@ -376,32 +377,29 @@ def run_experiment_parallelized(experiment_config, example_dir):
     "x0": x0,
     "u0": experiment_config["u0"],
     # There are no pending (previouslly computed) control values because we are at the start of the experiment.
-    "u_pending": None,
-    # "u_pending_time_index": None
-    "u_pending_time": None
+    "pending_computation": None,
   }
 
-  actual_time_series = plant_runner.TimeStepSeries(k0, t0, x0)
+  actual_time_series = plant_runner.TimeStepSeries(k0, t0, x0, None)
 
   ### Batches Loop ###
   # Loop through batches of time-steps until the start time-step is no longer less 
   # than the total number of time-steps desired or until the max number of batches is reached.
   while batch_init["first_time_index"] < max_time_steps and batch_init["i_batch"] < max_batch:
     
-    batch_sim_config = create_batch_sim_config(experiment_config, batch_init)
+    batch_sim_config = create_simulation_config(experiment_config, batch_init)
 
     printHeader2( f'Starting batch: {batch_sim_config["simulation_label"]} ({batch_sim_config["max_time_steps"]} time steps)')
     print(f'↳ dir: {batch_sim_config["simulation_dir"]}')
     print(f'↳             x0: {batch_sim_config["x0"]}')
     print(f'↳             u0: {batch_sim_config["u0"]}')
-    print(f'↳ "time_indices": {batch_sim_config["time_indices"]}')
+    # print(f'↳ "time_indices": {batch_sim_config["time_indices"]}')
 
     # Run simulation
-    checkBatchConfig(batch_sim_config)
+    # checkBatchConfig(batch_sim_config)
     batch_sim_data = runSimulation(batch_sim_config)
     sample_time = batch_sim_config["system_parameters"]["sample_time"]
     batch_init, all_data_from_batch, valid_data_from_batch, next_batch_init = processBatchSimulationData(batch_init, batch_sim_data, sample_time)
-
 
     batch_data = {
       "batch_init": batch_init,
@@ -433,22 +431,22 @@ def run_experiment_parallelized(experiment_config, example_dir):
     batch_u = all_batch_data.u
     batch_t = all_batch_data.t
 
-      
     if batch_u[0] != batch_sim_config["u0"]:
-      raise ValueError(f'batch_u[0] = {batch_u[0]} != batch_sim_config["u0"] = {batch_sim_config["u0"]}')
+      # raise ValueError(f'batch_u[0] = {batch_u[0]} != batch_sim_config["u0"] = {batch_sim_config["u0"]}')
+      print(f'WARNING: batch_u[0] = {batch_u[0]} != batch_sim_config["u0"] = {batch_sim_config["u0"]}')
 
     printHeader2(f'Finished batch {batch_init["i_batch"]}: {batch_sim_config["simulation_label"]}')
     # print(f'↳ dir: {batch_dir}')
-    print(f'↳           length of "x": {len(batch_x)}')
-    print(f'↳           length of "u": {len(batch_u)}')
-    print(f'↳                    "u0": {batch_u[0]}')
+    print(f'↳           length of x: {len(batch_x)}')
+    print(f'↳           length of u: {len(batch_u)}')
+    print(f'↳                     u0: {batch_u[0]}')
     print(f'↳           length of "t": {len(batch_t)}')
     # print(f'↳               "t_delay": {all_batch_data["t_delay"]}')
     # print(f'↳      "first_time_index": {all_batch_data["first_time_index"]}')
     # print(f'↳       "last_time_index": {all_batch_data["last_time_index"]}')
     # print(f'↳    "time_steps_delayed": {all_batch_data["time_steps_delayed"]}')
     # print(f'↳          "time_indices": {all_batch_data["time_indices"]}')
-    print(f'↳          "max_time_steps": {batch_sim_config["max_time_steps"]}')
+    print(f'↳         max_time_steps: {batch_sim_config["max_time_steps"]}')
     print(f'↳ Next "first_time_index": {batch_data["next_batch_init"]["first_time_index"]}')
 
     experiment_data = {"batches": batch_data_list,
@@ -460,22 +458,22 @@ def run_experiment_parallelized(experiment_config, example_dir):
                       
     writeJson(experiment_dir + "/experiment_data_incremental.json", experiment_data, label="Incremental experiment data")
 
-  # Print out all of the batches!  
-  printHeader2(' '*60 + 'All Batches' + ' '*60)
-  for batch_data in batch_data_list:
-    # batch_data["next_batch_init"]
-    next_batch_init = batch_data["next_batch_init"]
-    all_batch_data = batch_data["all_data_from_batch"]
-    valid_batch_data = batch_data["valid_data_from_batch"]
-    # print(f"             u0: {u0[0]}")
-    printJson('batch init', batch_data["batch_init"])
-    all_batch_data.print('--------------- Entire Batch Data ---------------')
-    valid_batch_data.print('--------------- Valid Batch Data ---------------')
-    
-    printJson("next_batch_init", next_batch_init)
-    print('==============')
+  # # Print out all of the batches!  
+  # printHeader2(' '*60 + 'All Batches' + ' '*60)
+  # for batch_data in batch_data_list:
+  #   # batch_data["next_batch_init"]
+  #   next_batch_init = batch_data["next_batch_init"]
+  #   all_batch_data = batch_data["all_data_from_batch"]
+  #   valid_batch_data = batch_data["valid_data_from_batch"]
+  #   # print(f"             u0: {u0[0]}")
+  #   printJson('batch init', batch_data["batch_init"])
+  #   all_batch_data.print('--------------- Entire Batch Data ---------------')
+  #   valid_batch_data.print('--------------- Valid Batch Data ---------------')
+  #   
+  #   # printJson("next_batch_init", next_batch_init)
+  #   print('==============')
 
-  actual_time_series.print('--------------- Actual Time Series (Concatenated) ---------------')
+  actual_time_series.print('--------------- Actualualized Time Series (Concatenated) ---------------')
 
 
   writeJson(experiment_dir + "/experiment_data.json", experiment_data, label="Experiment data")
@@ -484,48 +482,75 @@ def run_experiment_parallelized(experiment_config, example_dir):
 
 
 
-def create_batch_sim_config(experiment_config, batch_init):
-  max_time_steps_per_batch = min(os.cpu_count(), experiment_config["Simulation Options"]["max_batch_size"])
+def create_simulation_config(experiment_config, batch_init=None):
   
-  # Add "max_time_steps_per_batch" steps to the first index to get the last index.
-  last_time_index_in_batch = batch_init["first_time_index"] + max_time_steps_per_batch
+  max_time_steps = experiment_config["max_time_steps"]
+  last_time_index_in_experiment = max_time_steps
 
-  # Truncate the index to not extend past the last index
-  last_time_index_in_experiment = experiment_config["max_time_steps"]
-  last_time_index_in_batch = min(last_time_index_in_batch, last_time_index_in_experiment)
+  if batch_init:
+    first_time_index = batch_init["first_time_index"]
+    pending_computation = batch_init["pending_computation"]
+    x0 = batch_init["x0"]
+    u0 = batch_init["u0"]
 
-  max_time_steps_per_batch = last_time_index_in_batch - batch_init["first_time_index"]
+    
+    max_time_steps_per_batch = min(os.cpu_count(), experiment_config["Simulation Options"]["max_batch_size"])
+    # Add "max_time_steps_per_batch" steps to the first index to get the last index.
+    last_time_index_in_batch = first_time_index + max_time_steps_per_batch
 
-  batch_label = f'batch{batch_init["i_batch"]}_steps{batch_init["first_time_index"]}-{last_time_index_in_batch}'
+    # Truncate the index to not extend past the last index
+    last_time_index_in_batch = min(last_time_index_in_batch, last_time_index_in_experiment)
+
+    # max_time_steps_per_batch = last_time_index - first_time_index
+
+    batch_label = f'batch{batch_init["i_batch"]}_steps{first_time_index}-{last_time_index_in_batch}'
+    directory = experiment_config["experiment_dir"] + "/" + batch_label
+    label = experiment_config["experiment_label"] + "/" + batch_label
+    max_time_steps = min(experiment_config["max_time_steps"], max_time_steps_per_batch)
+
+    last_time_index = first_time_index + max_time_steps
+    # if max_time_steps > os.cpu_count():
+    #   raise ValueError(f"max_time_steps_in_batch={max_time_steps_in_batch} > os.cpu_count()")
+  else:
+    first_time_index = 0
+    pending_computation = None
+    x0 = experiment_config["x0"]
+    u0 = experiment_config["u0"]
+    directory = experiment_config["experiment_dir"] 
+    label = experiment_config["experiment_label"]
+
+
+  last_time_index = first_time_index + max_time_steps
 
   batch_config = copy.deepcopy(experiment_config)
   
-  batch_config["simulation_label"] = experiment_config["experiment_label"] + "/" + batch_label
-  batch_config["max_time_steps"]   = max_time_steps_per_batch
-  batch_config["simulation_dir"]   = experiment_config["experiment_dir"] + "/" + batch_label
-  batch_config["x0"]               = batch_init["x0"]
-  batch_config["u0"]               = batch_init["u0"]
-  batch_config["u_pending"]            = batch_init["u_pending"]
-  # batch_config["u_pending_time_index"] = batch_init["u_pending_time_index"]
-  batch_config["u_pending_time"]   = batch_init["u_pending_time"]
-  batch_config["first_time_index"] = batch_init["first_time_index"]
-  batch_config["last_time_index"]  = last_time_index_in_batch
+  batch_config["simulation_label"] = label
+  batch_config["max_time_steps"]   = max_time_steps
+  batch_config["simulation_dir"]   = directory
+  batch_config["x0"]               = x0
+  batch_config["u0"]               = u0
+  batch_config["pending_computation"] = pending_computation
+  batch_config["first_time_index"] = first_time_index
+  batch_config["last_time_index"]  = last_time_index
   batch_config["time_indices"]  = list(range(batch_config["first_time_index"], batch_config["last_time_index"]+1))
 
   # Check that batch data and then write it to "config.json" so it is available in the batch directory with any updated values for the controller to read. 
   checkBatchConfig(batch_config)
+
+  
   return batch_config
 
 
 @indented_print
 def runSimulation(sim_config: dict):
-  sim_dir = sim_config["simulation_dir"]
-  simulation_start_time = time.time()
+  sim_dir = os.path.abspath(sim_config["simulation_dir"])
+  chip_params_path = sim_dir + '/PARAMS.generated'
 
-  os.makedirs(sim_dir)
-  shutil.copyfile(sim_config["experiment_dir"] + "/PARAMS.generated", sim_dir + "/PARAMS.generated")
+  if sim_config["experiment_dir"] != sim_config["simulation_dir"]:
+    os.makedirs(sim_dir)
+    shutil.copyfile(sim_config["experiment_dir"] + "/PARAMS.generated", chip_params_path)
 
-  writeJson(sim_config["simulation_dir"] + "/config.json", sim_config)
+    writeJson(sim_config["simulation_dir"] + "/config.json", sim_config)
 
   os.chdir(sim_dir)
 
@@ -534,8 +559,7 @@ def runSimulation(sim_config: dict):
 
   printHeader2(f"Starting simulation: {simulation_label}")
   print(f'↳ Simulation dir: {sim_dir}')
-
-  chip_params_path = sim_dir + '/PARAMS.generated'
+  
   assertFileExists(chip_params_path)  
 
   use_parallel_scarab_simulation = sim_config["Simulation Options"]["parallel_scarab_simulation"]
@@ -556,8 +580,9 @@ def runSimulation(sim_config: dict):
     print(f'↳      Plant log: {plant_log_path}')
     print(f"↳  Data out file: {os.path.abspath('simulation_data.json')}")
     
-    simulation_end_time = time.time()
-    # simulation_data["simulation wall time"] = simulation_start_time - simulation_end_time
+    # simulation_data.metadata["controller_log_path"] = controller_log_path
+    # simulation_data.metadata["plant_log_path"] = plant_log_path
+
     return simulation_data
 
 def create_patched_PARAMS_file(sim_config: dict, PARAMS_src_filename: str, PARAMS_out_filename: str):
@@ -585,8 +610,6 @@ def create_patched_PARAMS_file(sim_config: dict, PARAMS_src_filename: str, PARAM
     params_out_file.writelines(PARAM_file_lines)
     
   assertFileExists(PARAMS_out_filename)
-
-
 
 
 def getSimulationExecutor(sim_dir, sim_config, controller_log, plant_log):
@@ -757,24 +780,27 @@ class ParallelSimulationExecutor(SimulationExecutor):
     # Time-steps are the intervals between sampls of x, so there is one less than the number of entries in x.
     max_time_steps = len(simulation_data.x) - 1 
     # Create a list of the correct length filled with None's.
-    computation_time_list = [None] * max_time_steps
-    if not self.use_fake_scarab_computation_times:
-      (dynamrio_trace_dir_dictionaries, trace_dirs, sorted_indices) = ParallelSimulationExecutor.get_dynamorio_trace_directories()
+    (dynamrio_trace_dir_dictionaries, trace_dirs, sorted_indices) = ParallelSimulationExecutor.get_dynamorio_trace_directories()
 
-      # Portabilize the trace files (in parallel) and then simulate with Scarab (in parallel).
-      print(f"Starting portabilization of trace directories {trace_dirs} in {self.sim_dir}.")
-      with ProcessPoolExecutor(max_workers = os.cpu_count()) as portabalize_executor:
-        portabalize_executor.map(ParallelSimulationExecutor.portabalize_trace, trace_dirs)
+    # Portabilize the trace files (in parallel) and then simulate with Scarab (in parallel).
+    print(f"Starting portabilization of trace directories {trace_dirs} in {self.sim_dir}.")
+    with ProcessPoolExecutor(max_workers = os.cpu_count()) as portabalize_executor:
+      portabalize_executor.map(ParallelSimulationExecutor.portabalize_trace, trace_dirs)
 
-      print(f"Finished portabilizing traces for each directory in {dynamrio_trace_dir_dictionaries.values()} in {self.sim_dir}.")
-      with ProcessPoolExecutor(max_workers = os.cpu_count()) as scarab_executor:
-        scarab_data = scarab_executor.map(ParallelSimulationExecutor.simulate_trace_in_scarab, sorted_indices)
-        for datum in scarab_data:
-          index = datum["index"]
-          trace_dir = datum["trace_dir"]
-          computation_time = datum["computation_time"]
-          computation_time_list[index] = computation_time
-      simulation_data["t_delay"] = computation_time_list
+    print(f"Finished portabilizing traces for each directory in {dynamrio_trace_dir_dictionaries.values()} in {self.sim_dir}.")
+    with ProcessPoolExecutor(max_workers = os.cpu_count()) as scarab_executor:
+      scarab_data = scarab_executor.map(ParallelSimulationExecutor.simulate_trace_in_scarab, sorted_indices)
+      
+      computation_time_list = [None] * simulation_data.n_time_indices()
+      print('computation_time_list (before)', computation_time_list)
+      for datum in scarab_data:
+        print('scarab_datum: ', datum)
+        index = datum["index"]
+        trace_dir = datum["trace_dir"]
+        computation_time = datum["computation_time"]
+        computation_time_list[index] = computation_time
+    print('computation_time_list (after)', computation_time_list)
+    simulation_data.overwrite_computation_times(computation_time_list)
     print(f"Finished executing parallel simulations, computation_time_list: {computation_time_list}")
 
     # simulation_data["t_delay"] = [None] + computation_time_list

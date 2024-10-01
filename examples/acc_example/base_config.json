@@ -3,8 +3,14 @@
   "label": "base",
   "skip": false,
   "Simulation Options": {
-    "use_external_dynamics_computation": true,
-    "use_fake_scarab_computation_times": true,
+    "simulator_mode": "parallel",
+    "simulator_mode": "serial update at samples",
+    "simulator_mode": "serial update immediately",
+    "simulator_mode": "no-delays",
+    "in-the-loop_delay_provider": "gaussian",
+    "in-the-loop_delay_provider": "execution-driven scarab",
+    "in-the-loop_delay_provider": "none",
+    "in-the-loop_delay_provider": "onestep",
     "parallel_scarab_simulation": false, 
     "max_batches": 9999999,
     "max_batch_size": 9999999
