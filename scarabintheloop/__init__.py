@@ -117,9 +117,17 @@ def run(example_dir):
 
   # Loop through all of the experiment configurations. For each one, run the experiment and append the result to experiment_result_list. 
   experiment_result_list = {}
+  n_experiments_failed = 0 
   for experiment_config_patches in experiment_config_patches_list:
     os.chdir(experiment_list_dir)
-    experiment_result = run_experiment(base_config, experiment_config_patches, example_dir)
+    try:
+      experiment_result = run_experiment(base_config, experiment_config_patches, example_dir)
+    except Exception as err:
+      print(f'Running {experiment_config_patches["label"]} failed! Error: {repr(err)}')
+      print(traceback.format_exc())
+      n_experiments_failed += 1
+      continue
+
 
     # If no result provided, then the experiemtn was skipped.
     if not experiment_result:
@@ -133,7 +141,7 @@ def run(example_dir):
   # Save all of the experiment results to a file.
   experiment_list_json_filename = experiment_list_dir + "experiment_result_list.json"
   writeJson(experiment_list_json_filename, experiment_result_list)
-  print(f"Finished {len(experiment_result_list)} experiments.")
+  print(f"Ran {len(experiment_result_list)} experiments. There were {n_experiments_failed} failures.")
   print(f"Experiment results are in {experiment_list_json_filename}.")
 
 @indented_print
@@ -155,7 +163,7 @@ def run_experiment(base_config: dict, experiment_config_patch: dict, example_dir
     printHeader1(f'Skipping Experiment: {experiment_label}')
     return
     
-  printHeader1("Starting Experiment: {experiment_label}")
+  printHeader1(f"Starting Experiment: {experiment_label}")
 
   example_dir = os.path.abspath('../..') # The "root" of this project.
   experiment_list_dir = os.path.abspath('.') # A path like <example_dir>/experiments/default-2024-08-25-16:17:35
