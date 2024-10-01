@@ -596,14 +596,13 @@ def getSimulationExecutor(sim_dir, sim_config, controller_log, plant_log):
 
   use_parallel_scarab_simulation = sim_config["Simulation Options"]["parallel_scarab_simulation"]
 
-  fake_computation_time_simulation = sim_config["Simulation Options"]["use_fake_scarab_computation_times"]
+  # fake_computation_time_simulation = sim_config["Simulation Options"]["use_fake_scarab_computation_times"]
 
   if use_parallel_scarab_simulation:
     print("Using ParallelSimulationExecutor.")
     return ParallelSimulationExecutor(sim_dir, sim_config, controller_log, plant_log)
-  elif fake_computation_time_simulation:
-    return ModeledDelaysSimulationExecutor(sim_dir, sim_config, controller_log, plant_log)
   else:
+    print("Using SerialSimulationExecutor.")
     return SerialSimulationExecutor(sim_dir, sim_config, controller_log, plant_log)
 
 
@@ -734,8 +733,7 @@ class SerialSimulationExecutor(SimulationExecutor):
                       # '--num_heartbeats 1'
                       # '--power_intf_on 1']
                     ]
-    # There is a bug in Scarab that causes it to crash when run in the terminal 
-    # when the terminal is resized. To avoid this bug, we run it in a different thread, which appears to fix the problem.
+    # There is a bug in Scarab that causes it to sometimes crash when run in the terminal and the terminal is resized. To avoid this bug, we run it in a different thread, which appears to fix the problem.
     with ThreadPoolExecutor() as executor:
       future = executor.submit(lambda: run_shell_cmd(scarab_cmd_argv, working_dir=self.sim_dir, log=self.controller_log))
 
@@ -747,7 +745,6 @@ class ParallelSimulationExecutor(SimulationExecutor):
 
   def __init__(self, sim_dir, sim_config, controller_log, plant_log):
     super().__init__(sim_dir, sim_config, controller_log, plant_log)
-    self.use_fake_scarab_computation_times = sim_config["Simulation Options"]["use_fake_scarab_computation_times"]
 
   def run_controller(self):
     run_shell_cmd(self.controller_executable, working_dir=self.sim_dir, log=self.controller_log)

@@ -53,9 +53,6 @@ class TestComputeTimeStepsDelayed(unittest.TestCase):
     self.assertEqual(first_excessive_delay_ndx, 2)
     self.assertEqual(first_excessive_delay, 10)
 
-# class TestCheckMissedComputations(unittest.TestCase):
-#   def test
-
 class TestFindFirstExcessiveComputationDelay(unittest.TestCase):
   pass
 
