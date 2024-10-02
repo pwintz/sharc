@@ -1,0 +1,18 @@
+[
+  {
+    "prediction_horizon": 2, 
+    "label": "2"
+  },
+  {
+    "prediction_horizon": 5, 
+    "label": "5"
+  },
+  {
+    "prediction_horizon": 10, 
+    "label": "10"
+  },
+  {
+    "prediction_horizon": 15, 
+    "label": "15"
+  }
+]
