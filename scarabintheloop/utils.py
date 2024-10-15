@@ -4,11 +4,13 @@ This package provides several utility functions that are used by Scarab-in-the-l
 
 import os
 import sys
+import re
 import json
 import subprocess
 import copy
 
 import importlib.util
+import numpy as np
 
 from typing import List, Set, Dict, Tuple
 from typing import Union
@@ -16,9 +18,24 @@ from typing import Union
 # Import contextmanager to allow defining commands to be used to create "with" blocks.
 from contextlib import contextmanager 
 
-def assertFileExists(path:str, append_msg=""):
+# Level 1: Print shell commands that are called.
+# Level 2: Also print the current working directory.
+debug_shell_calls_level = 0
+
+try:
+    assert False
+    raise Exception('Python assertions are not working. This tool uses Python assertions to check correctness. Possible causes are running with the "-O" flag or running a precompiled (".pyo" or ".pyc") module. We do not recommend removing this check, but the code should work without assertions.')
+except AssertionError:
+    pass
+
+def assertFileExists(path:str, help_msg=None):
   if not os.path.exists(path):
-      raise IOError(f'Expected {path} to exist but it does not. The absolute path is {os.path.abspath(path)}' + append_msg)
+    err_msg = f'Expected {path} to exist but it does not. '
+    if os.path.abspath(path) != path:
+      err_msg += f'The absolute path is {os.path.abspath(path)}'
+    if help_msg:
+      err_msg += '\n' + help_msg
+    raise IOError(err_msg)
 
 def printIndented(string_to_print:str, indent: int=1):
   indent_str = '\t' * indent
@@ -28,27 +45,102 @@ def printIndented(string_to_print:str, indent: int=1):
 
 def readJson(filename: str) -> Union[Dict,List]:
   assertFileExists(filename)
-  with open(filename, 'r') as json_file:
-    json_data = json.load(json_file)
-    return json_data
+  try:
+    with open(filename, 'r') as json_file:
+      json_data = json.load(json_file)
+      return json_data
+  except json.decoder.JSONDecodeError as err:
+    raise ValueError(f'An error occured while parsing {filename}.') from err
+
+# # Define a custom JSON encoder for the class
+# class MyJsonEncoder(json.JSONEncoder):
+#   def default(self, obj):
+#     if isinstance(obj, np.ndarray):
+#       return 
+#     if isinstance(obj, MyClass):
+#       # Convert the object to a dictionary
+#       return obj.__dict__
+#     # For other objects, use the default serialization
+#     return super().default(obj)
+
+
+# # Define a custom JSON encoder for the class
+# class MyJsonEncoder(json.JSONEncoder):
+#   def default(self, obj):
+#     if isinstance(obj, np.ndarray):
+#       return numpy_vec_to_list(obj)
+#     elif str(type(obj)) == "TimeStepSeries":
+#       # Convert the object to a dictionary
+#       return obj.__dict__
+#     # For other objects, use the default serialization
+#     return super().default(obj)
+
+def _create_json_string(json_data):
+  # Use "default=vars" to automatically convert many objects to JSON data.
+  try:
+    def encode_objs(obj):
+      if hasattr(obj, "__dict__"):
+        # print(obj.__dict__())
+        return vars(obj)
+      elif isinstance(obj, np.ndarray):
+        return nump_vec_to_csv_string(obj)
+      else:
+        return repr(obj)
+    json_string = json.dumps(json_data, indent=2, default=encode_objs)
+    # json_string = json.dumps(json_data, indent=2, default=vars)
+    # json_string = json.dumps(json_data, indent=2)
+    json_string = _remove_linebreaks_in_json_dump_between_number_list_items(json_string)
+    return json_string
+  except Exception as err:
+    raise ValueError(f"Failed to create JSON string for:\n{json_data}") from err
 
 def writeJson(filename: str, json_data: Union[Dict,List], label:str=None):
   """
   Write a dictionary to a file in JSON format. 
   If 'label' is given, then the path is printed to the stdout with the given label.
   """
+  json_string = _create_json_string(json_data)
+
   with open(filename, 'w') as file:
-    file.write(json.dumps(json_data, indent=2))
+    file.write(json_string)
   if label:
     print(f'{label}: ' + os.path.abspath(filename))
-
     
+
 def printJson(label: str, json_data: Union[Dict,List]):
   """
-  Pretty-print JSON to standard out.
+  Pretty-print JSON to standard out. Loses percision, so do not parse this output to recove data!
   """
-  print(f"{label}:\n{json.dumps(json_data, indent=2)}")
+  try:
+    json_string = _create_json_string(json_data)
+    
+    max_replacements = 0
+    double_regex = r"(-?\d+(?:\.\d{1,2})?)\d*"
+    truncated_double_subst = "\\1"
+    json_string = re.sub(double_regex, truncated_double_subst, json_string, max_replacements, re.MULTILINE)
+    print(f"{label}:\n{json_string}")
+  except Exception as err:
+    print(f"ERROR: Could not print as json: label={label}, json_data={json_data}.")
 
+def _remove_linebreaks_in_json_dump_between_number_list_items(json_string:str):
+  max_replacements = 0 # As many as found.
+  
+  # Change the starts of a list of strings to be on a single line.
+  first_item_regex = r"\[\s*((?:-?\d+(?:\.\d+)?))"
+  first_item_subst = "[\\1"
+  json_string = re.sub(first_item_regex, first_item_subst, json_string, max_replacements, re.MULTILINE)
+
+  # Remove the line breaks after between item in lists of numbers. 
+  list_items_regex = r"(-?\d+(?:\.\d+)?)(,)\s*(?=-?\d+(?:\.\d+)?)"
+  list_items_subst = "\\1\\2 "
+  json_string = re.sub(list_items_regex, list_items_subst, json_string, max_replacements, re.MULTILINE)
+  
+  # Remove the line break after the last item in a list of numbers.
+  last_item_regex = r"(-?\d+(?:\.\d+)?)\s*\]"
+  last_item_subst = "\\1]"
+  json_string = re.sub(last_item_regex, last_item_subst, json_string, max_replacements, re.MULTILINE)
+
+  return json_string
 
 def patch_dictionary(base: dict, patch: dict) -> dict:
   """
@@ -74,50 +166,69 @@ def patch_dictionary(base: dict, patch: dict) -> dict:
     
   return patched
 
-def checkBatchConfig(batch_config):
-  simulation_label = batch_config["simulation_label"]
-  max_time_steps = batch_config["max_time_steps"]
-  x0 = batch_config["x0"]
-  u0 = batch_config["u0"]
-  first_time_index = batch_config["first_time_index"]
-  last_time_index = batch_config["last_time_index"]
+# TODO: Define a function for finding any numpy arrays in a dictionary and converting them to lists.
+# def sanitize_np_arrays_in_dictionary(dictionary):
+#   dictionary = copy.deepcopy(dictionary)
+#   
 
-  max_time_steps_in_batch = batch_config["max_time_steps"]
-  n_time_indices_in_bath = max_time_steps_in_batch + 1
-  simulation_dir = batch_config["simulation_dir"]
-  
-  if max_time_steps_in_batch > os.cpu_count():
-    raise ValueError(f"max_time_steps_in_batch={max_time_steps_in_batch} > os.cpu_count()")
+#############################
+#####  NUMPY FUNCTIONS ######
+#############################
+def numpy_vec_to_list(array: np.ndarray) -> List[float]:
+  return array.transpose().tolist()[0]
 
-  if last_time_index - first_time_index != max_time_steps_in_batch:
-    raise ValueError(f"last_time_index - first_time_index = {last_time_index - first_time_index} != max_time_steps_in_batch = {max_time_steps_in_batch}")
+def list_to_numpy_vec(list_vec: List[float]) -> np.ndarray:
+  return np.array(list_vec).reshape(-1, 1)
 
-  if max_time_steps_in_batch < 0:
-    raise ValueError(f"A negative max_time_steps_in_batch was given: {max_time_steps_in_batch}")
+def nump_vec_to_csv_string(array: np.ndarray) -> str:
+  if not isinstance(array, np.ndarray):
+    raise ValueError(f'Expected array={array} to be an np.array but instead it is a {type(array)}')
+  string = ', '.join(map(str, array.flatten()))
+  return string
 
-  if batch_config["time_indices"][0] != first_time_index or batch_config["time_indices"][-1] != last_time_index:
-    raise ValueError(f"time_indices doen't align.")
-    
 
-def checkSimulationData(batch_simulation_data, max_time_steps):
-  n_time_indices = max_time_steps + 1
+# def checkBatchConfig(batch_config):
+#   pass
+#   simulation_label = batch_config["simulation_label"]
+#   max_time_steps = batch_config["max_time_steps"]
+#   x0 = batch_config["x0"]
+#   u0 = batch_config["u0"]
+#   first_time_index = batch_config["first_time_index"]
+#   # last_time_index = batch_config["last_time_index"]
+# 
+#   max_time_steps_in_batch = batch_config["max_time_steps"]
+#   n_time_indices_in_bath = max_time_steps_in_batch + 1
+#   simulation_dir = batch_config["simulation_dir"]
+# 
+#   if last_time_index - first_time_index != max_time_steps_in_batch:
+#     raise ValueError(f"last_time_index - first_time_index = {last_time_index - first_time_index} != max_time_steps_in_batch = {max_time_steps_in_batch}")
+# 
+#   if max_time_steps_in_batch < 0:
+#     raise ValueError(f"A negative max_time_steps_in_batch was given: {max_time_steps_in_batch}")
+# 
+#   if batch_config["time_indices"][0] != first_time_index or batch_config["time_indices"][-1] != last_time_index:
+#     raise ValueError(f"time_indices doen't align.")
+#     
 
-  def assert_len_equals_n_time_indices(name:str):
-    array = batch_simulation_data[name]
-    if len(array) != n_time_indices:
-      raise ValueError(f"the length of x ({len(array)}) is not equal to the number of time indices ({n_time_indices}).")
-
-  # There is one fewer time steps than time indices because each step is a step between indices.
-  def assert_len_equals_n_time_steps(name:str):
-    array = batch_simulation_data[name]
-    if len(array) != n_time_indices - 1:
-      raise ValueError(f"the length of {name} ({len(array)}) is not equal to the number of time steps ({n_time_indices - 1}).")
-
-  # The control values applied. The first entry is the u0 previously computed. Subsequent entries are the computed values. The control u[i] is applied from t[i] to t[i+1], with u[-1] not applied during this batch. 
-  assert_len_equals_n_time_indices("x")
-  assert_len_equals_n_time_indices("u")
-  assert_len_equals_n_time_indices("t")
-  assert_len_equals_n_time_steps("t_delay")
+# def checkSimulationData(batch_simulation_data, max_time_steps):
+#   n_time_indices = len(batch_simulation_data['time_indices']) #max_time_steps + 1
+# 
+#   def assert_len_equals_n_time_indices(name:str):
+#     array = batch_simulation_data[name]
+#     if len(array) != n_time_indices:
+#       raise ValueError(f'the length of {name} ({len(array)}) is not equal to the number of time indices ({n_time_indices}). The time indices are {batch_simulation_data["time_indices"]}')
+# 
+#   # There is one fewer time steps than time indices because each step is a step between indices.
+#   def assert_len_equals_n_time_steps(name:str):
+#     array = batch_simulation_data[name]
+#     if len(array) != n_time_indices - 1:
+#       raise ValueError(f"the length of {name} ({len(array)}) is not equal to the number of time steps ({n_time_indices - 1}).")
+# 
+#   # The control values applied. The first entry is the u0 previously computed. Subsequent entries are the computed values. The control u[i] is applied from t[i] to t[i+1], with u[-1] not applied during this batch. 
+#   assert_len_equals_n_time_indices("x")
+#   assert_len_equals_n_time_indices("u")
+#   assert_len_equals_n_time_indices("t")
+#   assert_len_equals_n_time_steps("t_delay")
 
 
 def printHeader1(header: str):
@@ -157,17 +268,28 @@ def printHeader(header: str, level=1):
 def openLog(filename, headerText=None):
   if not headerText:
     headerText=f"Log: {filename}"
-  print(f"Opening log: {os.path.abspath(filename)}")
-  log_file = open(filename, 'w+')
-
-  # Write a header for the log file.
-  log_file.write(f'===={"="*len(headerText)}==== \n')
-  log_file.write(f'=== {headerText} === \n')
-  log_file.write(f'===={"="*len(headerText)}==== \n')
-  log_file.flush()
-
+  log_path = os.path.abspath(filename)
+  print(f"Opening log: {log_path}")
+  if not os.path.isdir(os.path.dirname(log_path)):
+    raise ValueError(f'The parent of the given path is not a directory: {log_path}')
+    
   try:
+    # Use buffering=1 for line buffering.
+    log_file = open(filename, 'w+', buffering=1)
+
+    # Write a header for the log file.
+    log_file.write(f'===={"="*len(headerText)}==== \n')
+    log_file.write(f'=== {headerText} === \n')
+    log_file.write(f'===={"="*len(headerText)}==== \n')
+    # log_file.flush()
+
     yield log_file
+  # except SystemExit as err:
+  #   print("SystemExit receieved")
+  #   raise err
+  # except KeyboardInterrupt as err:
+  #   print("KeyboardInterrupt receieved")
+  #   raise err
   finally:
     # Clean up
     log_file.close()
@@ -202,13 +324,21 @@ def run_shell_cmd(cmd: Union[str, List[str]], log=None, working_dir=None):
   
   # If the working directory is provided, then prepend it to the printed command.
   if working_dir:
-    cmd_print_string = f"{working_dir}/" + cmd_print_string
+    if debug_shell_calls_level >= 2:
+      cmd_print_string = f"{working_dir}/" + cmd_print_string
+    elif debug_shell_calls_level >= 1:
+      cmd_print_string = os.path.basename(working_dir) + "/" + cmd_print_string
+
 
   # Print the command and if a log is given, then write the command there too.
-  print(cmd_print_string)
-  if log:
-    log.write(cmd_print_string + "\n")
-    log.flush()
+  if debug_shell_calls_level >= 1:
+    # Write the command string to the log, if provided.
+    if log:
+      log.write(cmd_print_string + "\n")
+      log.flush()
+    # Print to standard out.
+    print(cmd_print_string)
+
 
   # We update the working directory after printing the string so that it is 
   # more evident to the developer that no working directory was explicitly given
@@ -219,15 +349,18 @@ def run_shell_cmd(cmd: Union[str, List[str]], log=None, working_dir=None):
   try:
     subprocess.check_call(cmd, stdout=log, stderr=log, cwd=working_dir)
   except Exception as e:
-    err_msg = f'ERROR when running "{cmd}" in {working_dir}:\n\t{str(e)}'
-    print(err_msg)
-    log.write(err_msg)
+    err_msg = f'ERROR when running shell command "{cmd}" in {working_dir}:\n\t{str(e)}'
     if log: 
+      
       # If using an external log file, print the contents.
+      log.write(err_msg)
       log.flush()
       log.seek(0)
-      print("(log) ".join([''] + log.readlines()))
-    raise e
+      print(f"({log.name}) ".join([''] + log.readlines()))
+    print(err_msg)
+    log.write(err_msg)
+    raise Exception(err_msg) from e
+    
 
 def loadModuleFromWorkingDir(module_name):
   """
@@ -257,28 +390,25 @@ def loadModuleFromPath(module_name, file_path):
 
 from functools import wraps
 
-# Track current indent level globally
-CURRENT_INDENT_LEVEL = 0
-
 def indented_print(func):
     """ 
-    This function defines a decorator that causes all of the print statements within a function to be indented. Nesting is supported.
-    This function was generated by ChatGPT. """
+    This function defines a decorator that causes all of the print statements within a function to be indented. 
+    Nesting is supported.
+    This function was drafted by ChatGPT. 
+    """
     @wraps(func)
     def wrapper(*args, **kwargs):
-        global CURRENT_INDENT_LEVEL
-        
-        # Increase the indent level for this function
-        original_indent_level = CURRENT_INDENT_LEVEL
-        CURRENT_INDENT_LEVEL += 1
-        
-        # Define custom print with indentation
-        original_print = print
-        indent = ' ' * (CURRENT_INDENT_LEVEL * 2)
+        # Define custom print with indentation. 
+        previous_print_fnc = print
+        indent = "|"
 
+        # Because custom_print is defined recursively, using the previous_print_fnc, we get 
+        # increasing indentations when a indented_print function is used inside another indented_print function
         def custom_print(*args, **kwargs):
-            # Prepend the indentation to the first argument
-            original_print(indent, *args, **kwargs)
+            # Prepend the indentation to the first argument.
+            # I'm not sure why it is necessary, but appending '+ " "' makes the alignement work out correctly (although with an extra space.)
+            args = [str(arg).replace('\n', '\n' + indent + " ") for arg in args]
+            previous_print_fnc(indent, *args, **kwargs)
 
         # Override the built-in print function
         builtins_print = sys.modules['builtins'].print
@@ -287,8 +417,15 @@ def indented_print(func):
             result = func(*args, **kwargs)  # Call the original function
         finally:
             # Restore the original print function and indent level
-            sys.modules['builtins'].print = original_print
-            CURRENT_INDENT_LEVEL = original_indent_level  # Restore the indent level
+            sys.modules['builtins'].print = previous_print_fnc
 
         return result
     return wrapper
+
+def assertLength(array, length, label=None):
+  if len(array) != length:
+    if None:
+      err_str = f"The length of the array was {len(array)} but {length} was expected."
+    else:
+      err_str = f"The length of the array {label} was {len(array)} but {length} was expected."
+    raise ValueError(err_str)

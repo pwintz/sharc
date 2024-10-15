@@ -22,12 +22,16 @@ def get_controller_executable(build_config:dict) -> str:
   debug_build_level = build_config["==== Debgugging Levels ===="]["debug_build_level"]
 
   simulation_options = build_config["Simulation Options"]
-  use_dynamorio = simulation_options["parallel_scarab_simulation"] and not simulation_options["use_fake_scarab_computation_times"]
+  use_parallel_simulation = simulation_options["parallel_scarab_simulation"]
   prediction_horizon = build_config["system_parameters"]["mpc_options"]["prediction_horizon"]
   control_horizon = build_config["system_parameters"]["mpc_options"]["control_horizon"]
 
+  use_fake_delays = build_config["Simulation Options"]["use_fake_delays"]
+
   executable_name = f"acc_controller_{prediction_horizon}_{control_horizon}"
-  
+
+  use_dynamorio = use_parallel_simulation and not use_fake_delays
+
   if use_dynamorio:
     executable_name += "_dynamorio"
 

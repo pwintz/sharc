@@ -2,8 +2,7 @@
 # Script for creating the pipe files needed to communicate between controller and plant dynamics when running a Scarab simulation in execution-driven mode. 
 
 ## Declare an array variable
-declare -a list_of_pipes=("x_c++_to_py" \
-                          "x_predict_c++_to_py" \
+declare -a list_of_pipes=("x_predict_c++_to_py" \
                           "t_predict_c++_to_py" \
                           "u_c++_to_py" \
                           "x_py_to_c++" \

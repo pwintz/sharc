@@ -1,11 +1,7 @@
-// 
-// Compile with g++ -c test_libmpc.cpp -I ~/libmpc-0.4.0/include/ -I /usr/include/eigen3/ -I /usr/local/include -std=c++20
-// #include <cstdio>
 #include <iostream>
 
 #include <mpc/LMPC.hpp>
 #include <mpc/Utils.hpp>
-#include "scarab_markers.h"
 #include <Eigen/Eigenvalues>
 #include <unsupported/Eigen/MatrixFunctions>
 #include <boost/algorithm/string/predicate.hpp>
@@ -28,8 +24,11 @@ using namespace mpc;
         return SetEnvironmentVariable(var, value) == TRUE;
     #endif
   }
+// #elif defined(USE_EXECUTION_DRIVEN_SCARAB)
+#else
+  #define USE_EXECUTION_DRIVEN_SCARAB
+  #include "scarab_markers.h"
 #endif
-// #include "scarabintheloop.h"
 
 // Define a macro to print a value 
 #define PRINT(x) std::cout << x << std::endl;
@@ -43,16 +42,16 @@ using json = nlohmann::json;
 #include <fstream>
  
 Eigen::IOFormat fmt(3, // precision
-                    0, // flags
+                    0,    // flags
                     ", ", // coefficient separator
                     "\n", // row prefix
-                    "[", // matrix prefix
+                    "[",  // matrix prefix
                     "]"); // matrix suffix.
 Eigen::IOFormat fmt_high_precision(20, // precision
-                    0, // flags
+                    0,    // flags
                     ", ", // coefficient separator
                     "\n", // row prefix
-                    "[", // matrix prefix
+                    "[",  // matrix prefix
                     "]"); // matrix suffix.
 
 inline void assertFileExists(const std::string& name) {
@@ -131,9 +130,13 @@ void sendCVec(std::string label, int i_loop, mpc::cvec<rows> x, std::ofstream& o
   auto out_str = x.transpose().format(fmt_high_precision);
   if (debug_interfile_communication_level >= 1) 
   {
-    PRINT_WITH_FILE_LOCATION(label << " (send to Python): " << out_str);
+    PRINT_WITH_FILE_LOCATION("Send \"" << label << "\" to Python: " << out_str);
   } 
   outfile << "Loop " << i_loop << ": " << out_str << std::endl;
+  if (debug_interfile_communication_level >= 2) 
+  {
+    PRINT_WITH_FILE_LOCATION("SENT \"" << label << "\" to Python: " << out_str);
+  } 
 }
 
 void sendDouble(std::string label, int i_loop, double x, std::ofstream& outfile) 
@@ -147,20 +150,16 @@ void sendDouble(std::string label, int i_loop, double x, std::ofstream& outfile)
 
 
 template<int rows>
-void readVec(std::ifstream& x_infile, mpc::cvec<rows>& x) {
+void readVec(std::string label, std::ifstream& x_infile, mpc::cvec<rows>& x) {
     std::string x_in_line_from_py;
 
     // Check debug level and print the appropriate message
     if (debug_interfile_communication_level >= 2) {
-        PRINT_WITH_FILE_LOCATION("Getting 'x' line from Python: ");
+        PRINT_WITH_FILE_LOCATION("Getting '" << label << "' line from Python: ");
     }
 
     // Get the line from the file
     std::getline(x_infile, x_in_line_from_py);
-
-    if (debug_interfile_communication_level >= 2) {
-        PRINT_WITH_FILE_LOCATION("Getting 't_delays' line from Python: ");
-    }
 
     // Parse the line into the x object
     std::stringstream x_ss(x_in_line_from_py);
@@ -168,6 +167,26 @@ void readVec(std::ifstream& x_infile, mpc::cvec<rows>& x) {
         char comma; // to read and discard the comma
         x_ss >> x(j_entry) >> comma;
     }
+}
+
+void readDouble(std::string label, std::ifstream& value_infile, double& value) {
+    // Check debug level and print the appropriate message
+    if (debug_interfile_communication_level >= 2) {
+        PRINT_WITH_FILE_LOCATION("Getting '" << label << "' line from Python...");
+    }
+
+    std::string value_in_line_from_py;
+
+    std::getline(value_infile, value_in_line_from_py);
+    if (debug_interfile_communication_level >= 2)
+    {
+      PRINT_WITH_FILE_LOCATION("Lines received from Python:")
+      PRINT_WITH_FILE_LOCATION("\t" << label << ": " << value_in_line_from_py);
+    }
+
+    // Create a stringstream to parse the string
+    std::stringstream value_ss(value_in_line_from_py);
+    value_ss >> value;
 }
 
 int main()
@@ -181,48 +200,26 @@ int main()
   //   std::cerr << "failed to set env var!\n";
   // }
   #ifdef USE_DYNAMORIO
-    PRINT("Using DynamoRio.")
+    PRINT_WITH_FILE_LOCATION("Using DynamoRio.")
 
     /* We also test -rstats_to_stderr */
     if (!my_setenv("DYNAMORIO_OPTIONS",
                    "-stderr_mask 0xc -rstats_to_stderr "
                    "-client_lib ';;-offline'"))
         std::cerr << "failed to set env var!\n";
-  #else 
-    PRINT("Not using DynamoRio")
+  #elif defined(USE_EXECUTION_DRIVEN_SCARAB)
+    PRINT_WITH_FILE_LOCATION("Running without DyanmoRIO (Execution-driven Scarab or just plain execution)")
+  #else
+    PRINT_WITH_FILE_LOCATION("Not using Scarab or DyanmoRIO to track statistics.")
   #endif
   PRINT("PREDICTION_HORIZON: " << PREDICTION_HORIZON)
   PRINT("CONTROL_HORIZON: " << CONTROL_HORIZON)
-  // return 0;
 
-  // if (argc == 1){
-  //     PRINT_WITH_FILE_LOCATION("Adaptive Cruise Control (ACC) controller. Example usage:")
-  //     PRINT_WITH_FILE_LOCATION("\tacc_controller <simulation_directory>")
-  //     PRINT_WITH_FILE_LOCATION("Typically, you wouldn't call this directly. Instead, call")
-  //     PRINT_WITH_FILE_LOCATION("\t run_scarabintheloop <example_directory>.")
-  //     return 0;
-  // }
-
-  // std::string sim_dir(argv[1]);
   std::string cwd = std::filesystem::current_path().string();
   std::string sim_dir = cwd + "/";
   PRINT_WITH_FILE_LOCATION("Simulation directory: " << sim_dir)
 
-  // auto cwd = std::filesystem::current_path();
-  // if ( boost::algorithm::ends_with(cwd.string(), "sim_dir") )
-  // {
-  //     example_path = cwd.parent_path().string() + "/";
-  // } else
-  // {
-  //   example_path = cwd.string() + "/";
-  // }
-  // PRINT_WITH_FILE_LOCATION("Example path: " << example_path)
-
-  // File names for the pipes we use for communicating with Python.
-  // std::string data_out_file_path = "data_out.json";
-
   std::string config_file_path            = sim_dir + "config.json";
-  std::string x_out_filename              = sim_dir + "x_c++_to_py";
   std::string x_predict_out_filename      = sim_dir + "x_predict_c++_to_py";
   std::string t_predict_out_filename      = sim_dir + "t_predict_c++_to_py";
   std::string iterations_out_filename     = sim_dir + "iterations_c++_to_py";
@@ -232,7 +229,6 @@ int main()
   std::string optimizer_info_out_filename = sim_dir + "optimizer_info.csv";
 
   assertFileExists(config_file_path);
-  assertFileExists(x_out_filename);
   assertFileExists(x_predict_out_filename);
   assertFileExists(t_predict_out_filename);
   assertFileExists(iterations_out_filename);
@@ -240,10 +236,6 @@ int main()
   assertFileExists(x_in_filename);
   assertFileExists(t_delays_in_filename);
   
-  // std::string system_dynamics_filename = sim_dir + "system_dynamics.json";
-  // std::string system_dyanmics_lock_filename = system_dynamics_filename + ".lock";
-  // PRINT_WITH_FILE_LOCATION("system_dynamics_filename: " << system_dynamics_filename)
-
   std::ifstream config_json_file(config_file_path);
   json json_data = json::parse(config_json_file);
   config_json_file.close();
@@ -262,10 +254,10 @@ int main()
   bool use_state_after_delay_prediction = json_data["system_parameters"]["mpc_options"]["use_state_after_delay_prediction"];
 
   // Vector sizes.
-  const int Tnx = 5;  // State dimension
-  const int Tnu = 1;  // Control dimension
+  const int Tnx  = 5;  // State dimension
+  const int Tnu  = 1;  // Control dimension
   const int Tndu = 1; // Exogenous control (disturbance) dimension
-  const int Tny = 2;  // Output dimension
+  const int Tny  = 2;  // Output dimension
 
   Controller* controller = Controller::createController(json_data["system_parameters"]["controller_type"], json_data);
 
@@ -277,50 +269,43 @@ int main()
   optimizer_info_out_file << "num_iterations,cost,primal_residual,dual_residual" << std::endl;
 
   // I/O Setup
-  std::ofstream x_outfile;
   std::ofstream x_predict_outfile;
   std::ofstream t_predict_outfile;
   std::ofstream iterations_outfile;
   std::ofstream u_outfile;
   std::ifstream x_infile;
   std::ifstream t_delays_infile;
-  if (use_external_dynamics_computation) {
     // Open the pipes to Python. Each time we open one of these streams, 
     // this process pauses until it is connected to the Python process (or another process). 
     // The order needs to match the order in the reader process.
     
     PRINT_WITH_FILE_LOCATION("Starting IO setup.");
 
-    assertFileExists(x_out_filename);
-    PRINT_WITH_FILE_LOCATION("Opening x_outfile. Waiting for reader.");
-    x_outfile.open(x_out_filename, std::ofstream::out);
-
     assertFileExists(u_out_filename);
-    PRINT_WITH_FILE_LOCATION("Opening u_outfile. Waiting for reader.");
+    PRINT_WITH_FILE_LOCATION("Opening " << u_out_filename << ". Waiting for reader.");
     u_outfile.open(u_out_filename, std::ofstream::out);
 
     assertFileExists(x_predict_out_filename);
-    PRINT_WITH_FILE_LOCATION("Opening x_predict_outfile. Waiting for reader.");
+    PRINT_WITH_FILE_LOCATION("Opening " << x_predict_out_filename << ". Waiting for reader.");
     x_predict_outfile.open(x_predict_out_filename, std::ofstream::out);
 
     assertFileExists(t_predict_out_filename);
-    PRINT_WITH_FILE_LOCATION("Opening t_predict_outfile. Waiting for reader.");
+    PRINT_WITH_FILE_LOCATION("Opening " << t_predict_out_filename << ". Waiting for reader.");
     t_predict_outfile.open(t_predict_out_filename, std::ofstream::out);
 
     assertFileExists(iterations_out_filename);
-    PRINT_WITH_FILE_LOCATION("Opening iterations_outfile. Waiting for reader.");
+    PRINT_WITH_FILE_LOCATION("Opening " << iterations_out_filename << ". Waiting for reader.");
     iterations_outfile.open(iterations_out_filename, std::ofstream::out);
 
     // In files.
     assertFileExists(x_in_filename);
-    PRINT_WITH_FILE_LOCATION("Opening x_infile. Waiting for reader.");
+    PRINT_WITH_FILE_LOCATION("Opening " << x_in_filename << ". Waiting for reader.");
     x_infile.open(x_in_filename, std::ofstream::in);
 
     assertFileExists(t_delays_in_filename);
-    PRINT_WITH_FILE_LOCATION("Opening t_delays_infile. Waiting for reader.");
+    PRINT_WITH_FILE_LOCATION("Opening " << t_delays_in_filename << ". Waiting for reader.");
     t_delays_infile.open(t_delays_in_filename, std::ofstream::in);
     PRINT_WITH_FILE_LOCATION("All files open.");
-  }
 
   // State vector state.
   mpc::cvec<Tnx> modelX, modeldX;
@@ -334,35 +319,37 @@ int main()
 
   // Create a vector for storing the control input from the previous time step.
   mpc::cvec<Tnu> u;
-
-  // Set the initial values from JSON.
-  // loadMatrixValuesFromJson(modelX, json_data, "x0");
-  readVec(x_infile, modelX);
   
   loadMatrixValuesFromJson(u, json_data, "u0");
 
   // Store the delay time required to compute the previous controller value.
   double t_delay_prev = 0;
 
-  if (!json_data["Simulation Options"]["use_fake_scarab_computation_times"] && !json_data["Simulation Options"]["parallel_scarab_simulation"]) {
-    scarab_begin(); // Tell Scarab to stop "fast forwarding". This is needed for '--pintool_args -fast_forward_to_start_inst 1'
-  }
+  #if defined(USE_EXECUTION_DRIVEN_SCARAB)
+    if (!json_data["Simulation Options"]["parallel_scarab_simulation"]) {
+      scarab_begin(); // Tell Scarab to stop "fast forwarding". This is needed for '--pintool_args -fast_forward_to_start_inst 1'
+    }
+  #endif
+
 
   for (int i = 0; i < max_time_steps; i++)
   {
     PRINT(std::endl << "====== Starting loop #" << i+1 << " of " << max_time_steps << " ======");
+    
+    // Read the value of 'x' for this iteration.
+    readVec("x", x_infile, modelX);
     PRINT("x=" << modelX.transpose().format(fmt));
-    PRINT("u=" << u.transpose().format(fmt));
+    // PRINT("u=" << u.transpose().format(fmt));
 
     // Begin a batch of Scarab statistics
-    #ifdef USE_DYNAMORIO
+    #if defined(USE_DYNAMORIO)
         PRINT_WITH_FILE_LOCATION("Starting DynamoRIO region of interest.")
         dr_app_setup_and_start();
-    #else
-      if (!json_data["Simulation Options"]["use_fake_scarab_computation_times"]) {
+    #elif defined(USE_EXECUTION_DRIVEN_SCARAB)
         PRINT_WITH_FILE_LOCATION("Starting Scarab region of interest.")
         scarab_roi_dump_begin(); 
-      }
+    #else
+        PRINT_WITH_FILE_LOCATION("Starting region of interest without statistics recording.")
     #endif
 
     if (use_state_after_delay_prediction)
@@ -385,6 +372,7 @@ int main()
       x_predict = modelX;
       t_predict = 0;
     }
+    
     if (debug_dynamics_level >= 1) 
     {
       PRINT("====== t_delay_prev: " << t_delay_prev);
@@ -400,7 +388,7 @@ int main()
     controller->calculateControl();
     u = controller->control;
 
-    #ifdef USE_DYNAMORIO
+    #if defined(USE_DYNAMORIO)
       PRINT_WITH_FILE_LOCATION("End of DynamoRIO region of interest.")
       dr_app_stop_and_cleanup();
 
@@ -441,12 +429,12 @@ int main()
       }
 
       PRINT_WITH_FILE_LOCATION("Finished saving trace with DyanmoRIO")
-    #else
-      if (!json_data["Simulation Options"]["use_fake_scarab_computation_times"]) {
+    #elif defined(USE_EXECUTION_DRIVEN_SCARAB)
         // Save a batch of Scarab statistics
         PRINT_WITH_FILE_LOCATION("End of Scarab region of interest.")
         scarab_roi_dump_end();  
-      }
+    #else
+        PRINT_WITH_FILE_LOCATION("End of region of interest. Statistics recording is disabled.")
     #endif
 
     // u = res.cmd;
@@ -462,54 +450,34 @@ int main()
     //   PRINT_WITH_FILE_LOCATION("          Dual error: " << res.dual_residual)
     // }
 
-    // optimizer_info_out_file << res.num_iterations << "," << res.cost << "," << res.primal_residual << "," << res.dual_residual << std::endl;  
+    optimizer_info_out_file << res.num_iterations << "," << res.cost << "," << res.primal_residual << "," << res.dual_residual << std::endl;  
+
+    // if ( res.num_iterations == 0 )
+    // {
+    //   throw std::range_error( "Number of iterations was zero." );
+    // }
+    // if ( res.cost < 0)
+    // {
+    //   PRINT_WITH_FILE_LOCATION("The cost was " << res.cost)
+    //   throw std::range_error( "The cost was negative." );
+    // }
 
     // OptSequence has three properties: state, input, and output. 
     // Each predicted time step is stored in one row.
     // There are <prediction_horizon> many rows. 
     // OptSequence optseq = lmpc.getOptimalSequence();
 
-    if (use_external_dynamics_computation) {
-      // Format the numerical arrays into strings (single lines) that we pass to Python.     
+    sendCVec("u", i, u, u_outfile);
+    sendCVec("x prediction", i, x_predict, x_predict_outfile);
+    sendDouble("t prediction ", i, t_predict, t_predict_outfile);
+    sendDouble("iterations ", i, res.num_iterations, iterations_outfile);
 
-      sendCVec("x", i, modelX, x_outfile);
-      sendCVec("x prediction", i, x_predict, x_predict_outfile);
-      sendDouble("t prediction ", i, t_predict, t_predict_outfile);
-      sendDouble("iterations ", i, 100, iterations_outfile); //revert this back later to res.num_iterations
-      sendCVec("u", i, u, u_outfile);
-
-      // Read and print the contents of the file from Python.
-      readVec(x_infile, modelX);
-
-      std::string t_delay_in_line_from_py;
-
-      std::getline(t_delays_infile, t_delay_in_line_from_py);
-      if (debug_interfile_communication_level >= 2)
-      {
-        PRINT_WITH_FILE_LOCATION("Lines received from Python:")
-        // PRINT_WITH_FILE_LOCATION("\t      x: " << x_in_line_from_py);
-        PRINT_WITH_FILE_LOCATION("\tt_delay: " << t_delay_in_line_from_py);
-      }
-
-      // Create a stringstream to parse the string
-      std::stringstream t_delay_ss(t_delay_in_line_from_py);
-      
-      if (debug_interfile_communication_level >= 2)
-      {
-        PRINT_WITH_FILE_LOCATION("Getting 't_delays' line from Python: ");
-      }
-
-      t_delay_ss >> t_delay_prev;
-      if (debug_interfile_communication_level >= 1) 
-      {
-        PRINT_WITH_FILE_LOCATION("x (from Python): " << modelX.transpose().format(fmt));
-        PRINT_WITH_FILE_LOCATION("t_delay_prev (from Python): " << t_delay_prev);
-      }
-    } else { // If use internal dynamics computation
-      // printVector("modelX", modelX);
-      // printMat("optseq.state", optseq.state);
-      // modelX = Ad * modelX + Bd * u + Bd_disturbance*lead_car_input;
-      // printVector("modelX", modelX);
+    readDouble("t_delay", t_delays_infile, t_delay_prev);
+    
+    if (debug_interfile_communication_level >= 1) 
+    {
+      PRINT_WITH_FILE_LOCATION("x (from Python): " << modelX.transpose().format(fmt));
+      PRINT_WITH_FILE_LOCATION("t_delay_prev (from Python): " << t_delay_prev);
     }
     
     // Set the model state to the next value of x from the optimal sequence. 
@@ -521,22 +489,29 @@ int main()
     // }
     
   } 
-  PRINT_WITH_FILE_LOCATION("Finshed looping through " << max_time_steps << " time steps.")
-  // printVector("y", y);
+  PRINT_WITH_FILE_LOCATION("Finished looping through " << max_time_steps << " time steps. Closing files...")
 
-  if (use_external_dynamics_computation)
-  {
-    x_outfile << "Done" << std::endl;
-    x_outfile.close();
-    u_outfile.close();
-    t_predict_outfile.close();
-    x_predict_outfile.close();
-    iterations_outfile.close();
-    x_infile.close();
-    t_delays_infile.close();
-  }
+  PRINT_WITH_FILE_LOCATION("Closing u_outfile...")
+  u_outfile.close();
+  
+  PRINT_WITH_FILE_LOCATION("Closing t_predict_outfile...")
+  t_predict_outfile.close();
+  
+  PRINT_WITH_FILE_LOCATION("Closing x_predict_outfile...")
+  x_predict_outfile.close();
+  
+  PRINT_WITH_FILE_LOCATION("Closing iterations_outfile...")
+  iterations_outfile.close();
+  
+  PRINT_WITH_FILE_LOCATION("Closing x_infile...")
+  x_infile.close();
+  
+  PRINT_WITH_FILE_LOCATION("Closing t_delays_infile...")
+  t_delays_infile.close();
 
+  // PRINT_WITH_FILE_LOCATION("Closing optimizer_info_out_file...")
   // optimizer_info_out_file.close();
+  PRINT_WITH_FILE_LOCATION("Finished closing files. All done!.")
 
   return 0;
 }
