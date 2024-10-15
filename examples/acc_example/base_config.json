@@ -31,6 +31,7 @@
   "system_parameters": {
     "state_dimension": 5, 
     "input_dimension": 1,
+    "disturbance_input_dimension": 1,
     "output_dimension": 2,
     "sample_time": 0.5,
     "lead_car_input": 0,

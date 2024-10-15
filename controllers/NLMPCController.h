@@ -13,11 +13,11 @@ using json = nlohmann::json;
 
 // These values are used in compile time so we need to define them inside the code
 #ifndef PREDICTION_HORIZON
-#define PREDICTION_HORIZON 25
+#define PREDICTION_HORIZON 5
 #endif
 
 #ifndef CONTROL_HORIZON
-#define CONTROL_HORIZON 5
+#define CONTROL_HORIZON 2
 #endif
 
 #ifndef TNX
@@ -52,8 +52,7 @@ private:
     // double sample_time;
     // double input_cost_weight;
 
-    // NLMPC<Tnx, Tnu, Tny, prediction_horizon, control_horizon, ineq_c, eq_c> nlmpc;
-    NLMPC<4, 1, 0, 25, 5, 0, 0> nlmpc;
+    NLMPC<Tnx, Tnu, Tny, prediction_horizon, control_horizon, ineq_c, eq_c> nlmpc;
 
 public:
     // Constructor that initializes dimensions and calls setup

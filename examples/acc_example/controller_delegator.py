@@ -25,6 +25,10 @@ def get_controller_executable(build_config:dict) -> str:
   use_dynamorio = simulation_options["parallel_scarab_simulation"] and not simulation_options["use_fake_scarab_computation_times"]
   prediction_horizon = build_config["system_parameters"]["mpc_options"]["prediction_horizon"]
   control_horizon = build_config["system_parameters"]["mpc_options"]["control_horizon"]
+  state_dimension = build_config["system_parameters"]["state_dimension"]
+  input_dimension = build_config["system_parameters"]["input_dimension"]
+  disturbance_input_dimension = build_config["system_parameters"]["disturbance_input_dimension"]
+  output_dimension = build_config["system_parameters"]["output_dimension"]
 
   executable_name = f"acc_controller_{prediction_horizon}_{control_horizon}"
   
@@ -60,7 +64,13 @@ def get_controller_executable(build_config:dict) -> str:
     if not os.path.exists(executable_path):
       raise IOError(f'The expected executable file "{executable_path}" was not build.')
 
-  cmake_arguments_from_config = [f"-DPREDICTION_HORIZON={prediction_horizon}", f"-DCONTROL_HORIZON={control_horizon}"]
+  cmake_arguments_from_config = [f"-DPREDICTION_HORIZON={prediction_horizon}", 
+                                 f"-DCONTROL_HORIZON={control_horizon}",
+                                 f"-DTNX={state_dimension}",
+                                 f"-DTNU={input_dimension}",
+                                 f"-DTNDU={disturbance_input_dimension}",
+                                 f"-DTNY={output_dimension}",
+                                 ]
 
   if use_dynamorio:
     cmake_arguments_from_config += [f"-DUSE_DYNAMORIO=ON"]

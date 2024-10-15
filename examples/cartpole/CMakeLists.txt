@@ -6,6 +6,10 @@ project(CartPoleExample)
 #    cmake -DPREDICTION_HORIZON:STRING=7 -DCONTROL_HORIZON:STRING=4
 set(PREDICTION_HORIZON 25 CACHE STRING "Prediction Horizon")
 set(CONTROL_HORIZON 5 CACHE STRING "Control Horizon")
+set(TNX 100 CACHE STRING "State Dimension")
+set(TNU 100 CACHE STRING "Input Dimension")
+set(TNDU 100 CACHE STRING "Disturbance Input Dimension")
+set(TNY 100 CACHE STRING "Output Dimension")
 set(USE_DYNAMORIO 4 CACHE BOOL OFF)
 
 # Set the C++ standard to C++ 20
@@ -26,6 +30,10 @@ message("Build parameter values:")
 message("\tEXECUTABLE_NAME=${EXECUTABLE_NAME}")
 message("\tPREDICTION_HORIZON=${PREDICTION_HORIZON}")
 message("\tCONTROL_HORIZON=${CONTROL_HORIZON}")
+message("\tTNX=${TNX}")
+message("\tTNU=${TNU}")
+message("\tTNDU=${TNDU}")
+message("\tTNY=${TNY}")
 message("\tUSE_DYNAMORIO=${USE_DYNAMORIO}")
 
 # Define the base directories (set this to where the controllers folder is)
