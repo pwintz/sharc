@@ -9,9 +9,11 @@
     "simulator_mode": "no-delays",
     "in-the-loop_delay_provider": "gaussian",
     "in-the-loop_delay_provider": "execution-driven scarab",
+    "in-the-loop_delay_provider": "fake execution-driven scarab",
     "in-the-loop_delay_provider": "none",
     "in-the-loop_delay_provider": "onestep",
     "parallel_scarab_simulation": false, 
+    "use_fake_delays": false,
     "max_batches": 9999999,
     "max_batch_size": 9999999
   },
@@ -26,11 +28,14 @@
     "computation_delay_y-intercept": 0.147
   },
   "==== Debgugging Levels ====": {
-    "debug_interfile_communication_level": 2,
+    "debug_interfile_communication_level": 0,
     "debug_optimizer_stats_level": 0,
     "debug_dynamics_level": 0,
     "debug_configuration_level": 0,
-    "debug_build_level": 0
+    "debug_build_level": 0, 
+    "debug_shell_calls_level": 0, 
+    "debug_batching_level": 0, 
+    "debug_scarab_level": 0
   },
   "==== Model Parameters ====": "",
   "system_parameters": {
@@ -54,7 +59,7 @@
       "ymax": [1e9,    1e2]
     }, 
     "mpc_options":{
-      "enable_mpc_warm_start": true,
+      "enable_mpc_warm_start": false,
       "use_state_after_delay_prediction": false,
       "prediction_horizon": 5,
       "control_horizon": 2,

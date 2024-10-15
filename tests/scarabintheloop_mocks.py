@@ -12,6 +12,9 @@ class MockDelayProvider(DelayProvider):
     self.delay_queue.put(delay)
 
   def get_delay(self, metadata):
+    if self.delay_queue.qsize() == 0:
+      raise ValueError(f'Delay queue is empty!')
+      
     t_delay = self.delay_queue.get()
     metadata = {}
     return t_delay, metadata

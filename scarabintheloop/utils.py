@@ -18,9 +18,24 @@ from typing import Union
 # Import contextmanager to allow defining commands to be used to create "with" blocks.
 from contextlib import contextmanager 
 
-def assertFileExists(path:str, append_msg=""):
+# Level 1: Print shell commands that are called.
+# Level 2: Also print the current working directory.
+debug_shell_calls_level = 0
+
+try:
+    assert False
+    raise Exception('Python assertions are not working. This tool uses Python assertions to check correctness. Possible causes are running with the "-O" flag or running a precompiled (".pyo" or ".pyc") module. We do not recommend removing this check, but the code should work without assertions.')
+except AssertionError:
+    pass
+
+def assertFileExists(path:str, help_msg=None):
   if not os.path.exists(path):
-      raise IOError(f'Expected {path} to exist but it does not. The absolute path is {os.path.abspath(path)}' + append_msg)
+    err_msg = f'Expected {path} to exist but it does not. '
+    if os.path.abspath(path) != path:
+      err_msg += f'The absolute path is {os.path.abspath(path)}'
+    if help_msg:
+      err_msg += '\n' + help_msg
+    raise IOError(err_msg)
 
 def printIndented(string_to_print:str, indent: int=1):
   indent_str = '\t' * indent
@@ -96,13 +111,16 @@ def printJson(label: str, json_data: Union[Dict,List]):
   """
   Pretty-print JSON to standard out. Loses percision, so do not parse this output to recove data!
   """
-  json_string = _create_json_string(json_data)
-  
-  max_replacements = 0
-  double_regex = r"(-?\d+(?:\.\d{1,2})?)\d*"
-  truncated_double_subst = "\\1"
-  json_string = re.sub(double_regex, truncated_double_subst, json_string, max_replacements, re.MULTILINE)
-  print(f"{label}:\n{json_string}")
+  try:
+    json_string = _create_json_string(json_data)
+    
+    max_replacements = 0
+    double_regex = r"(-?\d+(?:\.\d{1,2})?)\d*"
+    truncated_double_subst = "\\1"
+    json_string = re.sub(double_regex, truncated_double_subst, json_string, max_replacements, re.MULTILINE)
+    print(f"{label}:\n{json_string}")
+  except Exception as err:
+    print(f"ERROR: Could not print as json: label={label}, json_data={json_data}.")
 
 def _remove_linebreaks_in_json_dump_between_number_list_items(json_string:str):
   max_replacements = 0 # As many as found.
@@ -169,8 +187,8 @@ def nump_vec_to_csv_string(array: np.ndarray) -> str:
   return string
 
 
-def checkBatchConfig(batch_config):
-  pass
+# def checkBatchConfig(batch_config):
+#   pass
 #   simulation_label = batch_config["simulation_label"]
 #   max_time_steps = batch_config["max_time_steps"]
 #   x0 = batch_config["x0"]
@@ -250,17 +268,28 @@ def printHeader(header: str, level=1):
 def openLog(filename, headerText=None):
   if not headerText:
     headerText=f"Log: {filename}"
-  print(f"Opening log: {os.path.abspath(filename)}")
-  log_file = open(filename, 'w+')
-
-  # Write a header for the log file.
-  log_file.write(f'===={"="*len(headerText)}==== \n')
-  log_file.write(f'=== {headerText} === \n')
-  log_file.write(f'===={"="*len(headerText)}==== \n')
-  log_file.flush()
-
+  log_path = os.path.abspath(filename)
+  print(f"Opening log: {log_path}")
+  if not os.path.isdir(os.path.dirname(log_path)):
+    raise ValueError(f'The parent of the given path is not a directory: {log_path}')
+    
   try:
+    # Use buffering=1 for line buffering.
+    log_file = open(filename, 'w+', buffering=1)
+
+    # Write a header for the log file.
+    log_file.write(f'===={"="*len(headerText)}==== \n')
+    log_file.write(f'=== {headerText} === \n')
+    log_file.write(f'===={"="*len(headerText)}==== \n')
+    # log_file.flush()
+
     yield log_file
+  # except SystemExit as err:
+  #   print("SystemExit receieved")
+  #   raise err
+  # except KeyboardInterrupt as err:
+  #   print("KeyboardInterrupt receieved")
+  #   raise err
   finally:
     # Clean up
     log_file.close()
@@ -295,13 +324,21 @@ def run_shell_cmd(cmd: Union[str, List[str]], log=None, working_dir=None):
   
   # If the working directory is provided, then prepend it to the printed command.
   if working_dir:
-    cmd_print_string = f"{working_dir}/" + cmd_print_string
+    if debug_shell_calls_level >= 2:
+      cmd_print_string = f"{working_dir}/" + cmd_print_string
+    elif debug_shell_calls_level >= 1:
+      cmd_print_string = os.path.basename(working_dir) + "/" + cmd_print_string
+
 
   # Print the command and if a log is given, then write the command there too.
-  print(cmd_print_string)
-  if log:
-    log.write(cmd_print_string + "\n")
-    log.flush()
+  if debug_shell_calls_level >= 1:
+    # Write the command string to the log, if provided.
+    if log:
+      log.write(cmd_print_string + "\n")
+      log.flush()
+    # Print to standard out.
+    print(cmd_print_string)
+
 
   # We update the working directory after printing the string so that it is 
   # more evident to the developer that no working directory was explicitly given
@@ -314,13 +351,16 @@ def run_shell_cmd(cmd: Union[str, List[str]], log=None, working_dir=None):
   except Exception as e:
     err_msg = f'ERROR when running shell command "{cmd}" in {working_dir}:\n\t{str(e)}'
     if log: 
+      
       # If using an external log file, print the contents.
+      log.write(err_msg)
       log.flush()
       log.seek(0)
-      print("(log) ".join([''] + log.readlines()))
+      print(f"({log.name}) ".join([''] + log.readlines()))
     print(err_msg)
     log.write(err_msg)
-    raise e
+    raise Exception(err_msg) from e
+    
 
 def loadModuleFromWorkingDir(module_name):
   """

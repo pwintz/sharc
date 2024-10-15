@@ -6,7 +6,8 @@ project(AccExample)
 #    cmake -DPREDICTION_HORIZON:STRING=7 -DCONTROL_HORIZON:STRING=4
 set(PREDICTION_HORIZON 7 CACHE STRING "Prediction Horizon")
 set(CONTROL_HORIZON 4 CACHE STRING "Control Horizon")
-set(USE_DYNAMORIO 4 CACHE BOOL OFF)
+set(USE_DYNAMORIO 1 CACHE BOOL OFF)
+# set(USE_EXECUTION_DRIVEN_SCARAB 0 CACHE BOOL OFF)
 
 # Set the C++ standard to C++ 20
 set(CMAKE_CXX_STANDARD 20)
@@ -20,6 +21,8 @@ set(CMAKE_C_COMPILER gcc-11)
 set(EXECUTABLE_NAME acc_controller_${PREDICTION_HORIZON}_${CONTROL_HORIZON})
 if(USE_DYNAMORIO)
   set(EXECUTABLE_NAME ${EXECUTABLE_NAME}_dynamorio)
+# elseif(USE_EXECUTION_DRIVEN_SCARAB)
+#   set(EXECUTABLE_NAME ${EXECUTABLE_NAME}_scarab)
 endif()
 
 message("Build parameter values:")
@@ -27,6 +30,7 @@ message("\tEXECUTABLE_NAME=${EXECUTABLE_NAME}")
 message("\tPREDICTION_HORIZON=${PREDICTION_HORIZON}")
 message("\tCONTROL_HORIZON=${CONTROL_HORIZON}")
 message("\tUSE_DYNAMORIO=${USE_DYNAMORIO}")
+# message("\tUSE_EXECUTION_DRIVEN_SCARAB=${USE_EXECUTION_DRIVEN_SCARAB}")
 
 # Add executable
 add_executable(${EXECUTABLE_NAME} src/acc_controller.cpp)
@@ -75,6 +79,9 @@ add_definitions(
 if(USE_DYNAMORIO)
   add_definitions(-DUSE_DYNAMORIO)
 endif()
+# if(USE_EXECUTION_DRIVEN_SCARAB)
+#   add_definitions(-DUSE_EXECUTION_DRIVEN_SCARAB)
+# endif()
 
 # Link libraries
 target_link_libraries(

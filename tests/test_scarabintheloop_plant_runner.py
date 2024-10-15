@@ -10,27 +10,6 @@ from scarabintheloop_mocks import MockDelayProvider, MockControllerInterface
 from scarabintheloop.utils import printJson
 
 
-
-# class Test_ComputationData(unittest.TestCase):
-# 
-# 
-#   def test(self):
-#     computation = ComputationData(0, 0.1, 2.3)
-#     print(computation)
-#     print(repr(computation))
-#     print(vars(computation))
-#     # print('type(repr(computation))', type(repr(computation)))
-#     # print('type(vars(computation))()', type(vars(computation)()))
-#     # print(computation.__dict__())
-#     printJson("computation", computation)
-#     # if not computation:
-#     #   self.fail()
-#     # else:
-#     #   self.fail()
-
-  
-
-@unittest.skip
 class Test_get_u(unittest.TestCase):
 
   def setUp(self):
@@ -40,18 +19,18 @@ class Test_get_u(unittest.TestCase):
   
   def test_without_pending(self):
     t0 = 0.111
-    u0 = -12.3
+    u0 = [-12.3]
     delay = 1.1
-    u_pending  = 2.2222
+    u_pending  = [2.2222]
     self.computational_delay_interface.put_delay(delay)
     self.controller_interface.set_next_u(u_pending)
     expected_pending_computation = ComputationData(t_start=t0, delay=delay, u=u_pending, metadata={})
 
     u_new, pending_computation_new, did_start_computation = plant_runner.get_u(
-                                    t = t0,
-                                    x = 2.3,
-                                    u = u0,
-                                    pending_computation = None,
+                                    t        = t0,
+                                    x        = 2.3,
+                                    u_before = u0,
+                                    pending_computation_before = None,
                                     controller_interface = self.controller_interface)
       
     self.assertTrue(did_start_computation)
@@ -81,17 +60,17 @@ class Test_get_u(unittest.TestCase):
     
   def test_with_pending_before_current_time(self):
 
-    expected_u_new = 1.1
+    expected_u_new = [1.1]
     expected_delay = 0.8
-    expected_u_pending = 2.2
+    expected_u_pending = [2.2]
     self.computational_delay_interface.put_delay(expected_delay)
     self.controller_interface.set_next_u(expected_u_pending)
     pending_computation_prev = ComputationData(t_start=0, delay=0.9, u=expected_u_new)
     u_new, pending_computation_new, did_start_computation = plant_runner.get_u(
                                     t = 1.0,
                                     x = 2.3,
-                                    u = 0.0,
-                                    pending_computation = pending_computation_prev,
+                                    u_before = [0.0],
+                                    pending_computation_before = pending_computation_prev,
                                     controller_interface = self.controller_interface)
     self.assertTrue(did_start_computation)
     self.assertEqual(u_new, expected_u_new)
@@ -100,13 +79,13 @@ class Test_get_u(unittest.TestCase):
     self.assertEqual(pending_computation_new.t_end, 1.0 + expected_delay)# t + delay
 
   def test_with_pending_after_current_time(self):
-    u0 = -12.3
+    u0 = [-12.3]
     delay = 1.1
     u_pending_time = 1.1 # Greaterthan t = 1.0
     u_pending      = 2.2222
     expected_u_new = u0
     expected_delay = 0.8
-    expected_u_pending = 2.2
+    expected_u_pending = [2.2]
     self.computational_delay_interface.put_delay(expected_delay)
     self.controller_interface.set_next_u(expected_u_pending)
 
@@ -116,8 +95,8 @@ class Test_get_u(unittest.TestCase):
     u_new, pending_computation_new, did_start_computation = plant_runner.get_u(
                                     t = 1.0,
                                     x = 2.3,
-                                    u = u0,
-                                    pending_computation = pending_computation_prev,
+                                    u_before = u0,
+                                    pending_computation_before = pending_computation_prev,
                                     controller_interface = self.controller_interface)
       
     self.assertFalse(did_start_computation)

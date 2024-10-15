@@ -3,7 +3,20 @@ import subprocess
 import re
 import shutil
 import time
+import sys
+import queue
+import warnings
 from typing import List, Set, Dict, Tuple
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+
+from abc import ABC, abstractmethod #  AbstractBaseClass
+
+from scarabintheloop.utils import run_shell_cmd, assertFileExists, openLog
+
+from scarab_globals import *
+from scarab_globals import scarab_paths
+
+debug_scarab_level = 0
 
 params_in_dir = 'docker_user_home'
 log_dir_regex = re.compile(r"\nLog directory is (.*?)\n")
@@ -17,6 +30,7 @@ SECONDS_PER_FEMTOSECOND = 10**(-15)
 SECONDS_PER_MICROSECOND = 10**(6)
 MICROSECONDS_PER_FEMTOSECOND = 10**(6-15)
 MICROSECONDS_PER_SECOND = 10**(-15)
+FEMTOSECOND_PER_SECONDS = 10**15
     
 def run(cmd, args=[], cwd='.'):
     verbose = False
@@ -139,10 +153,16 @@ class ScarabStatsReader:
       self.stats_dir_path = stats_dir_path
       # Create a RegEx to match a line in the form
       #   EXECUTION_TIME      294870700000000  <anything here is ignored>    
-      # or
+      # or the CSV notation:
       #   EXECUTION_TIME_count,      294870700000000  <anything here is ignored>    
       # and create two groups, key="EXECUTION_TIME" and value="294870700000000".
       self.stat_regex = re.compile(r"\s*(?P<key>[\w\_]+)(?:_count,)?\s*(?P<value>[\d.]+).*")
+      
+      # Create a RegEx to match a line in the form
+      #   EXECUTION_TIME_count,      294870700000000  <anything here is ignored>    
+      # and create two groups, key="EXECUTION_TIME" and value="294870700000000".
+      self.csv_stat_regex = re.compile(r"\s*(?P<key>[\w\_]+)_count,\s*(?P<value>\d(?:.\d+)?).*")
+
       
       # Create a RegEx to match a line in the form
       #   EXECUTION_TIME,             294870700000000  <anything here is ignored>             
@@ -154,7 +174,7 @@ class ScarabStatsReader:
     if self.is_using_roi:
       file_name = f"core.stat.0.csv.roi.{k}"
     else:
-      file_name = f"core.stat.{k}.out"
+      file_name = f"core.stat.{k}.csv"
     file_path = os.path.join(self.stats_dir_path, file_name)
     return file_path
 
@@ -167,18 +187,23 @@ class ScarabStatsReader:
   def readStatistic(self, k: int, stat_key: str): 
     file_path = self.getStatsFilePath(k)
     with open(file_path, 'r') as stats_file:
-        for line in stats_file:
-          regex_match = self.stat_regex.match(line)
-          if regex_match and stat_key == regex_match.groupdict()['key']:
-            value = regex_match.groupdict()['value']
-            # Cast value to either int or float.
-            try: 
-              return int(value)
-            except ValueError:
-              pass
-            return float(value)
-        raise ValueError(f"key: \"{stat_key}\" was not found in stats file {file_path}.")
+      return self.find_stat_in_lines(stat_key, stats_file.readlines())
               
+  def find_stat_in_lines(self, stat_key: str, lines: List[str]):
+    for line in lines:
+      regex_match = self.csv_stat_regex.match(line)
+      if regex_match and stat_key == regex_match.groupdict()['key']:
+        value = regex_match.groupdict()['value']
+        # Cast value to either int or float.
+        try: 
+          return int(value)
+        except ValueError:
+          pass
+        return float(value)
+    # After looping through all of the lines, we have not found the key.
+    raise ValueError(f'The key {stat_key} was not found in \n{lines}')
+      
+
   def readCyclesCount(self, k: int):  
     # return self.readStatistic(k, "NODE_CYCLE_count")
     return self.readStatistic(k, "NODE_CYCLE")
@@ -191,6 +216,329 @@ class ScarabStatsReader:
     time_in_femtosecs = self.readStatistic(k, "EXECUTION_TIME")
     time_in_secs = float(time_in_femtosecs) * SECONDS_PER_FEMTOSECOND
     return time_in_secs
+
+
+class ExecutionDrivenScarabRunner:
+
+  def __init__(self, controller_log=None, sim_dir=None):
+    # print(type(controller_log))
+    # print(type(sim_dir))
+    self.controller_log = controller_log
+    self.instruction_limit = int(1e9)
+    self.heartbeat_interval = int(1e6) # How often to print progress.
+    if sim_dir is None:
+      sim_dir = '.'
+    self.sim_dir = os.path.abspath(sim_dir)
+    self.params_src_file = os.path.join(self.sim_dir, 'PARAMS.generated')
+    self.params_in_file = os.path.join(self.sim_dir, 'PARAMS.in')
+    self.params_out_file = os.path.join(self.sim_dir, 'PARAMS.out')
+
+  def run(self, cmd):
+    print(f"ExecutionDrivenScarabRunner.run({cmd})")
+    scarab_cmd_argv = [
+        sys.executable, # The Python executable
+        scarab_paths.bin_dir + '/scarab_launch.py',
+        f'--program', cmd,
+        f'--param', self.params_src_file,
+        f'--pintool_args',
+        # Skip over anything before the start instruction.
+        f'-fast_forward_to_start_inst 1',
+        f'--scarab_args',
+        f'--inst_limit {self.instruction_limit}' # Instruction limit
+        f'--heartbeat_interval {self.heartbeat_interval}', 
+        # '--num_heartbeats 1'
+        # '--power_intf_on 1']
+      ]
+    if self.sim_dir:
+      # If sim_dir is given, provide it to Scarab. 
+      # This changes the working directory.
+      scarab_cmd_argv += [
+        '--simdir', self.sim_dir 
+      ]
+
+
+    # There is a bug in Scarab that causes it to sometimes crash when run in the terminal and the terminal is resized. To avoid this bug, we run it in a different thread, which appears to fix the problem.
+    def task():
+      # raise ValueError(f'FORCE ERROR')
+      
+      run_shell_cmd(scarab_cmd_argv, working_dir=self.sim_dir, log=self.controller_log)
+
+    with ThreadPoolExecutor() as executor:
+      future = executor.submit(task)
+      if future.exception(): # Waits until finished or failed.
+        raise Exception(f'Failed to execute {scarab_cmd_argv} in {sim_dir}. \nLogs: {controller_log.name}.') from future.exception()
+         
+      # Wait for the background task to finish before exiting
+      future.result()
+        
+    
+
+class MockExecutionDrivenScarabRunner(ExecutionDrivenScarabRunner):
+    def __init__(self, *args, **kwargs):
+      # self.number_of_steps = int(kwargs.pop('number_of_steps', 1))
+      queued_delays = kwargs.pop('queued_delays')
+      self.delay_queue = queue.Queue()
+      # Put all of the queued delays into the delay queue
+      for delay in queued_delays:
+        self.delay_queue.put(delay)
+      self.number_of_steps = self.delay_queue.qsize()
+      # print("q_size:", self.number_of_steps)
+      super().__init__(*args, **kwargs)
+
+    def run(self, cmd):
+      # print("Running MockExecutionDrivenScarabRunner.")
+      if self.sim_dir:
+        sim_dir = os.path.abspath(self.sim_dir)
+      else:
+        sim_dir = os.getcwd()
+      
+      if self.delay_queue.qsize() == 0:
+        raise ValueError(f'Delay queue is empty!')
+      delay = self.delay_queue.get()
+      delay_in_femtoseconds = int(FEMTOSECOND_PER_SECONDS*delay)
+
+      for roi_ndx in range(self.number_of_steps):
+        # stat_out_roi_file_name = f'core.stat.0.out.roi.{roi_ndx}'
+        stat_csv_roi_file_name = f'core.stat.0.csv.roi.{roi_ndx}'
+        # stat_out_roi_file_contents = "\n".join([
+        #   "Cumulative:        Cycles: 1               Instructions: 1               IPC: 1",
+        #   "Periodic:          Cycles: 1               Instructions: 1               IPC: 1",
+        #   f"EXECUTION_TIME                           {delay_in_femtoseconds}                  {delay_in_femtoseconds}",
+        #   "NODE_CYCLE                                     1                        1",
+        #   "NODE_INST_COUNT                                1                        1"
+        # ])
+        mock_cycle_count       = 1000
+        mock_instruction_count = 1000
+        stat_csv_roi_file_contents = "\n".join([
+          # "Cumulative Cycles, 1",
+          # "Cumulative Instructions, 1",
+          # "Cumulative IPC, 1.1",
+          # "Periodic Cycles, 1",
+          # "Periodic Instructions, 1",
+          # "Periodic IPC, 1.1",
+          f"EXECUTION_TIME_count,  {delay_in_femtoseconds}",
+          f"NODE_CYCLE_count,      {mock_cycle_count}",
+          # f"NODE_CYCLE_total_count,       1",
+          f"NODE_INST_COUNT_count, {mock_instruction_count}",
+          # f"NODE_INST_COUNT_total_count,       1"
+        ])
+        
+        # print(f"About to save a mock out file: {stat_out_roi_file_name}")
+        # with open(os.path.join(sim_dir, stat_out_roi_file_name), 'w', buffering=1) as stat_out_roi_file:
+          # stat_out_roi_file.write(stat_out_roi_file_contents + "\n")
+          # print(f"Saved a mock out file: {stat_out_roi_file.name}")
+        # print(f"About to save a mock out file: {stat_csv_roi_file_name}")
+        with open(os.path.join(sim_dir, stat_csv_roi_file_name), 'w', buffering=1) as stat_csv_roi_file:
+          stat_csv_roi_file.write(stat_csv_roi_file_contents + "\n")
+
+      # Copy file
+      assertFileExists(self.params_src_file)
+      shutil.copyfile(self.params_src_file, self.params_in_file)
+      shutil.copyfile(self.params_src_file, self.params_out_file)
+
+      run_shell_cmd(cmd, working_dir=sim_dir, log=self.controller_log)
+
+
+class TracesToComputationTimesProcessor(ABC):
+
+  def __init__(self, sim_dir):
+    self.sim_dir = os.path.abspath(sim_dir)
+
+  @abstractmethod
+  def get_computation_time_from_trace(self):
+    pass
+
+  def get_all_computation_times(self):
+    sorted_indices = self._get_trace_directories_indices()
+    # print('sorted_trace_dirs', sorted_trace_dirs)
+    # print('self.sim_dir:', self.sim_dir)
+
+    if len(sorted_indices) > os.cpu_count():
+      warnings.warn("There were more traces generated in a batch than the number of CPUs.", Warning)
+
+    with ProcessPoolExecutor(max_workers = os.cpu_count()) as scarab_executor:
+      computation_times = scarab_executor.map(self.get_computation_time_from_trace, sorted_indices)
+    
+    # The executor returns a iterator, but we want a list.
+    return list(computation_times)
+
+  def _get_trace_directory_from_index(self, index):
+    trace_dir = os.path.join(self.sim_dir, f'dynamorio_trace_{index}')
+    assertFileExists(trace_dir)
+    return trace_dir
+  
+  def _get_trace_directories_indices(self):
+    trace_dir_regex = re.compile(r".*dynamorio_trace_(?P<trace_index>\d+)")
+
+    # Note: glob does not support 'root_dir' until Python 3.10. :(
+    # dynamorio_trace_dirs = glob.glob('dynamorio_trace_*', root_dir=sim_dir)
+
+    dynamorio_trace_dirs = []
+    trace_dir_dict = {}
+
+    # Loop through the contents of sim_dir to find the folders that match "dynamorio_trace_XX"
+    for trace_dir in os.listdir(self.sim_dir):
+      result = trace_dir_regex.match(trace_dir)
+      if not result:
+        # Not a trace directory. Skip.
+        continue 
+      if not trace_dir.startswith("dynamorio_trace_"):
+        raise ValueError(f'Not a trace directory!')
+
+      trace_dir = os.path.join(self.sim_dir, trace_dir)
+      trace_index = int(result.group('trace_index'))
+      dynamorio_trace_dirs.append(trace_dir)
+      trace_dir_dict[trace_index] = trace_dir
+
+    if len(trace_dir_dict) == 0:
+      raise ValueError(f"No DynamoRIO trace directories were found in {self.sim_dir}")
+
+    sorted_indices = sorted(trace_dir_dict)
+    return sorted_indices
+
+  def _get_trace_directories(self):
+    indices = self._get_trace_directories_indices()
+    path_format = lambda ndx: os.path.join(self.sim_dir, f'dynamorio_trace_{ndx}')
+    # trace_dirs = [os.path.join(self.sim_dir, f'dynamorio_trace_{ndx}') for ndx in indices]
+    trace_dirs = map(path_format, indices)
+    return trace_dirs
+
+class ScarabTracesToComputationTimesProcessor(TracesToComputationTimesProcessor):
+
+#   def __init__(self, sim_dir):
+#     self.sim_dir = os.path.abspath(sim_dir)
+#     pass
+#     # self.log = log
+#     # self.instruction_limit = int(1e9)
+#     # self.heartbeat_interval = int(1e6) # How often to print progress.
+#     # if sim_dir is None:
+#     #   sim_dir = '.'
+#     # self.sim_dir = os.path.abspath(sim_dir)
+#     # self.params_in_file = os.path.join(self.sim_dir, 'PARAMS.in')
+# 
+#   def get_all_computation_times(self):
+#     (dynamrio_trace_dir_dictionaries, sorted_trace_dirs, sorted_indices) = self._get_trace_directories_indices()
+#     print('sorted_trace_dirs', sorted_trace_dirs)
+#     print('self.sim_dir:', self.sim_dir)
+# 
+#     if len(sorted_indices) > os.cpu_count():
+#       warnings.warn("There were more traces generated in a batch than the number of CPUs.", Warning)
+# 
+#     with ProcessPoolExecutor(max_workers = os.cpu_count()) as scarab_executor:
+#       # scarab_data = scarab_executor.map(ParallelSimulationExecutor.get_computation_time_from_trace_in_scarab, sorted_indices)
+#       scarab_data = scarab_executor.map(self.get_computation_time_from_trace, sorted_indices)
+#       scarab_data = list(scarab_data)
+#     
+#     computation_time_list = [None] * len(scarab_data)
+#     print('computation_time_list (before)', computation_time_list)
+#     print('scarab_data', scarab_data)
+#     for datum in scarab_data:
+#       print('scarab_datum: ', datum)
+#       dir_index = datum["index"]
+#       trace_dir = datum["trace_dir"]
+#       computation_time = datum["computation_time"]
+#       computation_time_list[dir_index] = computation_time
+# 
+#     return computation_time_list
+
+  @staticmethod 
+  def portabalize_trace(trace_dir): 
+    print(f"Starting portabilization of trace in {trace_dir}.")
+    log_path = trace_dir + "/portabilize.log"
+    with openLog(log_path, f"Portablize \"{trace_dir}\"") as portabilize_log:
+      try:
+          run_shell_cmd("run_portabilize_trace.sh", working_dir=trace_dir, log=portabilize_log)
+      except Exception as e:
+        raise Exception(f'failed to portablize trace in {trace_dir}. See logs: {portabilize_log}') from e
+    if debug_scarab_level > 1:
+      print(f"Finished portabilization of trace in {trace_dir}.")
+
+  def get_computation_time_from_trace(self, dir_index):
+    if not isinstance(dir_index, int):
+      raise AssertionError("Assertion failed: isinstance(dir_index, int)")
+    
+    trace_dir = self._get_trace_directory_from_index(dir_index)
+    
+    ScarabTracesToComputationTimesProcessor.portabalize_trace(trace_dir)
+
+    log_path   = os.path.join(trace_dir, 'scarab.log')
+    
+    # Copy PARAMS.in file
+    shutil.copyfile(os.path.join(trace_dir, '..', 'PARAMS.generated'), os.path.join(trace_dir, 'PARAMS.in'))
+    assertFileExists(os.path.join(trace_dir, 'PARAMS.in'))
+    assertFileExists(os.path.join(trace_dir, 'bin'))
+    assertFileExists(os.path.join(trace_dir, 'trace'))
+    scarab_cmd = ["scarab", # Requires that the Scarab build folder is in PATH
+                    "--fdip_enable", "0", 
+                    "--frontend", "memtrace", 
+                    "--fetch_off_path_ops", "0", 
+                    "--cbp_trace_r0=trace", 
+                    "--memtrace_modules_log=bin"] 
+    with openLog(log_path, headerText=f"Scarab log for {trace_dir}") as scarab_log:
+      run_shell_cmd(scarab_cmd, working_dir=trace_dir, log=scarab_log)
+
+    # Read the generated statistics files.
+    stats_reader = ScarabStatsReader(trace_dir, is_using_roi=False)
+    stats_file_index = 0 # We only simulate one timestep.
+    computation_time = stats_reader.readTime(stats_file_index)
+    if computation_time == 0:
+      raise ValueError(f'The computation time was zero (computation_time = {computation_time}). This typically indicates that Scarab did not find a PARAMS.in file.')
+    data = {
+            "index": int(dir_index), 
+            "trace_dir": trace_dir, 
+            "computation_time": computation_time
+            }
+    print(f"Finished Scarab simulation. Time to compute controller: {computation_time} seconds.")
+    # return data
+    return float(computation_time)
+
+
+  def _clean_statistics(self):
+    """
+    Delete the statitics files that were created. This is designed to be used in test cases to make sure we reset the original state of the file system (more or less).
+    """
+    for directory in self._get_trace_directories():
+      try:
+        os.remove(directory + '/core.stat.0.csv')
+      except FileNotFoundError:
+        pass
+
+class MockTracesToComputationTimesProcessor(TracesToComputationTimesProcessor):
+
+  def __init__(self, *args, **kwargs):
+    self.delay_list = kwargs.pop('delays')
+    self.number_of_steps = len(self.delay_list)
+    for delay in self.delay_list:
+      if delay is None:
+        raise ValueError(f'One of the provide delays was None! delays: {self.delay_list}')
+        
+    super().__init__(*args, **kwargs)
+
+  def get_computation_time_from_trace(self, dir_index):
+    """
+    Override the superclass' simulate trace to not use Scarab to get the computation times.
+    """
+    trace_dir = self._get_trace_directory_from_index(dir_index)
+      
+    # We don't need PARAMS.in in the trace directory for the sake of the
+    # Mock delays, but it is usful to have it here to check that copying it works
+    # as expected.
+    shutil.copyfile(os.path.join(trace_dir, '..', 'PARAMS.generated'), os.path.join(trace_dir, 'PARAMS.in'))
+    assertFileExists(os.path.join(trace_dir, 'PARAMS.in'))
+
+    # Read the fake delay data.
+    delay = self.delay_list[dir_index]
+    if delay == None:
+      raise ValueError(f'The delay at index {dir_index} has already been read!')
+    self.delay_list[dir_index] = None
+
+    # data = {
+    #         "index": dir_index, 
+    #         "trace_dir": self._get_trace_directory_from_index(dir_index), 
+    #         "computation_time": delay
+    #         }
+    # return data
+    return delay
 
 class Scarab:
 
@@ -289,7 +637,7 @@ class Scarab:
         # print(stderr)
         return trace_directory,stdout,stderr
 
-    def simulate_trace_with_scarab(self, trace_dir):
+    def get_computation_time_from_trace_with_scarab(self, trace_dir):
         if self.verbose:
             print('\n=== Starting Scarab ===')
 
@@ -325,7 +673,7 @@ class Scarab:
     # The return value is the (simulation) time in femptoseconds for the command to be executed on the simulated platform.
     def simulate(self, cmd, args=[]):
         trace_dir,stdout,stderr = self.trace_cmd(cmd, args)
-        time_in_fs = self.simulate_trace_with_scarab(trace_dir)
+        time_in_fs = self.get_computation_time_from_trace_with_scarab(trace_dir)
         # print(f"time: {time_in_fs:0.6} seconds ({time_in_fs*SECONDS_PER_MICROSECOND:0.4} microseconds).")
         data = ScarabData(time_in_fs, stdout, stderr)
         return data
@@ -334,7 +682,7 @@ class Scarab:
 # if __name__ == "__main__":
 #     scarab = Scarab();
 #     # trace_dir = scarab.trace_cmd('touch', '~/mytestfile.txt')
-#     # scarab.simulate_trace_with_scarab("/workspaces/ros-docker/drmemtrace.python3.8.122943.1703.dir")
+#     # scarab.get_computation_time_from_trace_with_scarab("/workspaces/ros-docker/drmemtrace.python3.8.122943.1703.dir")
 #     print(os.getcwd())
 #     data = scarab.simulate('./3x3_proportional_controller', ['1.43'])
 #     print(os.getcwd())
