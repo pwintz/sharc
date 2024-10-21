@@ -118,10 +118,6 @@ def run():
     pass
   os.symlink(experiment_list_dir, latest_experiment_list_dir_symlink_path, target_is_directory=True)
 
-  # if debug_configuration_level >= 1:
-  #   printJson(f"base_config loaded from {base_config_file_path}", base_config)
-  #   printJson(f"experiment_config_patches_list loaded from {experiments_config_file_path}", experiment_config_patches_list)
-
   # Loop through all of the experiment configurations. For each one, run the experiment and append the result to experiment_result_list. 
   experiment_result_list = {}
   successful_experiment_labels = []
