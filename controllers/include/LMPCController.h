@@ -1,54 +1,35 @@
 // controller/LMPCController.h
 #pragma once
 
-#ifndef LMPC_CONTROLLER_H
-#define LMPC_CONTROLLER_H
 #include "controller.h"
 #include <mpc/LMPC.hpp>
 #include <mpc/Utils.hpp>
 using namespace mpc;
 
-#include "nlohmann/json.hpp"
-using json = nlohmann::json;
-
-// These values are used in compile time so we need to define them inside the code
-#ifndef PREDICTION_HORIZON
-#define PREDICTION_HORIZON 5
-#endif
-
-#ifndef CONTROL_HORIZON
-#define CONTROL_HORIZON 3
-#endif
-
-#ifndef TNX
-#define TNX 5
-#endif
-
-#ifndef TNU
-#define TNU 1
-#endif
-
-#ifndef TNDU
-#define TNDU 1
-#endif
-
-#ifndef TNY
-#define TNY 2
-#endif
+// This code requires the following preprocessor variables to be defined:
+// * PREDICTION_HORIZON
+// * CONTROL_HORIZON
+// * TNX
+// * TNU
+// * TNDU
+// * TNY
 
 class LMPCController : public Controller {
 private:
-    constexpr static int Tnx = TNX;
-    constexpr static int Tnu = TNU;
+    constexpr static int Tnx  = TNX;
+    constexpr static int Tnu  = TNU;
     constexpr static int Tndu = TNDU;
-    constexpr static int Tny = TNY;
+    constexpr static int Tny  = TNY;
     constexpr static int prediction_horizon = PREDICTION_HORIZON;
-    constexpr static int control_horizon = CONTROL_HORIZON;
+    constexpr static int control_horizon    = CONTROL_HORIZON;
 
     double convergence_termination_tol;
     double sample_time;
     double lead_car_input;
     double tau;
+    
+    // MPC Computation Result
+    Result<Tnu> lmpc_step_result;
 
     LMPC<Tnx, Tnu, Tndu, Tny, prediction_horizon, control_horizon> lmpc;
 
@@ -67,5 +48,13 @@ public:
     void setup(const nlohmann::json &json_data) override;
     void update_internal_state(const Eigen::VectorXd &x) override;
     void calculateControl() override;
+    // Result<Tnu> getLastLmpcStepResult() {
+    //   return lmpc_step_result;
+    // }
+    // Eigen::VectorXd getLastControl() {
+    //   return lmpc_step_result.cmd;
+    // }
+    // Result<Tnu> getLastLmpcIterations() {
+    //   return lmpc_step_result.iterations;
+    // }
 };
-#endif // LMPC_CONTROLLER_H

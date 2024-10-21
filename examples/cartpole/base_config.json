@@ -31,6 +31,7 @@
   "system_parameters": {
     "state_dimension": 4, 
     "input_dimension": 1,
+    "disturbance_input_dimension": 1,
     "output_dimension": 0,
     "sample_time": 0.13,
     "x names": ["x", "theta", "x_dot", "theta_dot"],

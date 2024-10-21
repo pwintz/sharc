@@ -250,8 +250,8 @@ int main()
   json json_data = json::parse(config_json_file);
   config_json_file.close();
 
-  int max_time_steps = json_data["max_time_steps"];
-  auto time_indices = json_data["time_indices"];
+  int max_time_steps = json_data.at("max_time_steps");
+  auto time_indices = json_data.at("time_indices");
   for (int time_index : time_indices){
     PRINT("time_index" << time_index)
   }
@@ -261,7 +261,7 @@ int main()
   debug_optimizer_stats_level = debug_config["debug_optimizer_stats_level"];
   debug_dynamics_level = debug_config["debug_dynamics_level"];
 
-  bool use_state_after_delay_prediction = json_data["system_parameters"]["mpc_options"]["use_state_after_delay_prediction"];
+  bool use_state_after_delay_prediction = json_data.at("system_parameters").at("mpc_options").at("use_state_after_delay_prediction");
 
   // Vector sizes. How to fix these so that we don't modify this file
   const int Tnx = 4;  // State dimension
@@ -270,7 +270,7 @@ int main()
   const int Tny = 0;  // Output dimension
 
   // Controller* controller = Controller::createController("LMPCController");
-  Controller* controller = Controller::createController(json_data["system_parameters"]["controller_type"], json_data);
+  Controller* controller = Controller::createController(json_data.at("system_parameters").at("controller_type"), json_data);
 
   // Set whether the evolution of the dyanmics are computed extenally 
   // (with Python) or are done within this process, using libmpc.

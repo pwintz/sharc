@@ -2,7 +2,7 @@
 
 void CustomController::setup(const nlohmann::json &json_data){
     // Load parameters from json as you want like below and setup the controller
-    // tau = json_data["system_parameters"]["tau"];
+    // tau = json_data.at("system_parameters").at("tau");
 }
 
 void CustomController::update_internal_state(const Eigen::VectorXd &x){

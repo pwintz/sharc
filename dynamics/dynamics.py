@@ -3,19 +3,28 @@ from dynamics_base import Dynamics
 
 class LTIDynamics(Dynamics):
     def setup_system(self):
-        self.A = self.config["system_parameters"]["A"]
-        self.B = self.config["system_parameters"]["B"]
+        self.A      = self.config["system_parameters"]["A"]
+        self.B      = self.config["system_parameters"]["B"]
         self.B_dist = self.config["system_parameters"]["B_dist"]
         
         # Do we need this in dynamics?
         self.C = self.config["system_parameters"]["C"]
         self.D = self.config["system_parameters"]["D"]
+        
+        self.n = self.config["system_parameters"]["state_dimension"]
+        self.m = self.config["system_parameters"]["input_dimension"]
+        self.p = self.config["system_parameters"]["output_dimension"]
+
 
     def system_derivative(self, t, x, u, w):
-        if w is None:
-            w = np.array([0])
-        dxdt = self.A @ x + self.B @ u + self.B_dist @ w
-        assert dxdt.shape == x.shape, (dxdt.shape, x.shape, u.shape, w.shape, (self.A @ x).shape, (self.B_dist @ w).shape)
+        try:
+          dxdt = self.A @ x + self.B @ u
+          if w: # If a disturbance is given, then add its effect.
+            dxdt += self.B_dist @ w
+        except Exception as err:
+          raise ValueError(f'Failed to calculate dx/dt with the following data: \nA: {self.A}\nx: {x}\nB: {self.B}\nu: {u}\nB_dist: {self.B_dist}\nw: {w}') from err
+        assert dxdt is not None
+        assert dxdt.shape == (self.n, 1), f'Expected dxdt.shape = {(self.n, 1)}, but instead dxdt.shape={dxdt.shape}.\nx.shape={x.shap}, u.shape={u.shape}, w.shape={"N/A" if w is None else w.shape}, (self.A @ x).shape={(self.A @ x).shape}, (self.B_dist @ w).shape={"N/A" if w is None else (self.B_dist @ w).shape}.' 
         return dxdt
     
 class ACCDynamics(LTIDynamics):
@@ -48,6 +57,10 @@ class ACCDynamics(LTIDynamics):
             [1, 0, 0, -1, 0]
         ])
         self.D = np.zeros([5, 1])
+        
+        self.n = self.config["system_parameters"]["state_dimension"]
+        self.m = self.config["system_parameters"]["input_dimension"]
+        self.p = self.config["system_parameters"]["output_dimension"]
 
 class CartPoleDynamics(Dynamics):
     def setup_system(self):
@@ -59,6 +72,10 @@ class CartPoleDynamics(Dynamics):
         self.c = self.config["system_parameters"]["c"]
         self.gamma = self.config["system_parameters"]["gamma"]
         self.g = self.config["system_parameters"]["g"]
+        
+        self.n = self.config["system_parameters"]["state_dimension"]
+        self.m = self.config["system_parameters"]["input_dimension"]
+        self.p = self.config["system_parameters"]["output_dimension"]
 
     def system_derivative(self, t, x, u, w):
         # Constants
@@ -68,7 +85,7 @@ class CartPoleDynamics(Dynamics):
         # Recover state parameters
         x_pos = x[0]     # position of the base
         theta = x[1]     # angle of the pendulum
-        vx = x[2]        # velocity of the base
+        vx    = x[2]     # velocity of the base
         omega = x[3]     # angular rate of the pendulum
         
         # Compute common terms

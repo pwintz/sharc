@@ -278,7 +278,7 @@ class ControllerInterface(ABC):
     t_prediction = self._read_t_prediction()
     iterations = self._read_iterations()
     if isinstance(x_prediction, np.ndarray):
-      x_prediction = numpy_vec_to_list(x_prediction)
+      x_prediction = column_vec_to_list(x_prediction)
     metadata = {
       "x_prediction": x_prediction,
       "t_prediction": t_prediction,
@@ -476,12 +476,15 @@ class ComputationData:
 class TimeStepSeries:
 
   def __init__(self, k0, t0, x0, pending_computation_prior=None):
-    if k0 is None:
-      raise ValueError("k0 is None")
-    if t0 is None:
-      raise ValueError("t0 is None")
-    if x0 is None:
-      raise ValueError("x0 is None")
+    assert k0 is not None, f"k0={k0} must not be None"
+    assert t0 is not None, f"t0={t0} must not be None"
+    assert x0 is not None, f"x0={x0} must not be None"
+
+    k0 = int(k0)
+    t0 = float(t0)
+    assert isinstance(k0, int), f'k_0={k_0} had an unexpected type: {type(k_0)}. Must be an int.'
+    assert isinstance(t0, (float, int)), f't0={t0} had an unexpected type: {type(t0)}.'
+    assert isinstance(x0, (list, np.ndarray)), f'x0={x0} had an unexpected type: {type(x0)}.'
     
     # Initial values
     self.k0 = k0 # Initial time step number
@@ -595,9 +598,15 @@ class TimeStepSeries:
 
   def append(self, t_end, x_end, u, pending_computation: ComputationData, t_mid=None, x_mid=None):
 
-    if not isinstance(u, (float, int, np.ndarray, list)):
-      raise ValueError(f'u={u} had an unexpected type: {type(u)}')
-      
+    assert isinstance(u, (np.ndarray, list)), f'u={u} had an unexpected type: {type(u)}. Must be a list or numpy array. For scalar values, make it a list of length 1.'
+    assert isinstance(x_end, (np.ndarray, list)), f'x_end={x_end} had an unexpected type: {type(x_end)}. Must be a list or numpy array. For scalar values, make it a list of length 1.'
+    assert isinstance(t_end, (float, int)), f't_end={t_end} had an unexpected type: {type(t_end)}.'
+    assert (t_mid is None) == (x_mid is None),  f'It must be that t_mid={t_mid} is None if and only if x_mid={x_mid} is None.'
+    if t_mid:
+      assert isinstance(t_mid, (float, int)), f't_mid={t_mid} had an unexpected type: {type(t_mid)}.'
+      assert isinstance(x_mid, (np.ndarray, list)), f'x_mid={x_mid} had an unexpected type: {type(x_mid)}. Must be a list or numpy array. For scalar values, make it a list of length 1.'
+      assert len(x_end) == len(x_mid)
+
     # is_x_end_None = x_end is None
     x_end     = TimeStepSeries.cast_vector(x_end)
     u         = TimeStepSeries.cast_vector(u)
@@ -616,7 +625,7 @@ class TimeStepSeries:
       x_start = self.x0
       pending_computation_prev = self.pending_computation_prior
     else:
-      k = self.k[-1] + 1
+      k       = self.k[-1] + 1
       t_start = self.t[-1]
       x_start = self.x[-1]
       pending_computation_prev = self.pending_computation[-1]
@@ -631,12 +640,13 @@ class TimeStepSeries:
     if pending_computation and pending_computation.t_start < t_start:
       assert pending_computation_prev == pending_computation
     
-    assert (t_mid is None) == (x_mid is None), f'If t_mid={t_mid} is None then x_mid={x_mid} must be None and vice versa.'
+
     assert t_start < t_end,                f't_start={t_start} >= t_end={t_end}. self:{self}'
     if t_mid: 
       assert t_start <= t_mid and t_mid <= t_end, f'We must have t_start={t_start} <= t_mid={t_mid} <= t_end={t_end}'
 
     if t_mid is None:
+      assert len(x_start) == len(x_end)
       #                           [ Start of time step,  End of time step  ]
       self.k                   += [                  k,                   k] # Step number
       self.i                   += [                  k,               k + 1] # Sample index
@@ -646,7 +656,10 @@ class TimeStepSeries:
       self.pending_computation += [pending_computation, pending_computation]
 
     else: # A mid point was given, indicating an update to u part of the way through.
+      assert len(x_start) == len(x_mid)
+      assert len(x_start) == len(x_end)
       u_mid = TimeStepSeries.cast_vector(pending_computation.u)
+      assert len(u) == len(u_mid)
       self.t += [t_start, t_mid, t_mid, t_end]
       self.x += [x_start, x_mid, x_mid, x_end]
       self.u += [       u,    u, u_mid, u_mid]
@@ -830,7 +843,7 @@ class TimeStepSeries:
       "k":  self.k,
       "i":  self.i
     }
-    printJson(label, timing_data)
+    printJson(label + ' (timing data)', timing_data)
     
     print(f'{label}')
     TimeStepSeries.print_sample_time_values("k_time_step", self.k)
@@ -858,10 +871,12 @@ class TimeStepSeries:
   def cast_vector(x):
     if x is None:
       return None
-    if isinstance(x, float) or isinstance(x, int) or isinstance(x, list):
+    if isinstance(x, (float, int)):
+      return [x]
+    if isinstance(x, list):
       return x
     elif isinstance(x, np.ndarray):
-      return numpy_vec_to_list(x)
+      return column_vec_to_list(x)
     raise ValueError(f'cast_vector(): Unexpected type: {type(x)}')
     
   @staticmethod
@@ -975,11 +990,9 @@ def get_u(t, x, u_before, pending_computation_before: ComputationData, controlle
   # if u_delay == 0:
   #   # If there is no delay, then we update immediately.
   #   return u_pending, None
-  if u_delay > 0:
+  assert u_delay > 0, 'Expected a positive value for u_delay.'
     # print(f'Updated pending_computation: {pending_computation_after}')
-    return u_after, pending_computation_after, did_start_computation
-  else:
-    raise ValueError(f'Expected a positive value.')
+  return u_after, pending_computation_after, did_start_computation
   
 
 def computation_delay_provider_factory(computation_delay_name: str, sim_dir, sample_time, use_fake_scarab):
@@ -1035,20 +1048,24 @@ def run(sim_dir: str, config_data: dict, evolveState) -> dict:
   # use_fake_scarab_computation_times = config_data["Simulation Options"]["use_fake_scarab_computation_times"]
   max_time_steps = config_data["max_time_steps"]
   sample_time = config_data["system_parameters"]["sample_time"] # Discrete sample period.
+  n = config_data["system_parameters"]["state_dimension"] 
+  m = config_data["system_parameters"]["input_dimension"] 
   first_time_index = config_data['first_time_index']
   use_fake_scarab = config_data['Simulation Options']["use_fake_delays"]
 
   computation_delay_provider = computation_delay_provider_factory(config_data["Simulation Options"]["in-the-loop_delay_provider"], sim_dir, sample_time, use_fake_scarab)
 
   # Read the initial control value.
-  x0 = list_to_numpy_vec(config_data['x0'])
-  u0 = list_to_numpy_vec(config_data['u0'])
+  x0 = list_to_column_vec(config_data['x0'])
+  u0 = list_to_column_vec(config_data['u0'])
   
+  assert x0.shape == (n, 1), f'x0={x0} did not have the expected shape: {(n, 1)}'
+  assert u0.shape == (m, 1), f'u0={u0} did not have the expected shape: {(m, 1)}'
+
   # pending_computation may be None.
   pending_computation0 = config_data["pending_computation"]
   print(f"                  u0: {u0}")
   printJson(f"pending_computation0", pending_computation0)
-  # print(f"pending_computation0", pending_computation0)
 
   with controller_interface_factory("pipes", computation_delay_provider, sim_dir) as controller_interface:
 
@@ -1062,6 +1079,9 @@ def run(sim_dir: str, config_data: dict, evolveState) -> dict:
       u_before_str = repr(u_before)
       pending_computation_before = pending_computation0
       time_index = first_time_index
+      
+      assert x_start.shape == (n, 1), f'x_start={x_start} did not have the expected shape: {(n, 1)}'
+      assert u_before.shape == (m, 1), f'u_before={u_before} did not have the expected shape: {(m, 1)}'
 
       # The number of time steps that the controller has been computed. 
       # When there is a pending 'u_before' value, there may be several time steps that don't compute new control values.
@@ -1093,6 +1113,10 @@ def run(sim_dir: str, config_data: dict, evolveState) -> dict:
         else: #u_delay and u_delay == sample_time:
           # Evolve state for entire time step and then update u_after
           (t_end, x_end) = evolveState(t_start, x_start, u_after, t_end)
+
+        # Check that the output of x_end is the expected type and shape.
+        assert_is_column_vector(x_end)
+        assert x_end.shape == (n, 1), f'x_end={x_end} did not have the expected shape: {(n, 1)}'
 
         if debug_dynamics_level >= 2:
           print(f'time_index={time_index}, t_start={t_start}, t_mid={t_mid}, t_end={t_end}, pending_computation_after={pending_computation_after}')

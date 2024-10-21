@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 import numpy as np
 from scipy.integrate import solve_ivp
+from scarabintheloop.utils import assert_is_column_vector
 
 class Dynamics(ABC):
     def __init__(self, config):
@@ -42,19 +43,35 @@ class Dynamics(ABC):
         - t: Time points
         - x: State trajectory
         """
-        def ode(t, x):                
-            return self.system_derivative(t, x, u, w)
         
-        # Make sure the shapes are consistent
-        if len(x0.shape) > 1:
-            x0 = x0.reshape(-1)
-        if len(u.shape) > 1:
-            u = u.reshape(-1)
-            
-        sol = solve_ivp(ode, [t0, tf], x0, t_eval=np.linspace(t0, tf, 100))
-        (t,x) = (sol.t[-1], sol.y[:,-1])
+        assert_is_column_vector(x0, 'x0')
+        n = x0.shape[0]
 
-        assert x.shape == x0.shape, (x.shape, x0.shape)
+        # Make sure the shapes are consistent
+        x0 = x0.squeeze()   
+
+        # Make u and w column vectors.
+        assert_is_column_vector(u, 'u')
+        if w:
+          assert_is_column_vector(w, 'w')
+        
+        def f(t, x):    
+          # Make x back into a column vector.
+          x = x.reshape([n, 1]) 
+          dxdt = self.system_derivative(t, x, u, w)
+          assert x.shape == dxdt.shape
+          dxdt = dxdt.squeeze()
+          assert dxdt.ndim == 1, f'dxdt={dxdt} must be a 1D array.'
+          return dxdt
+
+
+        assert x0.ndim == 1, f'x0 must be a 1D array for solve_ivp. x0.shape={x0.shape}.'
+        sol = solve_ivp(f, [t0, tf], x0, t_eval=np.linspace(t0, tf, 100))
+        assert sol.y.shape[0] == n
+        (t, x) = (sol.t[-1], sol.y[:,-1])
+
+        x = x.reshape([n, 1])
+        assert x.shape == (n, 1)
         return (t, x)
     
     def getDynamicsFunction(self):

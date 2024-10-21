@@ -90,7 +90,8 @@
     "charconv": "cpp",
     "*.ipp": "cpp",
     "*.tlh": "cpp",
-    "*.in": "c"
+    "*.in": "c",
+    "kroneckerproduct": "cpp"
   },
   "files.autoSave": "onFocusChange",
   "terminal.integrated.profiles.windows": {

@@ -34,10 +34,6 @@ using namespace mpc;
 #define PRINT(x) std::cout << x << std::endl;
 #define PRINT_WITH_FILE_LOCATION(x) std::cout << __FILE__  << ":" << __LINE__ << ": " << x << std::endl;
 
-// Load a header file for parsing and generating JSON files.
-#include "nlohmann/json.hpp"
-using json = nlohmann::json;
-
 // fstream provides I/O to file pipes.
 #include <fstream>
  
@@ -79,7 +75,7 @@ std::string string_format( const std::string& format, Args ... args )
 }
 
 template<int rows, int cols>
-void loadMatrixValuesFromJson(mat<rows, cols>& mat_out, json json_data, std::string key) {
+void loadMatrixValuesFromJson(mat<rows, cols>& mat_out, nlohmann::json json_data, std::string key) {
       if (json_data[key].size() != rows*cols)
       {
         throw std::invalid_argument(string_format(
@@ -237,33 +233,26 @@ int main()
   assertFileExists(t_delays_in_filename);
   
   std::ifstream config_json_file(config_file_path);
-  json json_data = json::parse(config_json_file);
+  nlohmann::json json_data(json::parse(config_json_file));
   config_json_file.close();
 
-  int max_time_steps = json_data["max_time_steps"];
-  auto time_indices = json_data["time_indices"];
-  for (int time_index : time_indices){
-    PRINT("time_index" << time_index)
-  }
+  int max_time_steps = json_data.at("max_time_steps");
 
   auto debug_config = json_data["==== Debgugging Levels ===="];
   debug_interfile_communication_level = debug_config["debug_interfile_communication_level"];
   debug_optimizer_stats_level = debug_config["debug_optimizer_stats_level"];
   debug_dynamics_level = debug_config["debug_dynamics_level"];
 
-  bool use_state_after_delay_prediction = json_data["system_parameters"]["mpc_options"]["use_state_after_delay_prediction"];
+  bool use_state_after_delay_prediction = json_data.at("system_parameters").at("mpc_options").at("use_state_after_delay_prediction");
 
   // Vector sizes.
-  const int Tnx  = 5;  // State dimension
-  const int Tnu  = 1;  // Control dimension
+  const int Tnx  = 5; // State dimension
+  const int Tnu  = 1; // Control dimension
   const int Tndu = 1; // Exogenous control (disturbance) dimension
-  const int Tny  = 2;  // Output dimension
+  const int Tny  = 2; // Output dimension
 
-  Controller* controller = Controller::createController(json_data["system_parameters"]["controller_type"], json_data);
-
-  // Set whether the evolution of the dyanmics are computed extenally 
-  // (with Python) or are done within this process, using libmpc.
-  bool use_external_dynamics_computation = json_data["Simulation Options"]["use_external_dynamics_computation"];
+  std::string controller_type = json_data.at("system_parameters").at("controller_type");
+  Controller* controller = Controller::createController(controller_type, json_data);
 
   std::ofstream optimizer_info_out_file(optimizer_info_out_filename);
   optimizer_info_out_file << "num_iterations,cost,primal_residual,dual_residual" << std::endl;
@@ -275,37 +264,37 @@ int main()
   std::ofstream u_outfile;
   std::ifstream x_infile;
   std::ifstream t_delays_infile;
-    // Open the pipes to Python. Each time we open one of these streams, 
-    // this process pauses until it is connected to the Python process (or another process). 
-    // The order needs to match the order in the reader process.
-    
-    PRINT_WITH_FILE_LOCATION("Starting IO setup.");
 
-    assertFileExists(u_out_filename);
-    PRINT_WITH_FILE_LOCATION("Opening " << u_out_filename << ". Waiting for reader.");
-    u_outfile.open(u_out_filename, std::ofstream::out);
+  // Open the pipes to Python. Each time we open one of these streams, 
+  // this process pauses until it is connected to the Python process (or another process). 
+  // The order needs to match the order in the reader process.
+  PRINT_WITH_FILE_LOCATION("Starting Pipe Readers/Writers setup.");
 
-    assertFileExists(x_predict_out_filename);
-    PRINT_WITH_FILE_LOCATION("Opening " << x_predict_out_filename << ". Waiting for reader.");
-    x_predict_outfile.open(x_predict_out_filename, std::ofstream::out);
+  assertFileExists(u_out_filename);
+  PRINT_WITH_FILE_LOCATION("Opening " << u_out_filename << ". Waiting for reader.");
+  u_outfile.open(u_out_filename, std::ofstream::out);
 
-    assertFileExists(t_predict_out_filename);
-    PRINT_WITH_FILE_LOCATION("Opening " << t_predict_out_filename << ". Waiting for reader.");
-    t_predict_outfile.open(t_predict_out_filename, std::ofstream::out);
+  assertFileExists(x_predict_out_filename);
+  PRINT_WITH_FILE_LOCATION("Opening " << x_predict_out_filename << ". Waiting for reader.");
+  x_predict_outfile.open(x_predict_out_filename, std::ofstream::out);
 
-    assertFileExists(iterations_out_filename);
-    PRINT_WITH_FILE_LOCATION("Opening " << iterations_out_filename << ". Waiting for reader.");
-    iterations_outfile.open(iterations_out_filename, std::ofstream::out);
+  assertFileExists(t_predict_out_filename);
+  PRINT_WITH_FILE_LOCATION("Opening " << t_predict_out_filename << ". Waiting for reader.");
+  t_predict_outfile.open(t_predict_out_filename, std::ofstream::out);
 
-    // In files.
-    assertFileExists(x_in_filename);
-    PRINT_WITH_FILE_LOCATION("Opening " << x_in_filename << ". Waiting for reader.");
-    x_infile.open(x_in_filename, std::ofstream::in);
+  assertFileExists(iterations_out_filename);
+  PRINT_WITH_FILE_LOCATION("Opening " << iterations_out_filename << ". Waiting for reader.");
+  iterations_outfile.open(iterations_out_filename, std::ofstream::out);
 
-    assertFileExists(t_delays_in_filename);
-    PRINT_WITH_FILE_LOCATION("Opening " << t_delays_in_filename << ". Waiting for reader.");
-    t_delays_infile.open(t_delays_in_filename, std::ofstream::in);
-    PRINT_WITH_FILE_LOCATION("All files open.");
+  // In files.
+  assertFileExists(x_in_filename);
+  PRINT_WITH_FILE_LOCATION("Opening " << x_in_filename << ". Waiting for reader.");
+  x_infile.open(x_in_filename, std::ofstream::in);
+
+  assertFileExists(t_delays_in_filename);
+  PRINT_WITH_FILE_LOCATION("Opening " << t_delays_in_filename << ". Waiting for reader.");
+  t_delays_infile.open(t_delays_in_filename, std::ofstream::in);
+  PRINT_WITH_FILE_LOCATION("All files open.");
 
   // State vector state.
   mpc::cvec<Tnx> modelX, modeldX;
@@ -386,7 +375,8 @@ int main()
     // // Update internal state and calculate control
     controller->update_internal_state(x_predict);
     controller->calculateControl();
-    u = controller->control;
+    u = controller->getLastControl();
+    // iterations = controller->getLastLmpcIterations()
 
     #if defined(USE_DYNAMORIO)
       PRINT_WITH_FILE_LOCATION("End of DynamoRIO region of interest.")
@@ -437,20 +427,7 @@ int main()
         PRINT_WITH_FILE_LOCATION("End of region of interest. Statistics recording is disabled.")
     #endif
 
-    // u = res.cmd;
-    
-    // if (debug_optimizer_stats_level >= 1) 
-    // {
-    //   PRINT_WITH_FILE_LOCATION("Optimizer Info")
-    //   PRINT_WITH_FILE_LOCATION("         Return code: " << res.retcode)
-    //   PRINT_WITH_FILE_LOCATION("       Result status: " << res.status)
-    //   PRINT_WITH_FILE_LOCATION("Number of iterations: " << res.num_iterations)
-    //   PRINT_WITH_FILE_LOCATION("                Cost: " << res.cost)
-    //   PRINT_WITH_FILE_LOCATION("    Constraint error: " << res.primal_residual)
-    //   PRINT_WITH_FILE_LOCATION("          Dual error: " << res.dual_residual)
-    // }
-
-    optimizer_info_out_file << res.num_iterations << "," << res.cost << "," << res.primal_residual << "," << res.dual_residual << std::endl;  
+    // optimizer_info_out_file << res.num_iterations << "," << res.cost << "," << res.primal_residual << "," << res.dual_residual << std::endl;  
 
     // if ( res.num_iterations == 0 )
     // {
@@ -467,10 +444,11 @@ int main()
     // There are <prediction_horizon> many rows. 
     // OptSequence optseq = lmpc.getOptimalSequence();
 
-    sendCVec("u", i, u, u_outfile);
-    sendCVec("x prediction", i, x_predict, x_predict_outfile);
-    sendDouble("t prediction ", i, t_predict, t_predict_outfile);
-    sendDouble("iterations ", i, res.num_iterations, iterations_outfile);
+    sendCVec("u",               i, u,          u_outfile);
+    sendCVec("x prediction",    i, x_predict,  x_predict_outfile);
+    sendDouble("t prediction ", i, t_predict,  t_predict_outfile);
+    // sendDouble("iterations ",   i, iterations, iterations_outfile);
+    sendDouble("iterations ", i, -1, iterations_outfile);
 
     readDouble("t_delay", t_delays_infile, t_delay_prev);
     

@@ -162,7 +162,7 @@ def run():
           print_status()
           continue
       
-      successful_experiment_labels += [experiment_config_patches["label"]]
+      successful_experiment_labels += [experiment_config_patches["label"] + f' ({experiment_result["experiment wall time"]:0.1f} seconds)']
       experiment_result_list[experiment_result["label"]] = experiment_result
       writeJson(experiment_list_dir + "experiment_result_list_incremental.json", experiment_result_list)
       # print(f'Added "{experiment_result["label"]}" to list of experiment results')
@@ -172,7 +172,7 @@ def run():
   # Save all of the experiment results to a file.
   experiment_list_json_filename = experiment_list_dir + "experiment_result_list.json"
   writeJson(experiment_list_json_filename, experiment_result_list)
-  print(f"Experiment results are in {experiment_list_json_filename}.")
+  print(f"Experiment results for \n\t{experiments_config_file_path}\nare in \n\t{experiment_list_json_filename}.")
 
 @indented_print
 def run_experiment(base_config: dict, experiment_config_patch: dict, example_dir: str):
@@ -285,6 +285,8 @@ def run_experiment_parallelized(experiment_config, example_dir):
   k0 = 0
   t0 = 0
   x0 = experiment_config["x0"]
+  state_dimension = experiment_config["system_parameters"]["state_dimension"]
+  assert len(x0) == state_dimension, f'x0={x0} did not have the expected number of entries: state_dimension={state_dimension}'
   batch_init = {
     "i_batch": 0,
     "first_time_index": 0,
@@ -464,7 +466,7 @@ def create_simulation_config(experiment_config, batch_init=None):
     pending_computation = batch_init["pending_computation"]
     x0                  = batch_init["x0"]
     u0                  = batch_init["u0"]
-
+    
     # Truncate the index to not extend past the last index
     max_time_steps_per_batch = min(os.cpu_count(), experiment_max_batch_size, experiment_max_time_steps - first_time_index)
 
@@ -617,8 +619,8 @@ def getSimulationExecutor(sim_dir, sim_config, controller_log, plant_log):
     print("Using SerialSimulationExecutor.")
     executor = SerialSimulationExecutor(sim_dir, sim_config, controller_log, plant_log)
     delay_provider_config = sim_config["Simulation Options"]["in-the-loop_delay_provider"]
-    assert delay_provider_config == "execution-driven scarab" or delay_provider_config == "fake execution-driven scarab"
-      # raise ValueError(f'delay_provider_config={delay_provider_config} was neither "execution-driven scarab" nor "fake execution-driven scarab"')
+    assert delay_provider_config == "execution-driven scarab" or delay_provider_config == "fake execution-driven scarab", \
+      f'delay_provider_config={delay_provider_config} must be either "execution-driven scarab" or "fake execution-driven scarab"'
     
     
     if use_fake_delays:

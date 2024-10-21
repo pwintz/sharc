@@ -9,32 +9,14 @@
 using namespace mpc;
 
 #include "nlohmann/json.hpp"
-using json = nlohmann::json;
 
-// These values are used in compile time so we need to define them inside the code
-#ifndef PREDICTION_HORIZON
-#define PREDICTION_HORIZON 25
-#endif
-
-#ifndef CONTROL_HORIZON
-#define CONTROL_HORIZON 5
-#endif
-
-#ifndef TNX
-#define TNX 4
-#endif
-
-#ifndef TNU
-#define TNU 1
-#endif
-
-#ifndef TNDU
-#define TNDU 0
-#endif
-
-#ifndef TNY
-#define TNY 0
-#endif
+// This code requires the following preprocessor variables to be defined:
+// * PREDICTION_HORIZON
+// * CONTROL_HORIZON
+// * TNX
+// * TNU
+// * TNDU
+// * TNY
 
 class NLMPCController : public Controller {
 private:
@@ -52,8 +34,7 @@ private:
     // double sample_time;
     // double input_cost_weight;
 
-    // NLMPC<Tnx, Tnu, Tny, prediction_horizon, control_horizon, ineq_c, eq_c> nlmpc;
-    NLMPC<4, 1, 0, 25, 5, 0, 0> nlmpc;
+    NLMPC<Tnx, Tnu, Tny, prediction_horizon, control_horizon, ineq_c, eq_c> nlmpc;
 
 public:
     // Constructor that initializes dimensions and calls setup

@@ -244,10 +244,6 @@ COPY --chown=$USERNAME .profile /home/$USERNAME/.bashrc
 # ENV PYTHONPATH "${PYTHONPATH}:/home/$USERNAME/resources:${SCARAB_ROOT}/bin"
 # ENV PATH "${PATH}:/home/$USERNAME/resources/scarabintheloop/scripts:${SCARAB_ROOT}/bin"
 
-### Setup scarabintheloop for development in a Dev Contiainer ###  
-ARG WORKSPACE_ROOT
-ENV PYTHONPATH "${PYTHONPATH}:${WORKSPACE_ROOT}:${SCARAB_ROOT}/bin"
-ENV PATH "${PATH}:${WORKSPACE_ROOT}/scarabintheloop:${WORKSPACE_ROOT}/scarabintheloop/scripts:${SCARAB_ROOT}/bin"
 COPY scarabintheloop/requirements.txt scarabintheloop-requirements.txt
 RUN pip3 install -r scarabintheloop-requirements.txt && rm scarabintheloop-requirements.txt
 
@@ -385,6 +381,17 @@ USER $USERNAME
 ###################################
 FROM mpc-examples-base as mpc-examples-dev
 ARG USERNAME
+ARG WORKSPACE_ROOT
+
+ENV CONTROLLERS_DIR "${WORKSPACE_ROOT}/controllers"
+ENV DYNAMICS_DIR "${WORKSPACE_ROOT}/dynamics"
+
+### Setup scarabintheloop for development in a Dev Contiainer ###  
+ENV PYTHONPATH "${PYTHONPATH}:${WORKSPACE_ROOT}:${SCARAB_ROOT}/bin"
+ENV PATH "${PATH}:${WORKSPACE_ROOT}/scarabintheloop:${WORKSPACE_ROOT}/scarabintheloop/scripts:${SCARAB_ROOT}/bin"
+
+# For convenience, set the working to the ACC example. 
+WORKDIR ${WORKSPACE_ROOT}/examples/acc_example
 
 #################################################
 ## Stand-alone mpc-examples (no dev container) ##
@@ -402,9 +409,12 @@ COPY --chown=$USERNAME examples/acc_example /home/$USERNAME/examples/acc_example
 ENV PYTHONPATH "${PYTHONPATH}:${RESOURCES_DIR}"
 ENV PATH "${PATH}:${RESOURCES_DIR}/scarabintheloop:${RESOURCES_DIR}/scarabintheloop/scripts"
 
+ENV CONTROLLERS_DIR "${RESOURCES_DIR}/controllers"
+ENV DYNAMICS_DIR "${RESOURCES_DIR}/dynamics"
+
 # Set the working directory
 WORKDIR /home/$USERNAME/examples/acc_example
 
-USER $USERNAME
+# USER $USERNAME
 
 # CMD run_scarabintheloop.py . && cd out/latest/default-settings && cat controller.log && cat plant_dynamics.logdocker system df

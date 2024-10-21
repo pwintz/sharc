@@ -7,6 +7,11 @@
 #include <functional>
 #include <unordered_map>
 
+
+// Define a macro to print a value 
+#define PRINT(x) std::cout << x << std::endl;
+#define PRINT_WITH_FILE_LOCATION(x) std::cout << __FILE__  << ":" << __LINE__ << ": " << x << std::endl;
+
 class Controller {
 public:
     Eigen::VectorXd state;   // Internal state
@@ -24,6 +29,10 @@ public:
     static void registerController(const std::string& name, CreatorFunc creator);
     static Controller* createController(const std::string& name, const nlohmann::json &json_data);
 
+    Eigen::VectorXd getLastControl() {
+      return control;
+    }
+
     virtual ~Controller() = default;
 
     // Controller specific functions
@@ -34,22 +43,16 @@ public:
 protected:
     // Method to initialize state and control based on dimensions from JSON
     void initializeDimensions(const nlohmann::json &json_data) {
-        if (json_data.contains("system_parameters") && 
-            json_data["system_parameters"].contains("state_dimension") && 
-            json_data["system_parameters"].contains("input_dimension")) {
 
-            int state_dim = json_data["system_parameters"]["state_dimension"];
-            int control_dim = json_data["system_parameters"]["input_dimension"];
+      int state_dim = json_data.at("system_parameters").at("state_dimension");
+      int control_dim = json_data.at("system_parameters").at("input_dimension");
 
-            if (state_dim <= 0 || control_dim <= 0) {
-                throw std::invalid_argument("Dimensions must be positive.");
-            }
+      if (state_dim <= 0 || control_dim <= 0) {
+          throw std::invalid_argument("Dimensions must be positive.");
+      }
 
-            state.resize(state_dim);
-            control.resize(control_dim);
-        } else {
-            throw std::invalid_argument("JSON must contain '[system_parameters][state_dimension]' and '[system_parameters][input_dimension]'.");
-        }
+      state.resize(state_dim);
+      control.resize(control_dim);
     }
 
 private:

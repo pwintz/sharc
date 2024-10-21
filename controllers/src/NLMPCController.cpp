@@ -6,15 +6,15 @@ double M, m, J, l, c, my_gamma, g, sample_time, input_cost_weight;
 
 void NLMPCController::setup(const nlohmann::json &json_data){
     // Load system parameters
-    M = json_data["system_parameters"]["M"];
-    m = json_data["system_parameters"]["m"];
-    J = json_data["system_parameters"]["J"];
-    l = json_data["system_parameters"]["l"];
-    c = json_data["system_parameters"]["c"];
-    my_gamma = json_data["system_parameters"]["gamma"];
-    g = json_data["system_parameters"]["g"];
-    sample_time = json_data["system_parameters"]["sample_time"];
-    input_cost_weight = json_data["system_parameters"]["mpc_options"]["input_cost_weight"];
+    M = json_data.at("system_parameters").at("M");
+    m = json_data.at("system_parameters").at("m");
+    J = json_data.at("system_parameters").at("J");
+    l = json_data.at("system_parameters").at("l");
+    c = json_data.at("system_parameters").at("c");
+    my_gamma = json_data.at("system_parameters").at("gamma");
+    g = json_data.at("system_parameters").at("g");
+    sample_time = json_data.at("system_parameters").at("sample_time");
+    input_cost_weight = json_data.at("system_parameters").at("mpc_options").at("input_cost_weight");
 
     nlmpc.setLoggerLevel(mpc::Logger::log_level::NORMAL);
     nlmpc.setContinuosTimeModel(sample_time);
@@ -64,7 +64,7 @@ void NLMPCController::setup(const nlohmann::json &json_data){
                                        const mpc::mat<prediction_horizon + 1, TNU> &u,
                                        double)
                                    { 
-                                    std::vector<double> w = json_data["system_parameters"]["mpc_options"]["state_cost_weights"].get<std::vector<double>>();
+                                    std::vector<double> w = json_data.at("system_parameters").at("mpc_options").at("state_cost_weights").get<std::vector<double>>();
                                     Eigen::VectorXd state_cost_weights = Eigen::Map<Eigen::VectorXd, Eigen::Unaligned>(w.data(), w.size()); // create a weight vector
                                     return (x * state_cost_weights.asDiagonal()).array().square().sum() + u.array().square().sum() * input_cost_weight; });
 }

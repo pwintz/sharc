@@ -1,11 +1,6 @@
 #pragma once
 
-#ifndef CUSTOM_CONTROLLER_H
-#define CUSTOM_CONTROLLER_H
 #include "controller.h"
-
-#include "nlohmann/json.hpp"
-using json = nlohmann::json;
 
 class CustomController : public Controller {
 public:
@@ -18,4 +13,3 @@ public:
     void update_internal_state(const Eigen::VectorXd &x) override;
     void calculateControl() override;
 };
-#endif // CUSTOM_CONTROLLER_H

@@ -68,7 +68,7 @@ def readJson(filename: str) -> Union[Dict,List]:
 # class MyJsonEncoder(json.JSONEncoder):
 #   def default(self, obj):
 #     if isinstance(obj, np.ndarray):
-#       return numpy_vec_to_list(obj)
+#       return column_vec_to_list(obj)
 #     elif str(type(obj)) == "TimeStepSeries":
 #       # Convert the object to a dictionary
 #       return obj.__dict__
@@ -171,13 +171,24 @@ def patch_dictionary(base: dict, patch: dict) -> dict:
 #   dictionary = copy.deepcopy(dictionary)
 #   
 
+def assert_is_column_vector(array: np.ndarray, label="array") -> None:
+  assert isinstance(array, np.ndarray), f'array={array} is not a np.ndarray'
+  assert array.ndim == 2, \
+    f'Expected {label}={array} to be two dimensional, but instead {label}.ndim={array.ndim}'
+  assert array.shape[1] == 1, \
+    f'array must be a column vector. Instead it was {label}.shape={array.shape}'
+
+
 #############################
 #####  NUMPY FUNCTIONS ######
 #############################
-def numpy_vec_to_list(array: np.ndarray) -> List[float]:
-  return array.transpose().tolist()[0]
+def column_vec_to_list(array: np.ndarray) -> List[float]:
+  assert_is_column_vector(array)
+  vec_as_list = array.transpose().tolist()[0]
+  assert isinstance(vec_as_list, list), f'vec_as_list={vec_as_list} must be a list. The original array was "{array}". Shape: {array.shape}'
+  return vec_as_list
 
-def list_to_numpy_vec(list_vec: List[float]) -> np.ndarray:
+def list_to_column_vec(list_vec: List[float]) -> np.ndarray:
   return np.array(list_vec).reshape(-1, 1)
 
 def nump_vec_to_csv_string(array: np.ndarray) -> str:

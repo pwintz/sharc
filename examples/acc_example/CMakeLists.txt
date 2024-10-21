@@ -6,6 +6,10 @@ project(AccExample)
 #    cmake -DPREDICTION_HORIZON:STRING=7 -DCONTROL_HORIZON:STRING=4
 set(PREDICTION_HORIZON 7 CACHE STRING "Prediction Horizon")
 set(CONTROL_HORIZON 4 CACHE STRING "Control Horizon")
+set(TNX 100 CACHE STRING "State Dimension")
+set(TNU 100 CACHE STRING "Input Dimension")
+set(TNDU 100 CACHE STRING "Disturbance Input Dimension")
+set(TNY 100 CACHE STRING "Output Dimension")
 set(USE_DYNAMORIO 1 CACHE BOOL OFF)
 # set(USE_EXECUTION_DRIVEN_SCARAB 0 CACHE BOOL OFF)
 
@@ -29,20 +33,39 @@ message("Build parameter values:")
 message("\tEXECUTABLE_NAME=${EXECUTABLE_NAME}")
 message("\tPREDICTION_HORIZON=${PREDICTION_HORIZON}")
 message("\tCONTROL_HORIZON=${CONTROL_HORIZON}")
+message("\tTNX=${TNX}")
+message("\tTNU=${TNU}")
+message("\tTNDU=${TNDU}")
+message("\tTNY=${TNY}")
 message("\tUSE_DYNAMORIO=${USE_DYNAMORIO}")
 # message("\tUSE_EXECUTION_DRIVEN_SCARAB=${USE_EXECUTION_DRIVEN_SCARAB}")
 
+# Define a function for asserting that an environmental variable is defined.
+function(assert_env_var var_name)
+    if(NOT DEFINED ENV{${var_name}})
+        message(FATAL_ERROR "${var_name} environment variable is not set")
+    endif()
+endfunction()
+
+# Check that expected environmental variables are defined.
+assert_env_var(CONTROLLERS_DIR)
+assert_env_var(DYNAMORIO_HOME)
+assert_env_var(SCARAB_ROOT)
+
 # Define the base directories (set this to where the controllers folder is)
-set(RESOURCES_DIR $ENV{RESOURCES_DIR})
-set(CONTROLLER_DIR "${RESOURCES_DIR}/controllers")
-# Include directories
-include_directories(${CONTROLLER_DIR})
+set(CONTROLLERS_DIR $ENV{CONTROLLERS_DIR})
+set(CONTROLLERS_INC ${CONTROLLERS_DIR}/include)
+set(CONTROLLERS_SRC ${CONTROLLERS_DIR}/src)
 # Add source files dynamically
-file(GLOB CONTROLLERS_SRC "${CONTROLLER_DIR}/*.cpp")
+file(GLOB CONTROLLERS_SOURCES "${CONTROLLERS_SRC}/*.cpp")
+message("    CONTROLLERS_DIR=${CONTROLLERS_DIR}")
+message("    CONTROLLERS_INC=${CONTROLLERS_INC}")
+message("    CONTROLLERS_SRC=${CONTROLLERS_SRC}")
+message("CONTROLLERS_SOURCES=${CONTROLLERS_SOURCES}")
 
 set(SOURCES
     src/acc_controller.cpp
-    ${CONTROLLERS_SRC}
+    ${CONTROLLERS_SOURCES}
 )
 # Add executable
 add_executable(${EXECUTABLE_NAME} ${SOURCES})
@@ -56,6 +79,7 @@ target_include_directories(
   /usr/include/eigen3
   /usr/local/include/osqp
   ../libmpc/include/
+  ${CONTROLLERS_INC}
 )
 
 target_link_directories(
@@ -86,6 +110,10 @@ add_definitions(
     -DEIGEN_STACK_ALLOCATION_LIMIT=0
     -DPREDICTION_HORIZON=${PREDICTION_HORIZON}
     -DCONTROL_HORIZON=${CONTROL_HORIZON}
+    -DTNX=${TNX}
+    -DTNU=${TNU}
+    -DTNDU=${TNDU}
+    -DTNY=${TNY}
 )
 
 if(USE_DYNAMORIO)
