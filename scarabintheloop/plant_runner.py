@@ -1020,7 +1020,7 @@ def controller_interface_factory(controller_interface_selection, computation_del
   finally:
     controller_interface.close()
 
-def run(sim_dir: str, config_data: dict, evolveState) -> dict:
+def run(sim_dir: str, config_data: dict, evolveState, controller_interface_selection="pipes") -> dict:
   if not sim_dir.endswith("/"):
     sim_dir += "/"
   print(f"Start of plant_runner.run()  in {sim_dir}")
@@ -1040,15 +1040,15 @@ def run(sim_dir: str, config_data: dict, evolveState) -> dict:
   x0 = list_to_column_vec(config_data['x0'])
   u0 = list_to_column_vec(config_data['u0'])
   
-  assert x0.shape == (n, 1), f'x0={x0} did not have the expected shape: {(n, 1)}'
-  assert u0.shape == (m, 1), f'u0={u0} did not have the expected shape: {(m, 1)}'
+  assert x0.shape == (n, 1), f'x0={x0} must have the shape: {(n, 1)}'
+  assert u0.shape == (m, 1), f'u0={u0} must have the shape: {(m, 1)}'
 
   # pending_computation may be None.
   pending_computation0 = config_data["pending_computation"]
   print(f"                  u0: {u0}")
   printJson(f"pending_computation0", pending_computation0)
 
-  with controller_interface_factory("pipes", computation_delay_provider, sim_dir) as controller_interface:
+  with controller_interface_factory(controller_interface_selection, computation_delay_provider, sim_dir) as controller_interface:
 
     # computational_delay_provider = ScarabDelayProvider(sim_dir)
     # computational_delay_provider = OneTimeStepDelayProvider(sample_time)
