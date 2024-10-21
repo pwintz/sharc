@@ -166,6 +166,9 @@ def run():
   writeJson(experiment_list_json_filename, experiment_result_list)
   print(f"Experiment results for \n\t{experiments_config_file_path}\nare in \n\t{experiment_list_json_filename}.")
 
+  if failed_experiment_labels:
+    exit(1)
+    
 @indented_print
 def run_experiment(base_config: dict, experiment_config_patch: dict, example_dir: str):
   """ This function assumes that the working directory is the experiment-list working directory and its parent directory is the example directory, which contains the following:
