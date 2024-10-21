@@ -12,9 +12,6 @@
 using json = nlohmann::json;
 using namespace mpc;
 
-// #define USE_DYNAMORIO
-
-// #define USE_DYNAMORIO
 #ifdef USE_DYNAMORIO
   #include "dr_api.h"
   bool my_setenv(const char *var, const char *value){
@@ -267,12 +264,6 @@ int main()
 // int main(int argc, char *argv[])
 {
   PRINT("==== Start of acc_controller.main() ====")
-  // /* We also test -rstats_to_stderr */
-  // if (!my_setenv("DYNAMORIO_OPTIONS",
-  //             "-stderr_mask 0xc -rstats_to_stderr "
-  //             "-client_lib ';;-offline'")){
-  //   std::cerr << "failed to set env var!\n";
-  // }
   #ifdef USE_DYNAMORIO
     PRINT_WITH_FILE_LOCATION("Using DynamoRio.")
 
@@ -303,7 +294,6 @@ int main()
   PipeDoubleReader delays_reader(sim_dir + "t_delay_py_to_c++");
   std::string optimizer_info_out_filename = sim_dir + "optimizer_info.csv";
 
-
   // Open and read JSON 
   nlohmann::json json_data = readJson(sim_dir + "config.json");
 
@@ -311,16 +301,14 @@ int main()
 
   nlohmann::json debug_config = json_data.at("==== Debgugging Levels ====");
   debug_interfile_communication_level = debug_config.at("debug_interfile_communication_level");
-  debug_optimizer_stats_level = debug_config.at("debug_optimizer_stats_level");
-  debug_dynamics_level = debug_config.at("debug_dynamics_level");
-
-  bool use_state_after_delay_prediction = json_data.at("system_parameters").at("mpc_options").at("use_state_after_delay_prediction");
+  debug_optimizer_stats_level         = debug_config.at("debug_optimizer_stats_level");
+  debug_dynamics_level                = debug_config.at("debug_dynamics_level");
 
   // Vector sizes.
-  const int Tnx  = 5; // State dimension
-  const int Tnu  = 1; // Control dimension
-  const int Tndu = 1; // Exogenous control (disturbance) dimension
-  const int Tny  = 2; // Output dimension
+  const int Tnx  =  TNX; // State dimension
+  const int Tnu  =  TNU; // Control dimension
+  const int Tndu = TNDU; // Exogenous control (disturbance) dimension
+  const int Tny  =  TNY; // Output dimension
 
   std::string controller_type = json_data.at("system_parameters").at("controller_type");
   Controller* controller = Controller::createController(controller_type, json_data);
@@ -377,7 +365,6 @@ int main()
     
     // Read the value of 'x' for this iteration.
     x_reader.read("x", modelX);
-    // PRINT("u=" << u.transpose().format(fmt));
 
     // Begin a batch of Scarab statistics
     #if defined(USE_DYNAMORIO)
@@ -413,9 +400,9 @@ int main()
     
     if (debug_dynamics_level >= 1) 
     {
-      PRINT("====== t_delay_prev: " << t_delay_prev);
-      PRINT("====== t_predict: " << t_predict);
-      PRINT("====== x_predict: " << x_predict.transpose());
+      PRINT("t_delay_prev: " << t_delay_prev);
+      PRINT("t_predict: " << t_predict);
+      PRINT("x_predict: " << x_predict.transpose());
     }
 
     // Compute a step of the MPC controller. This does NOT change the value of modelX.
