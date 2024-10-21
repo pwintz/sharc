@@ -304,15 +304,15 @@ int main()
   std::string optimizer_info_out_filename = sim_dir + "optimizer_info.csv";
 
 
-  // Open and read JSON 
+  // Read JSON 
   nlohmann::json json_data = readJson(sim_dir + "config.json");
+  nlohmann::json debug_levels_config = readJson(sim_dir + "debug_levels.json")
 
   int max_time_steps = json_data.at("max_time_steps");
 
-  nlohmann::json debug_config = json_data.at("==== Debgugging Levels ====");
-  debug_interfile_communication_level = debug_config.at("debug_interfile_communication_level");
-  debug_optimizer_stats_level = debug_config.at("debug_optimizer_stats_level");
-  debug_dynamics_level = debug_config.at("debug_dynamics_level");
+  debug_interfile_communication_level = debug_levels_config.at("debug_interfile_communication_level");
+  debug_optimizer_stats_level         = debug_levels_config.at("debug_optimizer_stats_level");
+  debug_dynamics_level                = debug_levels_config.at("debug_dynamics_level");
 
   bool use_state_after_delay_prediction = json_data.at("system_parameters").at("mpc_options").at("use_state_after_delay_prediction");
 

@@ -64,6 +64,7 @@ def run():
   args = parser.parse_args()
   experiments_config_file_path = Path(os.path.abspath(os.path.join(example_dir, "simulation_configs", args.config_filename)))
   base_config_file_path        = Path(os.path.abspath(os.path.join(example_dir, 'base_config.json')))
+  debug_levels_config_file_path= Path(os.path.abspath(os.path.join(example_dir, 'debug_levels.json')))
 
   print(f'        Base config: {base_config_file_path}')
   print(f' Experiments config: {experiments_config_file_path}')
@@ -73,6 +74,7 @@ def run():
 
   # Read JSON configuration file.
   base_config = readJson(base_config_file_path)
+  debug_levels_config = readJson(base_config_file_path)
 
   # Open list of example configurations.
   experiment_config_patches_list = readJson(experiments_config_file_path)
@@ -85,15 +87,14 @@ def run():
   experiment_list_label = slugify(experiments_config_file_path.stem)
   base_config["experiment_list_label"] = experiment_list_label
 
-  debug_levels = base_config["==== Debgugging Levels ===="]
-  debug_interfile_communication_level = debug_levels["debug_interfile_communication_level"]
-  debug_optimizer_stats_level         = debug_levels["debug_optimizer_stats_level"]
-  debug_dynamics_level                = debug_levels["debug_dynamics_level"]
-  debug_configuration_level           = debug_levels["debug_configuration_level"]
-  debug_build_level                   = debug_levels["debug_build_level"]
-  utils.debug_shell_calls_level       = debug_levels["debug_shell_calls_level"]
-  debug_batching_level                = debug_levels["debug_batching_level"]
-  scarabizor.debug_scarab_level       = debug_levels["debug_scarab_level"]
+  debug_interfile_communication_level = debug_levels_config["debug_interfile_communication_level"]
+  debug_optimizer_stats_level         = debug_levels_config["debug_optimizer_stats_level"]
+  debug_dynamics_level                = debug_levels_config["debug_dynamics_level"]
+  debug_configuration_level           = debug_levels_config["debug_configuration_level"]
+  debug_build_level                   = debug_levels_config["debug_build_level"]
+  utils.debug_shell_calls_level       = debug_levels_config["debug_shell_calls_level"]
+  debug_batching_level                = debug_levels_config["debug_batching_level"]
+  scarabizor.debug_scarab_level       = debug_levels_config["debug_scarab_level"]
 
   # Set the debugging levels to the plant_runner module.
   plant_runner.debug_interfile_communication_level = debug_interfile_communication_level
