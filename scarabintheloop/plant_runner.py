@@ -37,7 +37,7 @@ from typing import List, Set, Dict, Tuple, Union
 try:
   # Ensure that assertions are enabled.
   assert False
-  raise Exception('Python assertions are not working. This tool relies on Python assertions to do its job. Possible causes are running with the "-O" flag or running a precompiled (".pyo" or ".pyc") module.')
+  raise Exception('Python assertions are not working. This tool relies on Python assertions to fail quickly when problems arise. Possible causes for assertions being disabled are running with the "-O" flag or running a precompiled (".pyo" or ".pyc") module.')
 except AssertionError:
     pass
 
@@ -89,25 +89,7 @@ class PipeReader:
     stat_info = os.stat(self.filename)
   
     # Check if the file size is greater than zero (some data has been written)
-    if stat_info.st_size > 0:
-      return True
-    return False
-
-    # Open the pipe in non-blocking mode to check if it's ready
-    fd = os.open(self.filename, os.O_RDONLY | os.O_NONBLOCK)
-
-    try:
-      # Use select to block until the pipe has data available
-      print(f"Waiting for data in {self.filename}...")
-      ready, _, _ = select.select([fd], [], [])
-      
-      if ready:
-        print(f"{self.filename} has data available.")
-      else:
-        raise ValueError(f'Expected pipe to be ready')
-        
-    finally:
-      os.close(fd)
+    return stat_info.st_size > 0
 
 class PipeFloatReader(PipeReader):
   
@@ -132,8 +114,7 @@ class DelayProvider(ABC):
     """ 
     return t_delay, metadata 
     """
-    # raise NotImplementedError(f'get_delay must be implemented by a subclass of DelayProvider.')
-    return t_delay, instruction_count, cycles_count
+    pass # Abstract method must be overridden.
 
 class ScarabDelayProvider(DelayProvider):
 
@@ -936,7 +917,7 @@ def get_u(t, x, u_before, pending_computation_before: ComputationData, controlle
   Returns: u, u_delay, u_pending, u_pending_time, metadata,
   where u is the value of u that should start being applied immediately (at t). 
   
-  If the updated value requires calling the controller, then u_delay  
+  If the updated value requires calling the controller, then u_delay does so.
 
   This function is tested in <root>/tests/test_scarabintheloop_plant_runner.py/Test_get_u
   """
@@ -1035,7 +1016,6 @@ def controller_interface_factory(controller_interface_selection, computation_del
     raise ValueError(f'Unexpected controller_interface: {controller_interface}')
 
   try:
-    controller_interface.open()
     yield controller_interface.open()
   finally:
     controller_interface.close()
@@ -1125,7 +1105,7 @@ def run(sim_dir: str, config_data: dict, evolveState) -> dict:
         # Save the data.
         time_step_series.append(t_end=t_end, 
                                 x_end=x_end, 
-                                u=u_after, 
+                                u    =u_after, 
                                 pending_computation=pending_computation_after, 
                                 t_mid=t_mid, 
                                 x_mid=x_mid)
@@ -1143,13 +1123,14 @@ def run(sim_dir: str, config_data: dict, evolveState) -> dict:
 
         # Update values:
         u_before = u_after
-        x_start = x_end
+        x_start  = x_end
         pending_computation_before = pending_computation_after
       
       time_step_series.finish()
     except (DataNotRecievedViaFileError, BrokenPipeError) as err:
       time_step_series.finish(repr(err))
       traceback.print_exc()
+      raise err
 
   print(f'time_step_series at end of run(): {time_step_series}')
   return time_step_series

@@ -19,12 +19,8 @@ import traceback
 from contextlib import redirect_stdout
 from scarabintheloop.utils import *
 
-
 # Type hinting.
 from typing import List, Set, Dict, Tuple, Union
-
-# from scarab_globals import *
-# from scarab_globals import scarab_paths
 
 import scarabintheloop.scarabizor as scarabizor
 
@@ -595,12 +591,12 @@ def getSimulationExecutor(sim_dir, sim_config, controller_log, plant_log):
     max_time_steps = sim_config["max_time_steps"]
     sample_time = sim_config['system_parameters']["sample_time"]
     # Create a list of delays that are shorter than the sample time
-    fake_delays = [0.5*sample_time]*max_time_steps
+    fake_delays = [0.1*sample_time]*max_time_steps
 
     # Update one of the queued delays to be longer than the sample time
     index_for_delay = 2
     if len(fake_delays) >= index_for_delay+1:
-      fake_delays[index_for_delay] = 1.5*sample_time
+      fake_delays[index_for_delay] = 1.1*sample_time
   # else:
   #   raise ValueError(f'Not using use_fake_delays is currently disabled.')
     

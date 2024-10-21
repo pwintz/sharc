@@ -52,7 +52,6 @@ Eigen::IOFormat fmt_high_precision(20, // precision
 
 inline void assertFileExists(const std::string& name) {
   // Check that a file exists.
-  // std::cout << "Checking if \"" + name + "\" exists." << std::endl;
   if (std::filesystem::exists(name)){
     return;
   } else {
@@ -523,7 +522,7 @@ int main()
 
   // PRINT_WITH_FILE_LOCATION("Closing optimizer_info_out_file...")
   // optimizer_info_out_file.close();
-  PRINT_WITH_FILE_LOCATION("Finished closing files. All done!.")
+  PRINT("Finished closing files. All done!.")
 
   return 0;
 }
