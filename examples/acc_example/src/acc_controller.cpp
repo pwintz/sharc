@@ -255,6 +255,13 @@ class PipeVectorWriter : public PipeWriter {
     }
 };
 
+nlohmann::json readJson(std::string file_path) {
+  assertFileExists(file_path);
+  std::ifstream json_file(file_path);
+  nlohmann::json json_data(json::parse(json_file));
+  json_file.close();
+  return json_data;
+}
 
 int main()
 // int main(int argc, char *argv[])
@@ -296,19 +303,16 @@ int main()
   PipeDoubleReader delays_reader(sim_dir + "t_delay_py_to_c++");
   std::string optimizer_info_out_filename = sim_dir + "optimizer_info.csv";
 
+
   // Open and read JSON 
-  std::string config_file_path            = sim_dir + "config.json";
-  assertFileExists(config_file_path);
-  std::ifstream config_json_file(config_file_path);
-  nlohmann::json json_data(json::parse(config_json_file));
-  config_json_file.close();
+  nlohmann::json json_data = readJson(sim_dir + "config.json");
 
   int max_time_steps = json_data.at("max_time_steps");
 
-  auto debug_config = json_data["==== Debgugging Levels ===="];
-  debug_interfile_communication_level = debug_config["debug_interfile_communication_level"];
-  debug_optimizer_stats_level = debug_config["debug_optimizer_stats_level"];
-  debug_dynamics_level = debug_config["debug_dynamics_level"];
+  nlohmann::json debug_config = json_data.at("==== Debgugging Levels ====");
+  debug_interfile_communication_level = debug_config.at("debug_interfile_communication_level");
+  debug_optimizer_stats_level = debug_config.at("debug_optimizer_stats_level");
+  debug_dynamics_level = debug_config.at("debug_dynamics_level");
 
   bool use_state_after_delay_prediction = json_data.at("system_parameters").at("mpc_options").at("use_state_after_delay_prediction");
 
@@ -361,7 +365,7 @@ int main()
   double t_delay_prev = 0;
 
   #if defined(USE_EXECUTION_DRIVEN_SCARAB)
-    if (!json_data["Simulation Options"]["parallel_scarab_simulation"]) {
+    if (!json_data.at("Simulation Options").at("Simulation Options")) {
       scarab_begin(); // Tell Scarab to stop "fast forwarding". This is needed for '--pintool_args -fast_forward_to_start_inst 1'
     }
   #endif
