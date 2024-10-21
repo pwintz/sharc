@@ -1032,6 +1032,7 @@ def run(sim_dir: str, config_data: dict, evolveState) -> dict:
   m = config_data["system_parameters"]["input_dimension"] 
   first_time_index = config_data['first_time_index']
   use_fake_scarab = config_data['Simulation Options']["use_fake_delays"]
+  only_update_control_at_sample_times = config_data["only_update_control_at_sample_times"]
 
   computation_delay_provider = computation_delay_provider_factory(config_data["Simulation Options"]["in-the-loop_delay_provider"], sim_dir, sample_time, use_fake_scarab)
 
@@ -1084,15 +1085,16 @@ def run(sim_dir: str, config_data: dict, evolveState) -> dict:
         if pending_computation_after.delay and pending_computation_after.delay > 2*sample_time:
           raise ValueError("Missing computation by multiple time steps is not supported, yet.")
 
-        if pending_computation_after.delay < sample_time:
+        if only_update_control_at_sample_times or pending_computation_after.delay >= sample_time:
+          # Evolve state for entire time step and then update u_after
+          (t_end, x_end) = evolveState(t_start, x_start, u_after, t_end)
+        else:
           # Evolve the state halfway and then update u.
           t_mid = pending_computation_after.t_end
           u_mid = pending_computation_after.u
           (t_mid, x_mid) = evolveState(t_start, x_start, u_after, t_mid)
           (t_end, x_end) = evolveState(t_mid,   x_mid,     u_mid, t_end)
-        else: #u_delay and u_delay == sample_time:
-          # Evolve state for entire time step and then update u_after
-          (t_end, x_end) = evolveState(t_start, x_start, u_after, t_end)
+          assert pending_computation_after.delay < sample_time
 
         # Check that the output of x_end is the expected type and shape.
         assert_is_column_vector(x_end)
