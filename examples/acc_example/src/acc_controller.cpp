@@ -116,74 +116,146 @@ std::vector<double> matToStdVector(mat<rows,cols>& matrix){
 int debug_interfile_communication_level;
 int debug_optimizer_stats_level;
 int debug_dynamics_level;
-// Eigen::IOFormat fmt(4, 0, ", ", "\n", "", "");
 
 std::string example_path;
 
-template<int rows>
-void sendCVec(std::string label, int i_loop, mpc::cvec<rows> x, std::ofstream& outfile) 
-{
-  auto out_str = x.transpose().format(fmt_high_precision);
-  if (debug_interfile_communication_level >= 1) 
-  {
-    PRINT_WITH_FILE_LOCATION("Send \"" << label << "\" to Python: " << out_str);
-  } 
-  outfile << "Loop " << i_loop << ": " << out_str << std::endl;
-  if (debug_interfile_communication_level >= 2) 
-  {
-    PRINT_WITH_FILE_LOCATION("SENT \"" << label << "\" to Python: " << out_str);
-  } 
-}
+class PipeReader {
+  protected:
+    std::string filename;
+    std::ifstream pipe_file;
 
-void sendDouble(std::string label, int i_loop, double x, std::ofstream& outfile) 
-{
-  if (debug_interfile_communication_level >= 1) 
-  {
-    PRINT_WITH_FILE_LOCATION(label << " (send to Python): " << x);
-  } 
-  outfile << "Loop " << i_loop << ": " << x << std::endl;
-}
-
-
-template<int rows>
-void readVec(std::string label, std::ifstream& x_infile, mpc::cvec<rows>& x) {
-    std::string x_in_line_from_py;
-
-    // Check debug level and print the appropriate message
-    if (debug_interfile_communication_level >= 2) {
-        PRINT_WITH_FILE_LOCATION("Getting '" << label << "' line from Python: ");
+  public:
+    PipeReader(std::string _filename) {
+      filename = _filename;
     }
 
-    // Get the line from the file
-    std::getline(x_infile, x_in_line_from_py);
-
-    // Parse the line into the x object
-    std::stringstream x_ss(x_in_line_from_py);
-    for (int j_entry = 0; j_entry < x.rows(); j_entry++) {
-        char comma; // to read and discard the comma
-        x_ss >> x(j_entry) >> comma;
-    }
-}
-
-void readDouble(std::string label, std::ifstream& value_infile, double& value) {
-    // Check debug level and print the appropriate message
-    if (debug_interfile_communication_level >= 2) {
-        PRINT_WITH_FILE_LOCATION("Getting '" << label << "' line from Python...");
+    void open() {
+      assertFileExists(filename);
+      PRINT_WITH_FILE_LOCATION("Opening " << filename << ". Waiting for writer...");
+      pipe_file.open(filename, std::ofstream::in);
     }
 
-    std::string value_in_line_from_py;
+    void close() {
+      PRINT_WITH_FILE_LOCATION("Closing " << filename << "...")
+      pipe_file.close();
+    }
+};
 
-    std::getline(value_infile, value_in_line_from_py);
-    if (debug_interfile_communication_level >= 2)
+class PipeDoubleReader : public PipeReader {
+  public:
+    // Constructor (call parent constructor).
+    PipeDoubleReader (std::string filename) : PipeReader (filename) {}
+
+    void read(std::string label, double& value) {
+      // Check debug level and print the appropriate message
+      if (debug_interfile_communication_level >= 2) {
+          PRINT_WITH_FILE_LOCATION("Getting '" << label << "' line from Python...");
+      }
+
+      std::string value_in_line_from_py;
+
+      std::getline(pipe_file, value_in_line_from_py);
+      if (debug_interfile_communication_level >= 2)
+      {
+        PRINT_WITH_FILE_LOCATION("Lines received from Python:")
+        PRINT_WITH_FILE_LOCATION("\t" << label << ": " << value_in_line_from_py);
+      }
+
+      // Create a stringstream to parse the string
+      std::stringstream value_ss(value_in_line_from_py);
+      value_ss >> value;
+  }
+};
+
+class PipeVectorReader : public PipeReader {
+  public:
+    // Constructor (call parent constructor).
+    PipeVectorReader (std::string filename) : PipeReader (filename) {}
+    
+    template<int rows>
+    void read(std::string label, mpc::cvec<rows>& x) {
+        std::string x_in_line_from_py;
+
+        // Check debug level and print the appropriate message
+        if (debug_interfile_communication_level >= 2) {
+            PRINT_WITH_FILE_LOCATION("Getting '" << label << "' line from Python: ");
+        }
+
+        // Get the line from the file
+        std::getline(pipe_file, x_in_line_from_py);
+
+        // Parse the line into the x object
+        std::stringstream x_ss(x_in_line_from_py);
+        for (int j_entry = 0; j_entry < x.rows(); j_entry++) {
+            char comma; // to read and discard the comma
+            x_ss >> x(j_entry) >> comma;
+        }
+
+        if (debug_interfile_communication_level >= 2) {
+          PRINT("Received " << label << "=" << x.transpose().format(fmt) << " from " << filename);
+        }
+    }
+};
+
+
+class PipeWriter {
+  protected:
+    std::string filename;
+    std::ofstream pipe_file;
+
+  public:
+    PipeWriter(std::string _filename) {
+      filename = _filename;
+    }
+
+    void open() {
+      assertFileExists(filename);
+      PRINT_WITH_FILE_LOCATION("Opening " << filename << ". Waiting for reader...");
+      pipe_file.open(filename, std::ofstream::out);
+    }
+
+    void close() {
+      PRINT_WITH_FILE_LOCATION("Closing " << filename << "...")
+      pipe_file.close();
+    }
+};
+
+class PipeDoubleWriter : public PipeWriter {
+  public:
+    // Constructor (call parent constructor).
+    PipeDoubleWriter (std::string filename) : PipeWriter (filename) {}
+
+    void write(std::string label, int i_loop, double x) 
     {
-      PRINT_WITH_FILE_LOCATION("Lines received from Python:")
-      PRINT_WITH_FILE_LOCATION("\t" << label << ": " << value_in_line_from_py);
+      if (debug_interfile_communication_level >= 1) 
+      {
+        PRINT_WITH_FILE_LOCATION(label << " (send to Python): " << x);
+      } 
+      pipe_file << "Loop " << i_loop << ": " << x << std::endl;
     }
+};
 
-    // Create a stringstream to parse the string
-    std::stringstream value_ss(value_in_line_from_py);
-    value_ss >> value;
-}
+class PipeVectorWriter : public PipeWriter {
+  public:
+    // Constructor (call parent constructor).
+    PipeVectorWriter (std::string filename) : PipeWriter (filename) {}
+
+    template<int rows>
+    void write(std::string label, int i_loop, mpc::cvec<rows> x) 
+    {
+      auto out_str = x.transpose().format(fmt_high_precision);
+      if (debug_interfile_communication_level >= 1) 
+      {
+        PRINT_WITH_FILE_LOCATION("Send \"" << label << "\" to Python: " << out_str);
+      } 
+      pipe_file << "Loop " << i_loop << ": " << out_str << std::endl;
+      if (debug_interfile_communication_level >= 2) 
+      {
+        PRINT_WITH_FILE_LOCATION("SENT \"" << label << "\" to Python: " << out_str);
+      } 
+    }
+};
+
 
 int main()
 // int main(int argc, char *argv[])
@@ -215,23 +287,19 @@ int main()
   std::string sim_dir = cwd + "/";
   PRINT_WITH_FILE_LOCATION("Simulation directory: " << sim_dir)
 
-  std::string config_file_path            = sim_dir + "config.json";
-  std::string x_predict_out_filename      = sim_dir + "x_predict_c++_to_py";
-  std::string t_predict_out_filename      = sim_dir + "t_predict_c++_to_py";
-  std::string iterations_out_filename     = sim_dir + "iterations_c++_to_py";
-  std::string u_out_filename              = sim_dir + "u_c++_to_py";
-  std::string x_in_filename               = sim_dir + "x_py_to_c++";
-  std::string t_delays_in_filename        = sim_dir + "t_delay_py_to_c++";
+  // Writers
+  PipeDoubleWriter    t_predict_writer(sim_dir + "t_predict_c++_to_py");
+  PipeVectorWriter x_prediction_writer(sim_dir + "x_predict_c++_to_py");
+  PipeDoubleWriter   iterations_writer(sim_dir + "iterations_c++_to_py");
+  PipeVectorWriter            u_writer(sim_dir + "u_c++_to_py");
+  // Readers
+  PipeVectorReader      x_reader(sim_dir + "x_py_to_c++");
+  PipeDoubleReader delays_reader(sim_dir + "t_delay_py_to_c++");
   std::string optimizer_info_out_filename = sim_dir + "optimizer_info.csv";
 
+  // Open and read JSON 
+  std::string config_file_path            = sim_dir + "config.json";
   assertFileExists(config_file_path);
-  assertFileExists(x_predict_out_filename);
-  assertFileExists(t_predict_out_filename);
-  assertFileExists(iterations_out_filename);
-  assertFileExists(u_out_filename);
-  assertFileExists(x_in_filename);
-  assertFileExists(t_delays_in_filename);
-  
   std::ifstream config_json_file(config_file_path);
   nlohmann::json json_data(json::parse(config_json_file));
   config_json_file.close();
@@ -258,42 +326,21 @@ int main()
   optimizer_info_out_file << "num_iterations,cost,primal_residual,dual_residual" << std::endl;
 
   // I/O Setup
-  std::ofstream x_predict_outfile;
-  std::ofstream t_predict_outfile;
-  std::ofstream iterations_outfile;
-  std::ofstream u_outfile;
-  std::ifstream x_infile;
-  std::ifstream t_delays_infile;
 
   // Open the pipes to Python. Each time we open one of these streams, 
   // this process pauses until it is connected to the Python process (or another process). 
   // The order needs to match the order in the reader process.
   PRINT_WITH_FILE_LOCATION("Starting Pipe Readers/Writers setup.");
 
-  assertFileExists(u_out_filename);
-  PRINT_WITH_FILE_LOCATION("Opening " << u_out_filename << ". Waiting for reader.");
-  u_outfile.open(u_out_filename, std::ofstream::out);
-
-  assertFileExists(x_predict_out_filename);
-  PRINT_WITH_FILE_LOCATION("Opening " << x_predict_out_filename << ". Waiting for reader.");
-  x_predict_outfile.open(x_predict_out_filename, std::ofstream::out);
-
-  assertFileExists(t_predict_out_filename);
-  PRINT_WITH_FILE_LOCATION("Opening " << t_predict_out_filename << ". Waiting for reader.");
-  t_predict_outfile.open(t_predict_out_filename, std::ofstream::out);
-
-  assertFileExists(iterations_out_filename);
-  PRINT_WITH_FILE_LOCATION("Opening " << iterations_out_filename << ". Waiting for reader.");
-  iterations_outfile.open(iterations_out_filename, std::ofstream::out);
+  // Open out files.
+  u_writer.open();
+  x_prediction_writer.open();
+  t_predict_writer.open();
+  iterations_writer.open();
 
   // In files.
-  assertFileExists(x_in_filename);
-  PRINT_WITH_FILE_LOCATION("Opening " << x_in_filename << ". Waiting for reader.");
-  x_infile.open(x_in_filename, std::ofstream::in);
-
-  assertFileExists(t_delays_in_filename);
-  PRINT_WITH_FILE_LOCATION("Opening " << t_delays_in_filename << ". Waiting for reader.");
-  t_delays_infile.open(t_delays_in_filename, std::ofstream::in);
+  x_reader.open();
+  delays_reader.open();
   PRINT_WITH_FILE_LOCATION("All files open.");
 
   // State vector state.
@@ -326,8 +373,7 @@ int main()
     PRINT(std::endl << "====== Starting loop #" << i+1 << " of " << max_time_steps << " ======");
     
     // Read the value of 'x' for this iteration.
-    readVec("x", x_infile, modelX);
-    PRINT("x=" << modelX.transpose().format(fmt));
+    x_reader.read("x", modelX);
     // PRINT("u=" << u.transpose().format(fmt));
 
     // Begin a batch of Scarab statistics
@@ -444,13 +490,12 @@ int main()
     // There are <prediction_horizon> many rows. 
     // OptSequence optseq = lmpc.getOptimalSequence();
 
-    sendCVec("u",               i, u,          u_outfile);
-    sendCVec("x prediction",    i, x_predict,  x_predict_outfile);
-    sendDouble("t prediction ", i, t_predict,  t_predict_outfile);
-    // sendDouble("iterations ",   i, iterations, iterations_outfile);
-    sendDouble("iterations ", i, -1, iterations_outfile);
+    u_writer.write(                      "u", i, u);
+    x_prediction_writer.write("x prediction", i, x_predict);
+    t_predict_writer.write( "t prediction", i, t_predict);
+    iterations_writer.write( "iterations ", i, -1); // TODO: Fix iterations. Currently sending "-1" because we aren't reading the iterations.
 
-    readDouble("t_delay", t_delays_infile, t_delay_prev);
+    delays_reader.read("t_delay", t_delay_prev);
     
     if (debug_interfile_communication_level >= 1) 
     {
@@ -469,23 +514,12 @@ int main()
   } 
   PRINT_WITH_FILE_LOCATION("Finished looping through " << max_time_steps << " time steps. Closing files...")
 
-  PRINT_WITH_FILE_LOCATION("Closing u_outfile...")
-  u_outfile.close();
-  
-  PRINT_WITH_FILE_LOCATION("Closing t_predict_outfile...")
-  t_predict_outfile.close();
-  
-  PRINT_WITH_FILE_LOCATION("Closing x_predict_outfile...")
-  x_predict_outfile.close();
-  
-  PRINT_WITH_FILE_LOCATION("Closing iterations_outfile...")
-  iterations_outfile.close();
-  
-  PRINT_WITH_FILE_LOCATION("Closing x_infile...")
-  x_infile.close();
-  
-  PRINT_WITH_FILE_LOCATION("Closing t_delays_infile...")
-  t_delays_infile.close();
+  u_writer.close();
+  x_prediction_writer.close();
+  t_predict_writer.close();
+  iterations_writer.close();
+  x_reader.close();
+  delays_reader.close();
 
   // PRINT_WITH_FILE_LOCATION("Closing optimizer_info_out_file...")
   // optimizer_info_out_file.close();
