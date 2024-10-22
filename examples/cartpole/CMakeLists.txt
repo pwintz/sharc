@@ -44,12 +44,11 @@ function(assert_env_var var_name)
 endfunction()
 
 # Check that expected environmental variables are defined.
-assert_env_var(CONTROLLERS_DIR)
-assert_env_var(DYNAMORIO_HOME)
-assert_env_var(SCARAB_ROOT)
+assert_env_var(RESOURCES_DIR)
 
 # Define the base directories (set this to where the controllers folder is)
-set(CONTROLLERS_DIR $ENV{CONTROLLERS_DIR})
+set(RESOURCES_DIR $ENV{RESOURCES_DIR})
+set(CONTROLLERS_DIR ${RESOURCES_DIR}/controllers)
 set(CONTROLLERS_INC ${CONTROLLERS_DIR}/include)
 set(CONTROLLERS_SRC ${CONTROLLERS_DIR}/src)
 # Add source files dynamically
@@ -94,11 +93,8 @@ endif(COMMAND cmake_policy)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
 
 # Check if SCARAB_ROOT is defined and add it to include directories
-if(DEFINED ENV{SCARAB_ROOT})
-    include_directories($ENV{SCARAB_ROOT}/utils)
-else()
-    message(FATAL_ERROR "SCARAB_ROOT environment variable is not set")
-endif()
+assert_env_var(SCARAB_ROOT)
+include_directories($ENV{SCARAB_ROOT}/utils)
 
 # Preprocessor definitions
 add_definitions(
@@ -121,11 +117,8 @@ target_link_libraries(
 )
 
 # Check if DYNAMORIO_HOME is defined and set DynamoRIO_DIR
-if(DEFINED ENV{DYNAMORIO_HOME})
-    set(DynamoRIO_DIR $ENV{DYNAMORIO_HOME}/cmake CACHE PATH "Path to DynamoRIO")
-else()
-    message(FATAL_ERROR "DYNAMORIO_HOME environment variable is not set")
-endif()
+assert_env_var(DYNAMORIO_HOME)
+set(DynamoRIO_DIR $ENV{DYNAMORIO_HOME}/cmake CACHE PATH "Path to DynamoRIO")
 
 find_package(DynamoRIO)
 if (NOT DynamoRIO_FOUND)

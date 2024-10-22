@@ -1,16 +1,20 @@
 #include <iostream>
 
-#include <mpc/LMPC.hpp>
-#include <mpc/Utils.hpp>
+#include <Eigen/Core>
 #include <Eigen/Eigenvalues>
-#include <unsupported/Eigen/MatrixFunctions>
-#include <boost/algorithm/string/predicate.hpp>
 #include <regex> // Used to find and rename Dynamorio trace directories.
 #include "controller.h"
 
 #include "nlohmann/json.hpp"
 using json = nlohmann::json;
-using namespace mpc;
+
+template <int M = Eigen::Dynamic,
+          int N = Eigen::Dynamic>
+using mat = Eigen::Matrix<double, M, N>;
+
+// Define a column vector type.
+template <int N = Eigen::Dynamic>
+using cvec = Eigen::Matrix<double, N, 1>;
 
 #ifdef USE_DYNAMORIO
   #include "dr_api.h"
@@ -169,7 +173,7 @@ class PipeVectorReader : public PipeReader {
     PipeVectorReader (std::string filename) : PipeReader (filename) {}
     
     template<int rows>
-    void read(std::string label, mpc::cvec<rows>& x) {
+    void read(std::string label, cvec<rows>& x) {
         std::string x_in_line_from_py;
 
         // Check debug level and print the appropriate message
@@ -237,7 +241,7 @@ class PipeVectorWriter : public PipeWriter {
     PipeVectorWriter (std::string filename) : PipeWriter (filename) {}
 
     template<int rows>
-    void write(std::string label, int i_loop, mpc::cvec<rows> x) 
+    void write(std::string label, int i_loop, cvec<rows> x) 
     {
       auto out_str = x.transpose().format(fmt_high_precision);
       if (debug_interfile_communication_level >= 1) 
@@ -263,7 +267,7 @@ nlohmann::json readJson(std::string file_path) {
 int main()
 // int main(int argc, char *argv[])
 {
-  PRINT("==== Start of acc_controller.main() ====")
+  PRINT("==== Start of __FILE__.main() ====")
   #ifdef USE_DYNAMORIO
     PRINT_WITH_FILE_LOCATION("Using DynamoRio.")
 
@@ -335,17 +339,17 @@ int main()
   PRINT_WITH_FILE_LOCATION("All files open.");
 
   // State vector state.
-  mpc::cvec<Tnx> modelX, modeldX;
-  mpc::cvec<Tnx> x_predict;
+  cvec<Tnx> modelX, modeldX;
+  cvec<Tnx> x_predict;
   
   // Predicted time of finishing computation.
   double t_predict;
 
   // Output vector.
-  mpc::cvec<Tny> y;
+  cvec<Tny> y;
 
   // Create a vector for storing the control input from the previous time step.
-  mpc::cvec<Tnu> u;
+  cvec<Tnu> u;
   
   loadMatrixValuesFromJson(u, json_data, "u0");
 
@@ -377,8 +381,8 @@ int main()
         PRINT_WITH_FILE_LOCATION("Starting region of interest without statistics recording.")
     #endif
 
-    if (use_state_after_delay_prediction)
-    {
+    // if (use_state_after_delay_prediction)
+    // {
       // t_predict = t_delay_prev;
       // discretization<Tnx, Tnu, Tndu>(Ac, Bc, Bc_disturbance, t_predict, Ad_predictive, Bd_predictive, Bd_disturbance_predictive);
       
@@ -393,10 +397,10 @@ int main()
       //   PRINT("====== Bd_disturbance_predictive: ")
       //   PRINT(Bd_disturbance_predictive)
       // }
-    } else {
+    // } else {
       x_predict = modelX;
       t_predict = 0;
-    }
+    // }
     
     if (debug_dynamics_level >= 1) 
     {
@@ -427,7 +431,7 @@ int main()
       PRINT("DynamoRIO Trace Files in " << folder.string())
 
       // Regex to match stings like "<path to sim dir>/drmemtrace.acc_controller_5_2_dynamorio.268046.6519.dir"
-      std::regex dynamorio_trace_filename_regex("(.*)drmemtrace\\.acc_controller_\\d_\\d_dynamorio\\.\\d+\\.\\d+\\.dir");
+      std::regex dynamorio_trace_filename_regex("(.*)drmemtrace\\.main_controller\\w*_dynamorio\\.\\d+\\.\\d+\\.dir");
       
       bool is_first_dir_found = true;
       for (const auto& folder_entry : std::filesystem::directory_iterator(folder)) {

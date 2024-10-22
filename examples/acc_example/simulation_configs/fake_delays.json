@@ -38,7 +38,7 @@
       },
       "mpc_options":{
         "prediction_horizon": 5,
-        "control_horizon": 3
+        "control_horizon": 2
       }
     }
   }

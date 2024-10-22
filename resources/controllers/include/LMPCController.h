@@ -27,6 +27,7 @@ private:
     double sample_time;
     double lead_car_input;
     double tau;
+    bool use_state_after_delay_prediction;
     
     // MPC Computation Result
     Result<Tnu> lmpc_step_result;

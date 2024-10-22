@@ -22,7 +22,7 @@ set(CMAKE_CXX_COMPILER g++-11)
 set(CMAKE_C_COMPILER gcc-11)
 
 # Define the executable name based on horizons
-set(EXECUTABLE_NAME acc_controller_${PREDICTION_HORIZON}_${CONTROL_HORIZON})
+set(EXECUTABLE_NAME main_controller_${PREDICTION_HORIZON}_${CONTROL_HORIZON})
 if(USE_DYNAMORIO)
   set(EXECUTABLE_NAME ${EXECUTABLE_NAME}_dynamorio)
 # elseif(USE_EXECUTION_DRIVEN_SCARAB)
@@ -48,12 +48,12 @@ function(assert_env_var var_name)
 endfunction()
 
 # Check that expected environmental variables are defined.
-assert_env_var(CONTROLLERS_DIR)
-assert_env_var(DYNAMORIO_HOME)
+assert_env_var(RESOURCES_DIR)
 assert_env_var(SCARAB_ROOT)
 
 # Define the base directories (set this to where the controllers folder is)
-set(CONTROLLERS_DIR $ENV{CONTROLLERS_DIR})
+set(RESOURCES_DIR $ENV{RESOURCES_DIR})
+set(CONTROLLERS_DIR ${RESOURCES_DIR}/controllers)
 set(CONTROLLERS_INC ${CONTROLLERS_DIR}/include)
 set(CONTROLLERS_SRC ${CONTROLLERS_DIR}/src)
 # Add source files dynamically
@@ -63,11 +63,9 @@ message("    CONTROLLERS_INC=${CONTROLLERS_INC}")
 message("    CONTROLLERS_SRC=${CONTROLLERS_SRC}")
 message("CONTROLLERS_SOURCES=${CONTROLLERS_SOURCES}")
 
-set(SOURCES
-    src/acc_controller.cpp
-    ${CONTROLLERS_SOURCES}
-)
-# Add executable
+set(SOURCES ${CONTROLLERS_SOURCES})
+
+# Add executable.
 add_executable(${EXECUTABLE_NAME} ${SOURCES})
 
 # Include directories
@@ -80,6 +78,7 @@ target_include_directories(
   /usr/local/include/osqp
   ../libmpc/include/
   ${CONTROLLERS_INC}
+  ${RESOURCES_DIR}/include
 )
 
 target_link_directories(
@@ -98,11 +97,8 @@ endif(COMMAND cmake_policy)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
 
 # Check if SCARAB_ROOT is defined and add it to include directories
-if(DEFINED ENV{SCARAB_ROOT})
-    include_directories($ENV{SCARAB_ROOT}/utils)
-else()
-    message(FATAL_ERROR "SCARAB_ROOT environment variable is not set")
-endif()
+assert_env_var(SCARAB_ROOT)
+include_directories($ENV{SCARAB_ROOT}/utils)
 
 # Preprocessor definitions
 add_definitions(
@@ -132,11 +128,8 @@ target_link_libraries(
 )
 
 # Check if DYNAMORIO_HOME is defined and set DynamoRIO_DIR
-if(DEFINED ENV{DYNAMORIO_HOME})
-    set(DynamoRIO_DIR $ENV{DYNAMORIO_HOME}/cmake CACHE PATH "Path to DynamoRIO")
-else()
-    message(FATAL_ERROR "DYNAMORIO_HOME environment variable is not set")
-endif()
+assert_env_var(DYNAMORIO_HOME)
+set(DynamoRIO_DIR $ENV{DYNAMORIO_HOME}/cmake CACHE PATH "Path to DynamoRIO")
 
 find_package(DynamoRIO)
 if (NOT DynamoRIO_FOUND)

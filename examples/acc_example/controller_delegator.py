@@ -32,7 +32,7 @@ def get_controller_executable(build_config:dict) -> str:
 
   use_fake_delays = build_config["Simulation Options"]["use_fake_delays"]
 
-  executable_name = f"acc_controller_{prediction_horizon}_{control_horizon}"
+  executable_name = f"main_controller_{prediction_horizon}_{control_horizon}"
 
   use_dynamorio = use_parallel_simulation and not use_fake_delays
 

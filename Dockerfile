@@ -1,10 +1,24 @@
+# Configurations
 ARG USERNAME=dcuser
+ARG TIME_ZONE=America/Los_Angeles
+
+# By default, we set WORKSPACE_ROOT to be the user's home directory, but 
+# if running using dev-containers, this should be set in .devcontainer/devcontainer.json
+# to be the workspaceMount target path. 
+ARG WORKSPACE_ROOT=/home/$USERNAME
+
+# The "resources" directory contains files that were developed as a part of scarab-in-the-loop. 
+# For development, this directory should persist after a container is closed.
+ARG RESOURCES_DIR=$WORKSPACE_ROOT/resources
+
 ARG PIN_NAME=pin-3.15-98253-gb56e429b1-gcc-linux
 ARG PIN_ROOT=/$PIN_NAME
 ARG SCARAB_ROOT=/scarab
-ARG RESOURCES_DIR=/home/$USERNAME/resources/
-ARG TIME_ZONE=America/Los_Angeles
-ARG WORKSPACE_ROOT=/dev-workspace
+
+ARG DYNAMORIO_VERSION=DynamoRIO-Linux-9.0.19314
+ARG DYNAMORIO_HOME=/${DYNAMORIO_VERSION}
+
+ARG LIBMPC_DIR=/libmpc
 
 ##################################
 ############## BASE ##############
@@ -12,6 +26,12 @@ ARG WORKSPACE_ROOT=/dev-workspace
 FROM ubuntu:20.04 AS apt-base
 ARG USERNAME
 ARG TIME_ZONE
+ARG RESOURCES_DIR
+
+# Environment Variables
+ENV RESOURCES_DIR $RESOURCES_DIR
+# ENV CONTROLLERS_DIR "${RESOURCES_DIR}/controllers"
+# ENV DYNAMICS_DIR "${RESOURCES_DIR}/dynamics"
 
 # Set the timezone to avoid getting stuck on a prompt when installing packages with apt-get.
 RUN ln -fs /usr/share/zoneinfo/$TIME_ZONE /etc/localtime 
@@ -45,10 +65,10 @@ RUN useradd --create-home --home-dir /home/$USERNAME --shell /bin/bash --user-gr
 # When running with Dev Conatiners this is needed for some unknown reason.
 RUN chown -R $USERNAME:$USERNAME /home/$USERNAME
 
-# # Authorize SSH Host. Is this neccessary?
-RUN mkdir -p /home/$USERNAME/.ssh && \
-    chown -R $USERNAME:root /home/$USERNAME/.ssh && \
-    chmod 700 /home/$USERNAME/.ssh
+# # # Authorize SSH Host. Is this neccessary?
+# RUN mkdir -p /home/$USERNAME/.ssh && \
+#     chown -R $USERNAME:root /home/$USERNAME/.ssh && \
+#     chmod 700 /home/$USERNAME/.ssh
 
 ##############################
 # Non-root User Setup
@@ -182,17 +202,19 @@ RUN pip3 install -r $SCARAB_ROOT/bin/requirements.txt
 
 # Build Scarab.
 RUN cd $SCARAB_ROOT/src && make
-# Add the Scarab "src" directory to path. 
-ENV PATH "${PATH}:$SCARAB_ROOT/src"
 
-# TODO: Try this, to make the built Scarab binaries not in the source directory. 
-# RUN mkdir build && cd build && make $SCARAB_ROOT/src
-# # Add the Scarab "src" directory to 
-# ENV PATH "${PATH}:$SCARAB_ROOT/src"
+# Add Scarab bin folder to Python path so we can import scarab_globals from Python.
+ENV PYTHONPATH "${PYTHONPATH}:${SCARAB_ROOT}/bin"
+# Add the Scarab "src" directory to path. 
+ENV PATH "${PATH}:$SCARAB_ROOT:$SCARAB_ROOT/src:$SCARAB_ROOT/bin"
 
 FROM scarab	as base
 
 ARG USERNAME
+ARG RESOURCES_DIR
+
+# Copy the resources directory. 
+COPY --chown=$USERNAME resources $RESOURCES_DIR
 
 ARG PIN_ROOT
 ENV PIN_ROOT $PIN_ROOT
@@ -235,18 +257,8 @@ RUN yes | unminimize
 # Copy Bash configurations
 COPY --chown=$USERNAME .profile /home/$USERNAME/.bashrc
 
-# # Copy scarabintheloop module and add to path.
-# COPY --chown=$USERNAME scarabintheloop /home/$USERNAME/resources/scarabintheloop
-# 
-# RUN pip3 install -r /home/$USERNAME/resources/scarabintheloop/requirements.txt
-
-## If doing development on run_examples.py, then we want to use the version stored in dev-workspace.
-# ENV PYTHONPATH "${PYTHONPATH}:/home/$USERNAME/resources:${SCARAB_ROOT}/bin"
-# ENV PATH "${PATH}:/home/$USERNAME/resources/scarabintheloop/scripts:${SCARAB_ROOT}/bin"
-
-COPY scarabintheloop/requirements.txt scarabintheloop-requirements.txt
+COPY resources/scarabintheloop/requirements.txt scarabintheloop-requirements.txt
 RUN pip3 install -r scarabintheloop-requirements.txt && rm scarabintheloop-requirements.txt
-
 
 #####################################
 ############# DynamoRIO #############
@@ -257,32 +269,35 @@ RUN pip3 install -r scarabintheloop-requirements.txt && rm scarabintheloop-requi
 # RUN cd /home/$USERNAME/dynamorio && mkdir build && cd build && cmake .. && make
 
 # Set environment variables for the setup
-# ENV PROJECT_DIR=/home/$USERNAME/Project
-ENV RESOURCES_DIR=/home/$USERNAME/resources
-RUN mkdir -p $RESOURCES_DIR
-ARG DYNAMORIO_VERSION=DynamoRIO-Linux-9.0.19314
-ENV DYNAMORIO_HOME=$RESOURCES_DIR/$DYNAMORIO_VERSION
-# ARG PIN_NAME=pin-3.15-98253-gb56e429b1-gcc-linux
-# ARG PIN_ROOT=$RESOURCES_DIR/pin-3.15-98253-gb56e429b1-gcc-linux
+ARG DYNAMORIO_HOME
+ENV DYNAMORIO_HOME $DYNAMORIO_HOME 
+ARG DYNAMORIO_VERSION
 ENV SCARAB_ENABLE_PT_MEMTRACE=1
 ENV SCARAB_ENABLE_MEMTRACE=1 
 ENV LD_LIBRARY_PATH=$PIN_ROOT/extras/xed-intel64/lib:$PIN_ROOT/intel64/runtime/pincrt:$LD_LIBRARY_PATH
 
 # Download and extract DynamoRIO
-ADD https://github.com/DynamoRIO/dynamorio/releases/download/cronbuild-9.0.19314/$DYNAMORIO_VERSION.tar.gz $RESOURCES_DIR
-RUN cd $RESOURCES_DIR && \
-    tar -xzvf $DYNAMORIO_VERSION.tar.gz && \
-    rm $DYNAMORIO_VERSION.tar.gz 
+RUN mkdir -p $DYNAMORIO_HOME
+ADD https://github.com/DynamoRIO/dynamorio/releases/download/cronbuild-9.0.19314/$DYNAMORIO_VERSION.tar.gz $DYNAMORIO_VERSION.tar.gz
+# Extract DynamoRIO in the $DYNAMORIO_HOME directory. We use "--strip-components=1" to remove the top-level directory during extraction---otherwise 
+# the resulting path is something like 
+#   /DynamoRIO-Linux-9.0.19314/DynamoRIO-Linux-9.0.19314/<files>, 
+# whereas what we actually want is
+#   /DynamoRIO-Linux-9.0.19314/<files>
+RUN tar --extract --gzip --verbose --strip-components=1 -f $DYNAMORIO_VERSION.tar.gz --directory $DYNAMORIO_HOME && rm $DYNAMORIO_VERSION.tar.gz 
+
+
+### Setup scarabintheloop for development in a Dev Contiainer ###  
+ENV PYTHONPATH "${PYTHONPATH}:${RESOURCES_DIR}"
+ENV PATH "${PATH}:${RESOURCES_DIR}/scarabintheloop:${RESOURCES_DIR}/scarabintheloop/scripts"
+
 
 ########################
 ##### MPC EXAMPLES #####
 ########################
 FROM base	as mpc-examples-base
 ARG USERNAME
-ARG WORKSPACE_ROOT
-
-# RUN cmake .. && sudo cmake --install . # <- Run something like this to build libmpc in libmpc/build.
-ENV LIBMPC_INCLUDE $WORKSPACE_ROOT/libmpc/include/
+ARG RESOURCES_DIR
 
 RUN apt-get install --assume-yes --quiet=2 --no-install-recommends \
     # CMake build toolchain
@@ -301,120 +316,59 @@ RUN pip3 install -r acc-requirements.txt && rm acc-requirements.txt
 ##############################
 # libMPC++
 ##############################
-ADD https://github.com/pwintz/libmpc.git libmpc
-RUN ./libmpc/configure.sh
-RUN mkdir libmpc/build && cd libmpc/build && cmake .. && cmake --install .
+ARG LIBMPC_DIR 
+ENV LIBMPC_DIR $LIBMPC_DIR 
+ADD https://github.com/pwintz/libmpc.git $LIBMPC_DIR
+RUN $LIBMPC_DIR/configure.sh
+RUN mkdir $LIBMPC_DIR/build && cd  $LIBMPC_DIR/build && cmake .. && cmake --install .
 
+# Copy the example folders.
+COPY --chown=$USERNAME examples/acc_example $WORKSPACE_ROOT/examples/acc_example
 
-# ##############################
-# # Eigen
-# ##############################
-# RUN apt-get install --assume-yes --quiet=2 --no-install-recommends libeigen3-dev
-#     # && apt-get clean \
-#     # && rm -rf /var/lib/apt/lists/*
-# 
-# 
-# ##############################
-# # NL Optimization
-# ##############################
-# # Get the nlopt code from the GitHub repository. 
-# # By default, this excludes the .git folder.
-# ADD https://github.com/stevengj/nlopt.git /tmp/nlopt
-# RUN cd /tmp/nlopt \
-#     && mkdir build \
-#     && cd build \
-#     && cmake \
-#         -D CMAKE_BUILD_TYPE=Release \
-#         -D NLOPT_PYTHON=OFF \
-#         -D NLOPT_OCTAVE=OFF \
-#         -D NLOPT_MATLAB=OFF \
-#         -D NLOPT_GUILE=OFF \
-#         -D NLOPT_SWIG=OFF \
-#         .. \
-#     && make -j$(($(nproc)-1)) \
-#     && make install \
-#     && rm -rf /tmp/nlopt
-# 
-# 
-# ##############################
-# # OSQP Solver
-# ##############################
-# 
-# ARG OSQP_BRANCH=v0.6.3
-# ADD https://github.com/osqp/osqp.git#$OSQP_BRANCH /tmp/osqp
-# # RUN git clone --depth 1 --branch v0.6.3 --recursive https://github.com/osqp/osqp /tmp/osqp \
-# RUN cd /tmp/osqp \
-#     && mkdir build \
-#     && cd build \
-#     && cmake \ 
-#         -G "Unix Makefiles" \
-#         .. \
-#     && make -j$(($(nproc)-1)) \
-#     && make install \
-#     && rm -rf /tmp/*
-# # ENV OSQP_INCLUDE_DIR=/usr/local/include/osqp/
-# # ENV OSQP_LIBRARIES=/usr/local/lib/
-# 
-# 
-# ############################
-# # Catch2 - Testing Library #
-# ############################
-# ADD https://github.com/catchorg/Catch2.git /tmp/Catch2
-# RUN cd /tmp/Catch2 \
-#     && mkdir build \
-#     && cd build \
-#     && cmake \
-#     -D BUILD_TESTING=OFF \
-#     .. \
-#     && make -j$(($(nproc)-1)) \
-#     && make install \
-#     && rm -rf /tmp/*
-# 
-# # Update the linker to recognize recently added libraries. 
-# # See: https://stackoverflow.com/questions/480764/linux-error-while-loading-shared-libraries-cannot-open-shared-object-file-no-s
-# RUN ldconfig
+# Check that all of the expected directories exist.
+ARG PIN_ROOT
+ARG RESOURCES_DIR
+ARG SCARAB_ROOT
+ARG DYNAMORIO_HOME
+RUN test -e $PIN_ROOT/source
+RUN test -e $RESOURCES_DIR
+RUN test -e $SCARAB_ROOT
+RUN test -e $DYNAMORIO_HOME
+RUN test -e $LIBMPC_DIR/build
+RUN test -e $WORKSPACE_ROOT/examples/acc_example
 
 USER $USERNAME
-
-###################################
-## DevContainer for mpc-examples ##
-###################################
-FROM mpc-examples-base as mpc-examples-dev
-ARG USERNAME
-ARG WORKSPACE_ROOT
-
-ENV CONTROLLERS_DIR "${WORKSPACE_ROOT}/controllers"
-ENV DYNAMICS_DIR "${WORKSPACE_ROOT}/dynamics"
-
-### Setup scarabintheloop for development in a Dev Contiainer ###  
-ENV PYTHONPATH "${PYTHONPATH}:${WORKSPACE_ROOT}:${SCARAB_ROOT}/bin"
-ENV PATH "${PATH}:${WORKSPACE_ROOT}/scarabintheloop:${WORKSPACE_ROOT}/scarabintheloop/scripts:${SCARAB_ROOT}/bin"
-
-# For convenience, set the working to the ACC example. 
 WORKDIR ${WORKSPACE_ROOT}/examples/acc_example
 
-#################################################
-## Stand-alone mpc-examples (no dev container) ##
-#################################################
-FROM mpc-examples-base as mpc-examples
-
-COPY --chown=$USERNAME scarabintheloop $RESOURCES_DIR/scarabintheloop
-COPY --chown=$USERNAME dynamics $RESOURCES_DIR/dynamics
-COPY --chown=$USERNAME controllers $RESOURCES_DIR/controllers
-COPY --chown=$USERNAME examples/acc_example /home/$USERNAME/examples/acc_example
-# COPY --chown=$USERNAME libmpc /home/$USERNAME/libmpc
-
-# ENV LIBMPC_INCLUDE /home/$USERNAME/libmpc/include/
-
-ENV PYTHONPATH "${PYTHONPATH}:${RESOURCES_DIR}"
-ENV PATH "${PATH}:${RESOURCES_DIR}/scarabintheloop:${RESOURCES_DIR}/scarabintheloop/scripts"
-
-ENV CONTROLLERS_DIR "${RESOURCES_DIR}/controllers"
-ENV DYNAMICS_DIR "${RESOURCES_DIR}/dynamics"
-
-# Set the working directory
-WORKDIR /home/$USERNAME/examples/acc_example
-
-# USER $USERNAME
-
-# CMD run_scarabintheloop.py . && cd out/latest/default-settings && cat controller.log && cat plant_dynamics.logdocker system df
+# ###################################
+# ## DevContainer for mpc-examples ##
+# ###################################
+# FROM mpc-examples-base as mpc-examples-dev
+# ARG USERNAME
+# ARG WORKSPACE_ROOT
+# ARG RESOURCES_DIR
+# 
+# # # Create a Simlink from the 
+# # RUN ln -s /dev-workspace/resources $RESOURCES_DIR
+# # run rm -r 
+# 
+# 
+# # For convenience, set the working to the ACC example. 
+# WORKDIR ${WORKSPACE_ROOT}/examples/acc_example
+# 
+# #################################################
+# ## Stand-alone mpc-examples (no dev container) ##
+# #################################################
+# FROM mpc-examples-base as mpc-examples
+# ARG RESOURCES_DIR
+# ARG WORKSPACE_ROOT
+# 
+# # At this point, we have already created the resources directory, so we cannot copy the whole thing, but we want the local contents to be added to the existing remove directory. 
+# # COPY --chown=$USERNAME resources/controllers $RESOURCES_DIR/controllers
+# # COPY --chown=$USERNAME resources/dynamics $RESOURCES_DIR/dynamics
+# # COPY --chown=$USERNAME resources/include $RESOURCES_DIR/include
+# # COPY --chown=$USERNAME resources/scarabintheloop $RESOURCES_DIR/scarabintheloop
+# # ENV CONTROLLERS_DIR $RESOURCES_DIR/controllers
+# # ENV DYNAMICS_DIR $RESOURCES_DIR/dynamics
+# # Set the working directory
+# WORKDIR ${WORKSPACE_ROOT}/examples/acc_example
