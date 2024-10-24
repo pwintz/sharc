@@ -1045,8 +1045,9 @@ def run(sim_dir: str, config_data: dict, evolveState, controller_interface_selec
 
   # pending_computation may be None.
   pending_computation0 = config_data["pending_computation"]
-  print(f"                  u0: {u0}")
-  printJson(f"pending_computation0", pending_computation0)
+  # print(f"                  u0: {u0}")
+  # if pending_computation0:
+  #   printJson(f"pending_computation0", pending_computation0)
 
   with controller_interface_factory(controller_interface_selection, computation_delay_provider, sim_dir) as controller_interface:
 

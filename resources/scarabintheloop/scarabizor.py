@@ -62,6 +62,130 @@ class ScarabData:
         self.cmd_stderr = cmd_stderr
 
 
+class ParamsData:
+
+  # --- STATIC VARIABLES --- #
+  PARAMS_FILE_KEYS = ["chip_cycle_time",
+                      "l1_size",
+                      "dcache_size",
+                      "icache_size",
+                      "decode_cycles"]
+  # Regex to find text in the form of "--name value"
+  PARAM_REGEX_PATTERN = re.compile(r"--(?P<param_name>[\w|\_]+)\s*(?P<param_value>\d+).*")
+  PARAM_STR_FMT = '--{}\t{}'
+  
+  @staticmethod
+  def from_file(filename):
+    with open(filename) as params_file:
+      PARAM_lines = params_file.readlines()
+    return ParamsData(PARAM_lines)
+
+  def __init__(self, PARAMS_lines):
+    self._PARAMS_lines = PARAMS_lines.copy()
+
+  # def patch(self, PARAMS_patch):
+  #   pass
+
+  def patch(self, patch: dict):
+    """ 
+    Create a new PARAMS file with the values in PARAMS_patch inserted.
+    """
+    # The ParamsData constructor copies self_PARAMS_lines, 
+    # so the copy will have a different list instance.
+    patched_params = self.copy()
+    for (key, value) in patch.items():
+      assert key in ParamsData.PARAMS_FILE_KEYS, \
+            f'key={key} must be in {ParamsData.PARAMS_FILE_KEYS}.'
+      if value is not None:
+        patched_params._set_value(key, value)
+    return patched_params
+
+  def copy(self):
+    return ParamsData(self._PARAMS_lines)
+  
+  def to_file(self, PARAMS_out_filename):
+    with open(PARAMS_out_filename, 'w') as params_out_file:
+      params_out_file.writelines(self._PARAMS_lines)
+
+  # TODO: Write tests for this.
+  def _set_value(self, key, value: int):
+    """
+    Search through PARAM_lines and modify it in-place by updating the value for the given key. 
+    If the key is not found, then an error is raised.
+    """
+    assert key in self.PARAMS_FILE_KEYS, f'key={key} must be in {self.PARAMS_FILE_KEYS}.'
+    assert isinstance(value, int), f'Only int values are supported. type(value)={type(value)}'
+    for line_num, line in enumerate(self._PARAMS_lines):
+      regex_match = self.PARAM_REGEX_PATTERN.match(line)
+      if not regex_match:
+        continue
+      if key == regex_match.groupdict()['param_name']:
+        # If the regex matches, then we replace the line.
+        new_line_text = self.PARAM_STR_FMT.format(key, value)
+        self._PARAMS_lines[line_num] = new_line_text
+        # print(f"Replaced line number {line_num} with {new_line_text}")
+        return
+    raise ValueError(f'The key {key} was not found in the PARAM_lines {PARAM_lines}.')
+
+  def get_lines(self):
+    return self._PARAMS_lines.copy()
+
+    
+  # TODO: Test. 
+  def to_dict(self, params_lines: List[str]):
+    param_dict = {}
+    for line in params_lines: 
+      regex_match = ParamsData.PARAM_REGEX_PATTERN.match(line)
+      if regex_match:
+        param_name = regex_match.groupdict()['param_name']
+        param_value = regex_match.groupdict()['param_value']
+        if param_name in ParamsData.PARAMS_FILE_KEYS:
+          param_dict[param_name] = int(param_value)
+    assert param_dict, f'param_dict is expected to have values. param_dict={param_dict}.'
+    return param_dict
+
+
+# def patchPARAMS(PARAMS_base_lines: dict, PARAMS_patch: dict):
+#   """ 
+#   Create a new PARAMS file with the values in PARAMS_patch inserted.
+#   """
+#   PARAMS_patched_lines = PARAMS_base_lines.copy()
+#   for (key, value) in PARAMS_patch.items():
+#     assert key in ParamsData.PARAMS_FILE_KEYS, f'key={key} must be in {ParamsData.PARAMS_FILE_KEYS}.'
+#     PARAMS_patched_lines = changeParamsValue(PARAMS_patched_lines, key, value)
+# 
+# # TODO: Write tests for this.
+# def changeParamsValue(PARAM_lines: List[str], key, value):
+#   """
+#   Search through PARAM_lines and modify it in-place by updating the value for the given key. 
+#   If the key is not found, then an error is raised.
+#   """
+#   for line_num, line in enumerate(PARAM_lines):
+#     regex_match = ParamsData.PARAM_REGEX_PATTERN.match(line)
+#     if not regex_match:
+#       continue
+#     if key == regex_match.groupdict()['param_name']:
+#       # If the regex matches, then we replace the line.
+#       new_line_text = self.param_str_fmt.format(key, value)
+#       PARAM_lines[line_num] = new_line_text
+#       # print(f"Replaced line number {line_num} with {new_line_text}")
+#       return PARAM_lines
+#   raise ValueError(f'The key {key} was not found in the PARAM_lines {PARAM_lines}.')
+# 
+# def find_PARAMS_value(PARAM_lines, key):
+#   
+#   for line_num, line in enumerate(PARAM_lines):
+#     regex_match = PARAM_REGEX_PATTERN.match(line)
+#     if not regex_match:
+#       continue
+#     if key == regex_match.groupdict()['param_name']:
+#       # If the regex matches, then we replace the line.
+#       new_line_text = self.param_str_fmt.format(key, value)
+#       PARAM_lines[line_num] = new_line_text
+#       # print(f"Replaced line number {line_num} with {new_line_text}")
+#       return PARAM_lines
+#   raise ValueError(f'The key {key} was not found in the PARAM_lines {PARAM_lines}.')
+
 class ScarabPARAMSReader:
   
   def __init__(self, sim_dir=None):
@@ -72,80 +196,47 @@ class ScarabPARAMSReader:
       self.params_in_file_path = sim_dir + 'PARAMS.in'
       self.params_out_file_path = sim_dir + 'PARAMS.out'
 
-    self.param_keys_to_save_in_data_out = ["chip_cycle_time", "l1_size", "dcache_size", "icache_size", "decode_cycles"]
-    # Regex to find text in the form of "--name value"
-    self.param_regex_pattern = re.compile(r"--(?P<param_name>[\w|\_]+)\s*(?P<param_value>\d+).*")
 
   def params_in_to_dictionary(self):
-    return self.params_file_to_dictionary(self.params_in_file_path)
+    return ParamsData(self.params_in_file_path).to_dict()
 
   def params_out_to_dictionary(self):
-    return self.params_file_to_dictionary(self.params_out_file_path)
+    return ParamsData(self.params_out_file_path).to_dict()
 
   def params_file_to_dictionary(self, filename):
-    params_lines = self.read_params_file(filename)
-    return self.params_lines_to_dict(params_lines)
+    return ParamsData(filename).to_dict()
 
   def read_params_file(self, filename):
-    with open(filename) as params_file:
-      params_lines = params_file.readlines()
-    return params_lines
+    return ParamsData(filename).get_lines()
 
-  def params_lines_to_dict(self, params_lines: List[str]):
-    param_dict = {}
-    for line in params_lines: 
-      regex_match = self.param_regex_pattern.match(line)
-      if regex_match:
-        param_name = regex_match.groupdict()['param_name']
-        param_value = regex_match.groupdict()['param_value']
-        if param_name in self.param_keys_to_save_in_data_out:
-          param_dict[param_name] = int(param_value)
-    if not param_dict:
-      raise ValueError(f'param_dict is expected to have values, but instead param_dict={param_dict}')
-      
-    return param_dict
+  # def params_lines_to_dict(self, params_lines: List[str]):
+  #   param_dict = {}
+  #   for line in params_lines: 
+  #     regex_match = ParamsData.PARAM_REGEX_PATTERN.match(line)
+  #     if regex_match:
+  #       param_name = regex_match.groupdict()['param_name']
+  #       param_value = regex_match.groupdict()['param_value']
+  #       if param_name in ParamsData.PARAMS_FILE_KEYS:
+  #         param_dict[param_name] = int(param_value)
+  #   assert param_dict, f'param_dict is expected to have values. param_dict={param_dict}.'
+  #   return param_dict
 
-  # TODO: Write tests for this.
-  def changeParamsValue(self,PARAM_lines: List[str], key, value):
-    """
-    Search through PARAM_lines and modify it in-place by updating the value for the given key. 
-    If the key is not found, then an error is raised.
-    """
-    for line_num, line in enumerate(PARAM_lines):
-      regex_match = self.param_regex_pattern.match(line)
-      if not regex_match:
-        continue
-      if key == regex_match.groupdict()['param_name']:
-        # If the regex matches, then we replace the line.
-        new_line_text = self.param_str_fmt.format(key, value)
-        PARAM_lines[line_num] = new_line_text
-        # print(f"Replaced line number {line_num} with {new_line_text}")
-        return PARAM_lines
-      
-    # After looping through all of the lines, we didn't find the key.
-    raise ValueError(f"Key \"{key}\" was not found in PARAM file lines.")
 
   def create_patched_PARAMS_file(sim_config: dict, PARAMS_src_filename: str, PARAMS_out_filename: str):
     """
     Read the baseline PARAMS file at the location given by the PARAMS_base_file option in the simulation configuration (sim_config).
-    Then, modify the values for keys listed in PARAMS_file_keys to values taken from sim_config. 
+    Then, modify the values for keys listed in PARAMS_FILE_KEYS to values taken from sim_config. 
     Write the resulting PARAMS data to a file at PARAMS_out_filename in the simulation directory (sim_dir).
     Returns the absolute path to the PARAMS file.
     """
     print(f'Creating chip parameter file.')
     print(f'\tSource: {PARAMS_src_filename}.')
     print(f'\tOutput: {PARAMS_out_filename}.')
-    with open(PARAMS_src_filename) as params_out_file:
-      PARAM_file_lines = params_out_file.readlines()
-    
-    for (key, value) in sim_config.items():
-      if key in PARAMS_file_keys:
-        PARAM_file_lines = changeParamsValue(PARAM_file_lines, key, value)
-
-    # Create PARAMS file with the values from the base file modified
-    # based on the values in sim_config.
-    with open(PARAMS_out_filename, 'w') as params_out_file:
-      params_out_file.writelines(PARAM_file_lines)
+    PARAMS_src = ParamsData.from_file(PARAMS_src_filename)
+    # with open(PARAMS_src_filename) as params_out_file:
+    #   PARAM_file_lines = params_out_file.readlines()
+    PARAMS_out = PARAMS_src.patch(sim_config['PARAMS_patch_values'])
+    PARAMS_out.to_file(PARAMS_out_filename)
 
 class ScarabStatsReader:
   
@@ -235,6 +326,7 @@ class ExecutionDrivenScarabRunner:
 
   def run(self, cmd):
     print(f"ExecutionDrivenScarabRunner.run({cmd})")
+    assertFileExists(self.params_src_file)
     scarab_cmd_argv = [
         sys.executable, # The Python executable
         scarab_paths.bin_dir + '/scarab_launch.py',

@@ -267,7 +267,7 @@ nlohmann::json readJson(std::string file_path) {
 int main()
 // int main(int argc, char *argv[])
 {
-  PRINT("==== Start of __FILE__.main() ====")
+  PRINT("==== Start of " << __FILE__ << ".main() ====")
   #ifdef USE_DYNAMORIO
     PRINT_WITH_FILE_LOCATION("Using DynamoRio.")
 
@@ -361,7 +361,6 @@ int main()
       scarab_begin(); // Tell Scarab to stop "fast forwarding". This is needed for '--pintool_args -fast_forward_to_start_inst 1'
     }
   #endif
-
 
   for (int i = 0; i < max_time_steps; i++)
   {

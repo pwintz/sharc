@@ -15,6 +15,7 @@ import argparse
 from warnings import warn
 from pathlib import Path
 import math
+from enum import Enum
 import traceback
 from contextlib import redirect_stdout
 from scarabintheloop.utils import *
@@ -44,48 +45,390 @@ debug_configuration_level = 0
 debug_build_level = 0
 debug_batching_level = 0
 
-PARAMS_file_keys = ["chip_cycle_time", "l1_size", "icache_size", "dcache_size"]
 
-def run():
+class ExperimentList:
+  def __init__(self, example_dir, config_filename):
+    example_dir = os.path.abspath(example_dir)
+    self.example_dir = example_dir
+
+    # TODO: Delete "Path"?
+    self.experiments_config_file_path = Path(os.path.join(example_dir, "simulation_configs", config_filename))
+    self.base_config_file_path        = Path(os.path.join(example_dir, 'base_config.json'))
+    
+    # If the user gave an output directory, then use it. Otherwise, use "experiments/" within the example folder.
+    self.experiments_dir = os.path.join(example_dir, "experiments")
+
+    # Read JSON configuration file.
+    self.base_config = readJson(self.base_config_file_path)
+
+    # Open list of example configurations.
+    self.experiment_config_patches_list = readJson(self.experiments_config_file_path)
+
+    # The experiment config file can either contain a single configuration or a list.
+    # In the case where there is only a single configuration, we convert it to a singleton list. 
+    if not isinstance(self.experiment_config_patches_list, list):
+      self.experiment_config_patches_list = [self.experiment_config_patches_list]
+
+    self.label = slugify(self.experiments_config_file_path.stem)
+    self.base_config["experiment_list_label"] = self.label
+
+    self.experiment_list_dir = self.experiments_dir + "/" + slugify(self.experiments_config_file_path.stem) + "--" + time.strftime("%Y-%m-%d--%H-%M-%S") + "/"
+    print(f"experiment_list_dir: {self.experiment_list_dir}")
+    self.experiment_config_patches_list
+    self.experiment_result_list = {}
+    self.successful_experiment_labels = []
+    self.skipped_experiment_labels = []
+    self.failed_experiment_labels = []
+    
+
+    # Create the experiment_list_dir if it does not exist. An error is created if it already exists.
+    os.makedirs(self.experiment_list_dir)
+
+    # Create or update the symlink to the latest folder.
+    latest_experiment_list_dir_symlink_path = self.experiment_list_dir + "/latest"
+    try:
+      # Try to remove the previous symlink.
+      os.remove(latest_experiment_list_dir_symlink_path)
+    except FileNotFoundError:
+      #  It if fails because it doesn't exist, that's OK.
+      pass
+    os.symlink(self.experiment_list_dir, latest_experiment_list_dir_symlink_path, target_is_directory=True)
+
+
+    print("         Example dir: " + self.example_dir)
+    print(f'        Base config: {self.base_config_file_path}')
+    print(f' Experiments config: {self.experiments_config_file_path}')
+
+    self._experiment_list = []
+
+    for experiment_config_patch in self.experiment_config_patches_list:
+      # Load human-readable labels.
+      experiment_label = self.label + "/" + slugify(experiment_config_patch["label"])
+
+      # example_dir            = os.path.abspath('../..') # The "root" of this project.
+      # experiment_list_dir    = os.path.abspath('.') # A path like <example_dir>/experiments/default-2024-08-25-16:17:35
+      experiment_dir  = os.path.abspath(self.experiment_list_dir + "/" + slugify(experiment_config_patch['label']))
+
+      experiment_config = patch_dictionary(self.base_config, experiment_config_patch)
+      experiment_config["experiment_label"] = experiment_label
+      experiment_config["experiment_dir"] = experiment_dir
+
+      chip_configs_path      = self.example_dir + '/chip_configs'
+      
+      # Check that the expected folders exist.
+      assertFileExists(chip_configs_path)
+
+      experiment = Experiment(experiment_config, chip_configs_path)
+      self._experiment_list.append(experiment)
+    
+  def __iter__(self):
+    self.iterator_counter = 0
+    return self
+
+  def __next__(self): 
+    if self.iterator_counter >= len(self.experiment_config_patches_list):
+      raise StopIteration
+        
+    experiment = self._experiment_list[self.iterator_counter]
+    # TODO: Make experiment
+    self.iterator_counter += 1
+    return experiment
+
+  def run_all(self):
+    for experiment in self._experiment_list:
+      experiment.setup_files()
+      experiment_result = experiment.run()
+      if experiment.status == ExperimentStatus.FINISHED:
+        self.successful_experiment_labels += [repr(experiment)]
+        self.experiment_result_list[experiment.label] = experiment.result
+        writeJson(self.experiment_list_dir + "experiment_result_list_incremental.json", self.experiment_result_list)
+        # print(f'Added "{experiment_result["label"]}" to list of experiment results')
+      elif experiment.status == ExperimentStatus.SKIPPED: # No result
+        # print(f'Skipped "{experiment.label}" experiment.')
+        self.skipped_experiment_labels += [repr(experiment)]
+      elif experiment.status == ExperimentStatus.FAILED:
+        # print(f'Running {experiment.label} failed! Error: {experiment.exception}')
+        self.failed_experiment_labels += [repr(experiment)]
+        
+      self.print_status()
+
+  def print_status(self):
+    n_total      = len(self.experiment_config_patches_list)
+    n_successful = len(self.successful_experiment_labels)
+    n_failed     = len(self.failed_experiment_labels)
+    n_skipped    = len(self.skipped_experiment_labels)
+    n_ran        = n_successful + n_failed 
+    n_not_pending= n_successful + n_failed + n_skipped
+    n_pending    = n_total - n_not_pending
+    def plural_suffix(n): 
+      return '' if n == 1 else 's'
+    print(f"Ran {n_ran} experiment{plural_suffix(n_ran)} of {n_total} experiment{plural_suffix(n_total)}.")
+    print(f'Successful: {n_successful}. ({self.successful_experiment_labels})')
+    print(f'   Skipped: {n_skipped   }. ({self.skipped_experiment_labels})')
+    print(f'    Failed: {n_failed    }. ({self.failed_experiment_labels})')
+    print(f'   Pending: {n_pending   }.')
+
+ExperimentStatus = Enum('ExperimentStatus', ['PENDING', 'RUNNING', 'FINISHED', 'SKIPPED', 'FAILED'])
+
+class Experiment:
+  def __init__(self, 
+              experiment_config: dict, 
+              chip_configs_path):
+    self.label = experiment_config["experiment_label"]
+    self.exception = None
+    self.result = None
+    self.run_time = None
+    self.experiment_config = experiment_config
+    self.status = ExperimentStatus.PENDING
+    
+    ########### Populate the experiment directory ############
+    # Make subdirectory for this experiment.
+    self.experiment_dir = experiment_config["experiment_dir"]
+
+    
+    if debug_configuration_level >= 2:
+      printJson("Experiment configuration", experiment_config)
+
+    
+    # Create PARAMS.generated file containing chip parameters for Scarab.
+    PARAMS_src_filename = os.path.join(chip_configs_path, experiment_config["PARAMS_base_file"])
+    
+    assertFileExists(PARAMS_src_filename)
+    if debug_configuration_level > 1:
+      print(f'Creating chip parameter file.')
+      print(f'\tSource: {PARAMS_src_filename}.')
+      print(f'\tOutput: {PARAMS_out_filename}.')
+    
+    self.PARAMS_base = scarabizor.ParamsData.from_file(PARAMS_src_filename)
+    # with open(PARAMS_src_filename) as params_base_file:
+    #   self.PARAM_base_lines = params_base_file.readlines()
+    # create_patched_PARAMS_file(experiment_config, PARAMS_src, PARAMS_out)
+
+  def setup_files(self):
+    os.makedirs(self.experiment_dir)
+    os.chdir(self.experiment_dir)
+
+
+  @indented_print
+  def run(self):
+    # """ This function assumes that the working directory is the experiment-list working directory and its parent directory is the example directory, which contains the following:
+    #   - scripts/controller_delegator.py
+    #   - chip_configs/PARAMS.base (and other optional alternative configuration files)
+    #   - simulation_configs/default.json (and other optional alternative configuration files)
+    # """
+    
+    # Record the start time.
+    start_time = time.time()
+    
+    if self.experiment_config.get("skip", False):
+      printHeader1(f'Skipping Experiment: {self.label}')
+      self.status = ExperimentStatus.SKIPPED
+      return
+      
+    printHeader1(f"Starting Experiment: {self.label}")
+
+    try:
+      self.status = ExperimentStatus.RUNNING
+      if self.experiment_config["Simulation Options"]["parallel_scarab_simulation"]:
+        experiment_data = run_experiment_parallelized(self.experiment_config, self.PARAMS_base)
+      else:
+        experiment_data = run_experiment_sequential(self.experiment_config, self.PARAMS_base)
+        
+      self.status = ExperimentStatus.FINISHED
+    except Exception as err:
+      print(traceback.format_exc())
+      self.exception = err
+      self.status = ExperimentStatus.FAILED
+      return
+    finally:
+      end_time = time.time()
+      self.run_time = end_time - start_time
+
+    # Check the data.
+    assert isinstance(experiment_data, dict)
+    if experiment_data["batches"]:
+      assert isinstance(experiment_data["batches"], list), \
+        f'expected experiment_data["batches"] to be a list. Instead it was {type(experiment_data["batches"])}'
+    assert isinstance(experiment_data["x"], list)
+    assert isinstance(experiment_data["u"], list)
+    assert isinstance(experiment_data["t"], list)
+    assert isinstance(experiment_data["pending_computations"], list)
+    assert isinstance(experiment_data["config"], dict)
+
+    self.result = {
+      "label":                self.label,
+      "experiment directory": self.experiment_dir,
+      "experiment config":    self.experiment_config, 
+      "experiment data":      experiment_data,
+      "experiment wall time": end_time - start_time
+    }
+
+    writeJson("experiment_result.json", self.result)
+
+  def __repr__(self):
+    repr_str = f'Experiment("{self.label}", {self.status.name}'
+    if self.status == ExperimentStatus.FAILED:
+      repr_str += f', error msg: "{self.exception}"'
+    if self.run_time:
+      repr_str += f' in {self.run_time:0.1f} s'
+    repr_str += ')'
+    return repr_str
+
+
+
+
+class Simulation:
+  def __init__(self, experiment_config, PARAMS_base: list, batch_init=None):
+    # !! We do not, in general, expect experiment_config['u0']==batch_init['u0'] because 
+    # !! batch_init overrides the experiment config.
+    self.experiment_config = copy.deepcopy(experiment_config)
+    sim_config = copy.deepcopy(experiment_config)
+
+    # printJson("experiment_config in create_simulation_config", experiment_config)
+    experiment_max_time_steps = experiment_config["max_time_steps"]
+    experiment_label          = experiment_config["label"]
+    experiment_directory      = experiment_config["experiment_dir"]
+    experiment_x0             = experiment_config["x0"]
+    experiment_u0             = experiment_config["u0"]
+    last_time_index_in_experiment = experiment_max_time_steps
+    experiment_max_batch_size = experiment_config["Simulation Options"]["max_batch_size"]
+    
+    
+    # experiment_config = None # Clear experiment_config so that we don't accidentally use or modify it anymore in this function
+
+    if batch_init:
+      first_time_index    = batch_init["first_time_index"]
+      pending_computation = batch_init["pending_computation"]
+      x0                  = batch_init["x0"]
+      u0                  = batch_init["u0"]
+      
+      # Truncate the index to not extend past the last index
+      max_time_steps_per_batch = min(os.cpu_count(), experiment_max_batch_size, experiment_max_time_steps - first_time_index)
+
+      # Add "max_time_steps_per_batch" steps to the first index to get the last index.
+      last_time_index_in_batch = first_time_index + max_time_steps_per_batch
+
+      assert last_time_index_in_batch <= last_time_index_in_experiment, 'last_time_index_in_batch must not be past the end of experiment.'
+
+      batch_label    = f'batch{batch_init["i_batch"]}_steps{first_time_index}-{last_time_index_in_batch}'
+      directory      = experiment_directory + "/" + batch_label
+      label          = experiment_label     + "/" + batch_label
+      max_time_steps = min(experiment_max_time_steps, max_time_steps_per_batch)
+
+    else:
+      first_time_index    = 0
+      pending_computation = None
+      x0                  = experiment_x0
+      u0                  = experiment_u0
+      directory           = experiment_directory
+      label               = experiment_label
+      max_time_steps      = experiment_max_time_steps
+
+    last_time_index = first_time_index + max_time_steps
+    
+    self.label = label
+    self.simulation_dir = directory
+    sim_config["simulation_label"] = label
+    sim_config["max_time_steps"]   = max_time_steps
+    sim_config["simulation_dir"]   = directory
+    sim_config["x0"]               = x0
+    sim_config["u0"]               = u0
+    sim_config["pending_computation"] = pending_computation
+    sim_config["first_time_index"] = first_time_index
+    sim_config["last_time_index"]  = last_time_index
+    sim_config["time_steps"]       = list(range(first_time_index, last_time_index))
+    sim_config["time_indices"]     = sim_config["time_steps"] + [last_time_index]
+    
+    self.PARAMS = PARAMS_base.copy()
+    self.PARAMS = self.PARAMS.patch(sim_config["PARAMS_patch_values"])
+
+    if batch_init:
+      assert batch_init["u0"] == sim_config["u0"], \
+                f'batch_u[0] = {batch_u[0]} must equal sim_config["u0"] = {sim_config["u0"]}.'
+                # print(f'WARNING: batch_u[0] = {batch_u[0]} != batch_sim_config["u0"] = {batch_sim_config["u0"]}')
+
+    self.sim_config = sim_config
+
+  def setup_files(self):
+
+    # Create the simulation directory if it does not already exist.
+    os.makedirs(self.simulation_dir, exist_ok=True)
+
+    # ?? Is it necessary to change directories?
+    os.chdir(self.simulation_dir)
+
+    # Write the configuration to config.json.
+    writeJson(os.path.join(self.simulation_dir, "config.json"), self.sim_config)
+
+    PARAMS_out_file = os.path.join(self.simulation_dir, 'PARAMS.generated')
+    self.PARAMS.to_file(PARAMS_out_file)
+
+    # Create the pipe files in the current directory.
+    run_shell_cmd("make_scarabintheloop_pipes.sh", working_dir=self.simulation_dir)
+    assertFileExists(self.simulation_dir + "/u_c++_to_py")
+    assertFileExists(self.simulation_dir + "/x_py_to_c++")
+
+
+  @indented_print
+  def run(self):
+    sim_config = self.sim_config
+    sim_dir = os.path.abspath(sim_config["simulation_dir"])
+    assertFileExists(sim_dir + '/PARAMS.generated')  
+    assertFileExists(sim_dir + '/config.json')  
+
+    # if sim_config["experiment_dir"] != sim_config["simulation_dir"]:
+    #   os.makedirs(sim_dir)
+    #   shutil.copyfile(sim_config["experiment_dir"] + "/PARAMS.generated", chip_params_path)
+    #   writeJson(sim_config["simulation_dir"] + "/config.json", sim_config)
+
+
+    # Get human-readable label for this simulation.
+    # simulation_label = sim_config["simulation_label"]
+
+    printHeader2(f"Starting simulation: {self.label}")
+    print(f'↳ Simulation dir: {sim_dir}')
+
+    # Open up some loooooooooogs.
+    controller_log_path = sim_dir + '/controller.log'
+    plant_log_path      = sim_dir + '/plant_dynamics.log'
+    with openLog(plant_log_path,      f'Plant Log for "{self.label}"') as plant_log, \
+        openLog(controller_log_path, f'Controller Log for "{self.label}"') as controller_log:
+
+      simulation_executor = getSimulationExecutor(sim_dir, sim_config, controller_log, plant_log)
+
+      # Execute the simulation.
+      simulation_data = simulation_executor.run_simulation()
+      printHeader2(f'Finished Simulation: "{self.label}"')
+      print(f'↳ Simulation dir: {sim_dir}')
+      print(f'↳ Controller log: {controller_log_path}')
+      print(f'↳      Plant log: {plant_log_path}')
+      print(f"↳  Data out file: {os.path.abspath('simulation_data.json')}")
+      
+      simulation_data.metadata["controller_log_path"] = controller_log_path
+      simulation_data.metadata["plant_log_path"]      = plant_log_path
+
+      return simulation_data
+
+def main():
   
-  print("        Example dir: " + example_dir)
-
   # Create the argument parser
-  parser = argparse.ArgumentParser(description="Run a set of examples.")
+  parser = argparse.ArgumentParser(description="Run a set of experiments.")
 
   parser.add_argument(
       '--config_filename',
-      type=str,  # Specify the data type
+      type   =str,  # Specify the data type
       default="default.json",
-      help="Select the name of a JSON file located in <example_dir>/simulation_configs."
+      help   ="Select the name of a JSON file located in <example_dir>/simulation_configs."
   )
 
   # Parse the arguments from the command line
   args = parser.parse_args()
-  experiments_config_file_path = Path(os.path.abspath(os.path.join(example_dir, "simulation_configs", args.config_filename)))
-  base_config_file_path        = Path(os.path.abspath(os.path.join(example_dir, 'base_config.json')))
+  experiment_list = ExperimentList(example_dir, args.config_filename)
 
-  print(f'        Base config: {base_config_file_path}')
-  print(f' Experiments config: {experiments_config_file_path}')
-
-  # If the user gave an output directory, then use it. Otherwise, use "experiments/" within the example folder.
-  experiments_dir = os.path.abspath(example_dir) + "/experiments"
-
-  # Read JSON configuration file.
-  base_config = readJson(base_config_file_path)
-
-  # Open list of example configurations.
-  experiment_config_patches_list = readJson(experiments_config_file_path)
-  
-  # The experiment config file can either contain a single configuration or a list.
-  # In the case where there is only a single configuration, we convert it to a singleton list. 
-  if not isinstance(experiment_config_patches_list, list):
-    experiment_config_patches_list = [experiment_config_patches_list]
-
-  experiment_list_label = slugify(experiments_config_file_path.stem)
-  base_config["experiment_list_label"] = experiment_list_label
-
-  debug_levels = base_config["==== Debgugging Levels ===="]
+  ##################################################################
+  ################### CONFIGURE DEBUGGING LEVELS ###################
+  ##################################################################
+  debug_levels                        = experiment_list.base_config["==== Debgugging Levels ===="]
   debug_interfile_communication_level = debug_levels["debug_interfile_communication_level"]
   debug_optimizer_stats_level         = debug_levels["debug_optimizer_stats_level"]
   debug_dynamics_level                = debug_levels["debug_dynamics_level"]
@@ -102,163 +445,23 @@ def run():
   plant_dynamics.debug_interfile_communication_level = debug_interfile_communication_level
   plant_dynamics.debug_dynamics_level = debug_dynamics_level
 
-  experiment_list_dir = experiments_dir + "/" + slugify(experiments_config_file_path.stem) + "--" + time.strftime("%Y-%m-%d--%H-%M-%S") + "/"
-  print(f"experiment_list_dir: {experiment_list_dir}")
-
-  # Create the experiment_list_dir if it does not exist. An error is created if it already exists.
-  os.makedirs(experiment_list_dir)
-
-  # Create or update the symlink to the latest folder.
-  latest_experiment_list_dir_symlink_path = experiments_dir + "/latest"
-  try:
-    # Try to remove the previous symlink.
-    os.remove(latest_experiment_list_dir_symlink_path)
-  except FileNotFoundError:
-    #  It if fails because it doesn't exist, that's OK.
-    pass
-  os.symlink(experiment_list_dir, latest_experiment_list_dir_symlink_path, target_is_directory=True)
-
-  # Loop through all of the experiment configurations. For each one, run the experiment and append the result to experiment_result_list. 
-  experiment_result_list = {}
-  successful_experiment_labels = []
-  skipped_experiment_labels = []
-  failed_experiment_labels = []
-
-  def print_status():
-    n_pending = len(experiment_config_patches_list)  \
-                 - len(successful_experiment_labels) \
-                 - len(failed_experiment_labels)     \
-                 - len(skipped_experiment_labels)
-    print(f"Ran {len(experiment_result_list)} experiment{'s' if len(experiment_result_list) > 1 else ''} of {len(experiment_config_patches_list)} experiments.")
-    print(f'Successful: {len(successful_experiment_labels):d}. ({successful_experiment_labels})')
-    print(f'   Skipped: {len(skipped_experiment_labels):d}. ({skipped_experiment_labels})')
-    print(f'    Failed: {len(failed_experiment_labels):d}. ({failed_experiment_labels})')
-    print(f'   Pending: {n_pending:d}.')
-
-
-  for experiment_config_patches in experiment_config_patches_list:
-      os.chdir(experiment_list_dir)
-      try:
-          experiment_result = run_experiment(base_config, experiment_config_patches, example_dir)
-
-          # If no result provided, then the experiment was skipped.
-          if not experiment_result:
-            print(f'No result for "{experiment_config_patches["label"]}" experiment.')
-            skipped_experiment_labels += [experiment_config_patches["label"]]
-            print_status()
-            continue
-      except Exception as err:
-          print(f'Running {experiment_config_patches["label"]} failed! Error: {repr(err)}')
-          print(traceback.format_exc())
-          failed_experiment_labels += [experiment_config_patches["label"]]
-          print_status()
-          continue
-      
-      successful_experiment_labels += [experiment_config_patches["label"] + f' ({experiment_result["experiment wall time"]:0.1f} seconds)']
-      experiment_result_list[experiment_result["label"]] = experiment_result
-      writeJson(experiment_list_dir + "experiment_result_list_incremental.json", experiment_result_list)
-      # print(f'Added "{experiment_result["label"]}" to list of experiment results')
-      print_status()
-      
+  experiment_list.run_all()
     
   # Save all of the experiment results to a file.
-  experiment_list_json_filename = experiment_list_dir + "experiment_result_list.json"
-  writeJson(experiment_list_json_filename, experiment_result_list)
-  print(f"Experiment results for \n\t{experiments_config_file_path}\nare in \n\t{experiment_list_json_filename}.")
+  experiment_list_json_filename = experiment_list.experiment_list_dir + "experiment_result_list.json"
+  writeJson(experiment_list_json_filename, experiment_list.experiment_result_list)
+  print(f'Experiment results for "{experiment_list.label}" experiments are in \n\t{experiment_list_json_filename}.')
 
-  if failed_experiment_labels:
+  if experiment_list.failed_experiment_labels:
     exit(1)
     
-@indented_print
-def run_experiment(base_config: dict, experiment_config_patch: dict, example_dir: str):
-  """ This function assumes that the working directory is the experiment-list working directory and its parent directory is the example directory, which contains the following:
-    - scripts/controller_delegator.py
-    - chip_configs/PARAMS.base (and other optional alternative configuration files)
-    - simulation_configs/default.json (and other optional alternative configuration files)
-  """
 
-  # Load human-readable labels.
-  experiment_list_label = base_config["experiment_list_label"]
-  experiment_label = experiment_list_label + "/" + slugify(experiment_config_patch["label"])
-  
-  # Record the start time.
-  experiment_start_time = time.time()
-
-  if experiment_config_patch.get("skip", False):
-    printHeader1(f'Skipping Experiment: {experiment_label}')
-    return
-    
-  printHeader1(f"Starting Experiment: {experiment_label}")
-
-  example_dir = os.path.abspath('../..') # The "root" of this project.
-  experiment_list_dir = os.path.abspath('.') # A path like <example_dir>/experiments/default-2024-08-25-16:17:35
-  experiment_dir = os.path.abspath(experiment_list_dir + "/" + slugify(experiment_config_patch['label']))
-  simulation_config_path = example_dir + '/simulation_configs'
-  chip_configs_path = example_dir + '/chip_configs'
-
-  print("Experiment list dir: " + experiment_list_dir)
-  print("     Experiment dir: " + experiment_dir)
-
-  # Check that the expected folders exist.
-  assertFileExists(chip_configs_path)
-  assertFileExists(simulation_config_path)
-
-  ########### Populate the experiment directory ############
-  # Make subdirectory for this experiment.
-  os.makedirs(experiment_dir)
-  os.chdir(experiment_dir)
-
-  # Using the base configuration dictionary (from JSON file), update the values given in the experiment config patch, loaded from
-  experiment_config = patch_dictionary(base_config, experiment_config_patch)
-  experiment_config["experiment_label"] = experiment_label
-  experiment_config["experiment_dir"] = experiment_dir
-
-  if debug_configuration_level >= 2:
-    printJson("Experiment configuration", experiment_config)
-
-  # Write the configuration to config.json.
-  writeJson("config.json", experiment_config)
-
-  # Create PARAMS.generated file containing chip parameters for Scarab.
-  PARAMS_src = chip_configs_path + "/" + experiment_config["PARAMS_base_file"] 
-  PARAMS_out = os.path.abspath('PARAMS.generated')
-  
-  create_patched_PARAMS_file(experiment_config, PARAMS_src, PARAMS_out)
-  
-  if experiment_config["Simulation Options"]["parallel_scarab_simulation"]:
-    experiment_data = run_experiment_parallelized(experiment_config, example_dir)
-  else:
-    experiment_data = run_experiment_sequential(experiment_config, example_dir)
-
-  # Check the data.
-  assert isinstance(experiment_data, dict)
-  if experiment_data["batches"]:
-    assert isinstance(experiment_data["batches"], list), \
-      f'expected experiment_data["batches"] to be a list. Instead it was {type(experiment_data["batches"])}'
-  assert isinstance(experiment_data["x"], list)
-  assert isinstance(experiment_data["u"], list)
-  assert isinstance(experiment_data["t"], list)
-  assert isinstance(experiment_data["pending_computations"], list)
-  assert isinstance(experiment_data["config"], dict)
-
-  experiment_end_time = time.time()
-  experiment_result = {
-    "label":                experiment_config["label"],
-    "experiment directory": experiment_dir,
-    "experiment data":      experiment_data,
-    "experiment config":    experiment_config, 
-    "experiment wall time": experiment_end_time - experiment_start_time
-  }
-
-  writeJson("experiment_result.json", experiment_result)
-  return experiment_result
-    
-def run_experiment_sequential(experiment_config, example_dir):
-  print(f'Start of run_experiment_sequential(<{experiment_config["experiment_label"]}>, "{example_dir}")')
+def run_experiment_sequential(experiment_config, PARAMS_base: list):
+  print(f'Start of run_experiment_sequential(<{experiment_config["experiment_label"]}>)')
   sim_dir = experiment_config["experiment_dir"]
-  sim_config = copy.deepcopy(experiment_config)
-  sim_config = create_simulation_config(experiment_config)
-  simulation_data = run_simulation_common_code(sim_config)
+  simulation = Simulation(experiment_config, PARAMS_base)
+  simulation.setup_files()
+  simulation_data = simulation.run()
   experiment_data = {"x": simulation_data.x,
                      "u": simulation_data.u,
                      "t": simulation_data.t,
@@ -267,8 +470,8 @@ def run_experiment_sequential(experiment_config, example_dir):
                      "config": experiment_config}
   return experiment_data
 
-def run_experiment_parallelized(experiment_config, example_dir):
-  print(f'Start of run_experiment_parallelized(<{experiment_config["experiment_label"]}>, "{example_dir}")')
+def run_experiment_parallelized(experiment_config, PARAMS_base: list):
+  print(f'Start of run_experiment_parallelized(<{experiment_config["experiment_label"]}>")')
   
   experiment_dir = experiment_config["experiment_dir"]
   max_time_steps = experiment_config["max_time_steps"]
@@ -299,14 +502,12 @@ def run_experiment_parallelized(experiment_config, example_dir):
   # than the total number of time-steps desired or until the max number of batches is reached.
   try:
     while batch_init["first_time_index"] < max_time_steps and batch_init["i_batch"] < max_batch:
-      
-      try:
-        batch_sim_config = create_simulation_config(experiment_config, batch_init)
-      except Exception as err:
-        raise Exception(f'Failed to create simulation configuration. Batch init was: {batch_init}') from err
+    
+      simulation = Simulation(experiment_config, PARAMS_base, batch_init)
+      simulation.setup_files()
 
       if debug_batching_level >= 1:
-        printHeader2( f'Starting batch: {batch_sim_config["simulation_label"]} ({batch_sim_config["max_time_steps"]} time steps)')
+        printHeader2( f'Starting batch: {simulation.label} ({simulation.sim_config["max_time_steps"]} time steps)')
         print(f'↳ dir: {batch_sim_config["simulation_dir"]}')
         print(f'↳  Last batch status: {batch_init["Last batch status"]}')
         print(f'↳                 x0: {batch_sim_config["x0"]}')
@@ -314,19 +515,19 @@ def run_experiment_parallelized(experiment_config, example_dir):
         print(f'↳     batch_init[u0]: {batch_init["u0"]}')
       
       # Run simulation
-      batch_sim_data = run_simulation_common_code(batch_sim_config)
+      batch_sim_data = simulation.run()
 
       # assert batch_sim_data.u[0] == batch_init["u0"], \
       #   f'batch_sim_data.u[0] = {batch_sim_data.u[0]} must equal batch_init["u0"]={batch_init["u0"]}'
 
-      sample_time = batch_sim_config["system_parameters"]["sample_time"]
+      sample_time = simulation.sim_config["system_parameters"]["sample_time"]
       valid_data_from_batch, next_batch_init = processBatchSimulationData(batch_init, batch_sim_data, sample_time)
 
       batch_data = {
-        'label':           batch_sim_config["simulation_label"],
-        'batch directory': batch_sim_config["simulation_dir"],
+        'label':           simulation.sim_config["simulation_label"],
+        'batch directory': simulation.sim_config["simulation_dir"],
         "batch_init":      batch_init,
-        'config':          batch_sim_config,
+        'config':          simulation.sim_config,
         "all_data_from_batch":   batch_sim_data, 
         "valid_data_from_batch": valid_data_from_batch, 
         "next_batch_init": next_batch_init
@@ -363,14 +564,13 @@ def run_experiment_parallelized(experiment_config, example_dir):
         (all_data_from_batch.u: {batch_data["all_data_from_batch"].u})
         """
 
-      
       if debug_batching_level >= 1:
         printHeader2(f'Finished batch {batch_init["i_batch"]}: {batch_sim_config["simulation_label"]}')
-        print(f'↳           length of x: {len(batch_x)}')
-        print(f'↳           length of u: {len(batch_u)}')
-        print(f'↳                     u0: {batch_u[0]}')
+        print(f'↳             length of x: {len(batch_x)}')
+        print(f'↳             length of u: {len(batch_u)}')
+        print(f'↳                      u0: {batch_u[0]}')
         print(f'↳           length of "t": {len(batch_t)}')
-        print(f'↳         max_time_steps: {batch_sim_config["max_time_steps"]}')
+        print(f'↳          max_time_steps: {batch_sim_config["max_time_steps"]}')
         print(f'↳ Next "first_time_index": {batch_data["next_batch_init"]["first_time_index"]}')
 
       experiment_data = {"batches": batch_data_list,
@@ -392,119 +592,6 @@ def run_experiment_parallelized(experiment_config, example_dir):
 
   writeJson(experiment_dir + "/experiment_data.json", experiment_data, label="Experiment data")
   return experiment_data
-
-
-@indented_print
-def run_simulation_common_code(sim_config: dict):
-  """
-  run_simulation_common_code() contains code that us used by both the parallel and serial run_simulation functions.
-  """
-    
-  sim_dir = os.path.abspath(sim_config["simulation_dir"])
-  chip_params_path = sim_dir + '/PARAMS.generated'
-
-  if sim_config["experiment_dir"] != sim_config["simulation_dir"]:
-    os.makedirs(sim_dir)
-    shutil.copyfile(sim_config["experiment_dir"] + "/PARAMS.generated", chip_params_path)
-    writeJson(sim_config["simulation_dir"] + "/config.json", sim_config)
-  assertFileExists(chip_params_path)  
-
-  # os.chdir(sim_dir)
-  # Get human-readable label for this simulation.
-  simulation_label = sim_config["simulation_label"]
-
-  printHeader2(f"Starting simulation: {simulation_label}")
-  print(f'↳ Simulation dir: {sim_dir}')
-  
-
-  # Open up some loooooooooogs.
-  controller_log_path = sim_dir + '/controller.log'
-  plant_log_path      = sim_dir + '/plant_dynamics.log'
-  with openLog(plant_log_path,      f'Plant Log for "{simulation_label}"') as plant_log, \
-       openLog(controller_log_path, f'Controller Log for "{simulation_label}"') as controller_log:
-
-    simulation_executor = getSimulationExecutor(sim_dir, sim_config, controller_log, plant_log)
-
-    # Execute the simulation.
-    simulation_data = simulation_executor.run_simulation()
-    printHeader2(f'Finished Simulation: "{simulation_label}"')
-    print(f'↳ Simulation dir: {sim_dir}')
-    print(f'↳ Controller log: {controller_log_path}')
-    print(f'↳      Plant log: {plant_log_path}')
-    print(f"↳  Data out file: {os.path.abspath('simulation_data.json')}")
-    
-    simulation_data.metadata["controller_log_path"] = controller_log_path
-    simulation_data.metadata["plant_log_path"]      = plant_log_path
-
-    return simulation_data
-
-
-
-def create_simulation_config(experiment_config, batch_init=None):
-  # !! We do not, in general, expect experiment_config['u0']==batch_init['u0'] because 
-  # !! batch_init overrides the experiment config.
-
-  # printJson("experiment_config in create_simulation_config", experiment_config)
-  experiment_max_time_steps = experiment_config["max_time_steps"]
-  experiment_label          = experiment_config["label"]
-  experiment_directory      = experiment_config["experiment_dir"]
-  experiment_x0             = experiment_config["x0"]
-  experiment_u0             = experiment_config["u0"]
-  last_time_index_in_experiment = experiment_max_time_steps
-  experiment_max_batch_size = experiment_config["Simulation Options"]["max_batch_size"]
-  
-  batch_config = copy.deepcopy(experiment_config)
-  experiment_config = None # Clear experiment_config so that we don't accidentally use or modify it anymore in this function
-
-  if batch_init:
-    first_time_index    = batch_init["first_time_index"]
-    pending_computation = batch_init["pending_computation"]
-    x0                  = batch_init["x0"]
-    u0                  = batch_init["u0"]
-    
-    # Truncate the index to not extend past the last index
-    max_time_steps_per_batch = min(os.cpu_count(), experiment_max_batch_size, experiment_max_time_steps - first_time_index)
-
-    # Add "max_time_steps_per_batch" steps to the first index to get the last index.
-    last_time_index_in_batch = first_time_index + max_time_steps_per_batch
-
-    assert last_time_index_in_batch <= last_time_index_in_experiment, 'last_time_index_in_batch must not be past the end of experiment.'
-
-    batch_label    = f'batch{batch_init["i_batch"]}_steps{first_time_index}-{last_time_index_in_batch}'
-    directory      = experiment_directory + "/" + batch_label
-    label          = experiment_label     + "/" + batch_label
-    max_time_steps = min(experiment_max_time_steps, max_time_steps_per_batch)
-
-  else:
-    first_time_index    = 0
-    pending_computation = None
-    x0                  = experiment_x0
-    u0                  = experiment_u0
-    directory           = experiment_directory
-    label               = experiment_label
-    max_time_steps      = experiment_max_time_steps
-
-  last_time_index = first_time_index + max_time_steps
-  
-  batch_config["simulation_label"] = label
-  batch_config["max_time_steps"]   = max_time_steps
-  batch_config["simulation_dir"]   = directory
-  batch_config["x0"]               = x0
-  batch_config["u0"]               = u0
-  batch_config["pending_computation"] = pending_computation
-  batch_config["first_time_index"] = first_time_index
-  batch_config["last_time_index"]  = last_time_index
-  batch_config["time_steps"]       = list(range(first_time_index, last_time_index))
-  # batch_config["time_indices"]     = list(range(first_time_index, last_time_index+1))
-  batch_config["time_indices"]     = batch_config["time_steps"] + [last_time_index]
-  
-  if batch_init:
-    assert batch_init["u0"] == batch_config["u0"], \
-              f'batch_u[0] = {batch_u[0]} must equal batch_config["u0"] = {batch_config["u0"]}.'
-              # print(f'WARNING: batch_u[0] = {batch_u[0]} != batch_sim_config["u0"] = {batch_sim_config["u0"]}')
-
-  return batch_config
-
 
 
 def processBatchSimulationData(batch_init:dict, batch_simulation_data: dict, sample_time):
@@ -549,34 +636,6 @@ def processBatchSimulationData(batch_init:dict, batch_simulation_data: dict, sam
   return valid_data_from_batch, next_batch_init
 
 
-def create_patched_PARAMS_file(sim_config: dict, PARAMS_src_filename: str, PARAMS_out_filename: str):
-  """
-  Read the baseline PARAMS file at the location given by the PARAMS_base_file option in the simulation configuration (sim_config).
-  Then, modify the values for keys listed in PARAMS_file_keys to values taken from sim_config. 
-  Write the resulting PARAMS data to a file at PARAMS_out_filename in the simulation directory (sim_dir).
-  Returns the absolute path to the PARAMS file.
-  """
-  assertFileExists(PARAMS_src_filename)
-  if debug_configuration_level > 1:
-    print(f'Creating chip parameter file.')
-    print(f'\tSource: {PARAMS_src_filename}.')
-    print(f'\tOutput: {PARAMS_out_filename}.')
-  
-  with open(PARAMS_src_filename) as params_out_file:
-    PARAM_file_lines = params_out_file.readlines()
-  
-  for (key, value) in sim_config.items():
-    if key in PARAMS_file_keys:
-      PARAM_file_lines = changeParamsValue(PARAM_file_lines, key, value)
-
-  # Create PARAMS file with the values from the base file modified
-  # based on the values in sim_config.
-  with open(PARAMS_out_filename, 'w') as params_out_file:
-    params_out_file.writelines(PARAM_file_lines)
-    
-  assertFileExists(PARAMS_out_filename)
-
-
 def getSimulationExecutor(sim_dir, sim_config, controller_log, plant_log):
   """ 
   This function implements the "Factory" design pattern, where it returns objects of various classes depending on the imputs.
@@ -588,7 +647,7 @@ def getSimulationExecutor(sim_dir, sim_config, controller_log, plant_log):
   if use_fake_delays:
     # Create some fake delay data.
     max_time_steps = sim_config["max_time_steps"]
-    sample_time = sim_config['system_parameters']["sample_time"]
+    sample_time    = sim_config['system_parameters']["sample_time"]
     # Create a list of delays that are shorter than the sample time
     fake_delays = [0.1*sample_time]*max_time_steps
 
@@ -596,8 +655,6 @@ def getSimulationExecutor(sim_dir, sim_config, controller_log, plant_log):
     index_for_delay = 2
     if len(fake_delays) >= index_for_delay+1:
       fake_delays[index_for_delay] = 1.1*sample_time
-  # else:
-  #   raise ValueError(f'Not using use_fake_delays is currently disabled.')
     
   if use_parallel_scarab_simulation:
     print("Using ParallelSimulationExecutor.")
@@ -651,11 +708,6 @@ class SimulationExecutor:
         self.evolveState_fnc = dynamics_instance.getDynamicsFunction()
 
 
-    # Create the pipe files in the current directory.
-    run_shell_cmd("make_scarabintheloop_pipes.sh", log=controller_log, working_dir=self.sim_dir)
-    assertFileExists(sim_dir + "/u_c++_to_py")
-    assertFileExists(sim_dir + "/x_py_to_c++")
-
   def run_controller(self):
     raise RuntimeError("This function must be implemented by a subclass")
 
@@ -667,9 +719,9 @@ class SimulationExecutor:
           f'      Executable: {self.controller_executable} \n'\
           f'  Simulation dir: {self.sim_dir} \n'\
           f'  Controller log: {self.controller_log.name}')
-    assertFileExists('config.json') # config.json is read by the controller.
     
     try:
+      assertFileExists('config.json') # config.json is read by the controller.
       self.run_controller()
       print('Controller finished.') 
     except Exception as err:
@@ -685,15 +737,17 @@ class SimulationExecutor:
     print(f'---- Starting plant dynamics for {sim_label} ----\n' \
           f'\t↳ Simulation dir: {self.sim_dir} \n' \
           f'\t↳      Plant log: {self.plant_log.name}\n')
-    self.plant_log.write('Start of thread.\n')
     if debug_configuration_level >= 2:
       printJson(f"Simulation configuration", self.sim_config)
 
     try:
       with redirect_stdout(self.plant_log):
+        print('Start of Plant Dynamics thread.')
         plant_result = plant_runner.run(self.sim_dir, self.sim_config, self.evolveState_fnc)
+        print('Successfully finished running Plant Dynamics.')
 
     except Exception as e:
+      self.plant_log.write(f'Plant dynamics had an error: {e}')
       raise Exception(f'Plant dynamics for "{sim_label}" had an error. See logs: {self.plant_log.name}') from e
 
     # Print the output in a single call to "print" so that it isn't interleaved with print statements in other threads.
@@ -712,7 +766,7 @@ class SimulationExecutor:
     N_TASKS = 2
     with ThreadPoolExecutor(max_workers=N_TASKS) as executor:
       # Create two tasks: One for the controller and another for the plant.
-      plant_task = executor.submit(self._run_plant)
+      plant_task      = executor.submit(self._run_plant)
       controller_task = executor.submit(self._run_controller)
       print("Waiting for plant_task and controller_task to run.")
       controller_task.add_done_callback(lambda future: print("Controller done."))
@@ -798,22 +852,6 @@ class ParallelSimulationExecutor(SimulationExecutor):
     simulation_data.overwrite_computation_times(computation_times)
     return simulation_data
 
-
-# class InternalSimulationExecutor(SimulationExecutor):
-#   """
-#   Create a simulation executor that performs all of the plant dynamics calculations internally. This executor does not support simulating computation times with Scarab.
-#   """
-#   def __init__(self):
-#     raise RuntimeError("This class is not tested and is not expected to work correctly as-is.")
-# 
-#   def run_controller(self):
-#     run_shell_cmd(self.controller_executable, working_dir=self.sim_dir, log=self.controller_log)
-# 
-#   def run_simulation(self):
-#     # Override run_simulation to just run the controller. 
-#     self.run_controller()
-
-# Ideas for experiments to run.
 # -> Run several iterations of Cache sizes
 
 ### Candidate values to modify

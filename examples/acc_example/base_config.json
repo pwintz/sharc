@@ -79,8 +79,13 @@
       "time_limit": 0,
       "verbose": false
     }
-  },
-  "==== Hardware Configuration ===": "",
-  "PARAMS_base_file":  "PARAMS.base"
+  },  
+  "PARAMS_base_file": "PARAMS.base",
+  "PARAMS_patch_values": {
+    "chip_cycle_time": null,
+    "l1_size": null,
+    "icache_size": null,
+    "dcache_size": null
+  }
 }
 
