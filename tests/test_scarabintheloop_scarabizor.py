@@ -3,8 +3,40 @@
 import unittest
 import os
 import copy
-from scarabintheloop.scarabizor import ScarabPARAMSReader, MockExecutionDrivenScarabRunner, ScarabStatsReader, SECONDS_PER_FEMTOSECOND
+from scarabintheloop.scarabizor import ParamsData, ScarabPARAMSReader, MockExecutionDrivenScarabRunner, ScarabStatsReader, SECONDS_PER_FEMTOSECOND
 from unittest.mock import mock_open, patch
+
+PARAMS_data_in = """# Here is a comment
+--mode                          full
+
+## Core Parameters
+# Length of each chip cycle in femtosecond (10^-15 sec).
+--chip_cycle_time               100000000
+"""
+
+class Test_ParamsData(unittest.TestCase):
+  def test_from_file(self):
+    # ---- Setup ---- 
+    
+    # ---- Execution ----
+    with patch("builtins.open", mock_open(read_data=PARAMS_data_in)) as mock_file:
+      data = ParamsData.from_file("path/to/PARAMS.in")
+
+    # ---- Assertions ---- 
+    mock_file.assert_called_with("path/to/PARAMS.in")
+    self.assertEqual(data.get_lines()[0], '# Here is a comment\n')
+
+  def test_params_lines_to_dict(self):
+    params_lines = [
+      "## Simulation Parameters",
+      "--mode                          full",
+      "--model                         cmp",
+      "# Length of each chip cycle in femtosecond (10^-15 sec).",
+      "--chip_cycle_time               100000000"
+    ]
+    params_dict = ParamsData(params_lines).to_dict()
+    self.assertEqual(len(params_dict), 1, "Only one item from key=chip_cycle_time should be saved in the dictionary.")
+    self.assertEqual(params_dict["chip_cycle_time"], 100000000)
 
 class TestScarabPARAMSReader(unittest.TestCase):
   def test_load(self):
@@ -17,15 +49,6 @@ class TestScarabPARAMSReader(unittest.TestCase):
     params_lines = scarab_params_reader.read_params_file('PARAMS.out')
     self.assertTrue(len(params_lines) > 100)
 
-  def test_params_lines_to_dict(self):
-    params_lines = ["## Simulation Parameters",
-      "--mode                          full",
-      "--model                         cmp",
-      "# Length of each chip cycle in femtosecond (10^-15 sec).",
-      "--chip_cycle_time               100000000"]
-    scarab_params_reader = ScarabPARAMSReader()
-    params_dict = scarab_params_reader.params_lines_to_dict(params_lines)
-    self.assertEqual(params_dict["chip_cycle_time"], 100000000)
 
 class TestMockExecutionDrivenScarabRunner(unittest.TestCase):
 

@@ -4,6 +4,7 @@ import unittest
 import scarabintheloop
 from scarabintheloop.plant_runner import TimeStepSeries, ComputationData
 import copy
+import scarabintheloop.scarabizor as scarabizor
 import os
 
 class TestProcessBatchSimulationData(unittest.TestCase):
@@ -149,9 +150,7 @@ class TestProcessBatchSimulationData(unittest.TestCase):
     self.assertEqual(next_batch_init, expected_next_batch_init)
 
     
-
-
-class Test_create_simulation_config(unittest.TestCase):
+class Test_Simulation(unittest.TestCase):
   def test_with_no_batch_init(self):
     # Setup 
     cpu_count = os.cpu_count()
@@ -163,22 +162,27 @@ class Test_create_simulation_config(unittest.TestCase):
       "u0": [3, 4], 
       "Simulation Options": {
         "max_batch_size": 12
+      },
+      "PARAMS_patch_values": {
+        'chip_cycle_time': 999
       }
     }
     batch_init = None
+    params_base = scarabizor.ParamsData(['--chip_cycle_time   100000000'])
 
     # Execution
-    sim_config = scarabintheloop.create_simulation_config(experiment_config, batch_init)
+    simulation = scarabintheloop.Simulation(experiment_config, params_base, batch_init)
     
     # Assertions 
-    self.assertEqual(sim_config["first_time_index"], 0)
-    self.assertEqual(sim_config["max_time_steps"], 200)
-    self.assertEqual(sim_config["last_time_index"], 200)
-    self.assertEqual(sim_config["pending_computation"], None)
-    self.assertEqual(sim_config["x0"], [1,2,3])
-    self.assertEqual(sim_config["u0"], [3, 4])
-    self.assertEqual(sim_config["simulation_dir"], '.')
-    self.assertEqual(sim_config["simulation_label"], 'my_label')
+    self.assertEqual(simulation.sim_config["first_time_index"], 0)
+    self.assertEqual(simulation.sim_config["max_time_steps"], 200)
+    self.assertEqual(simulation.sim_config["last_time_index"], 200)
+    self.assertEqual(simulation.sim_config["pending_computation"], None)
+    self.assertEqual(simulation.sim_config["x0"], [1,2,3])
+    self.assertEqual(simulation.sim_config["u0"], [3, 4])
+    self.assertEqual(simulation.sim_config["simulation_dir"], '.')
+    self.assertEqual(simulation.sim_config["simulation_label"], 'my_label')
+    self.assertEqual(simulation.PARAMS["chip_cycle_time"], 999)
 
   @unittest.skipIf(os.cpu_count() < 4, 
         """In order for this test to be valid, we need 
@@ -195,7 +199,8 @@ class Test_create_simulation_config(unittest.TestCase):
       "u0":             [3, 4],  # Ignored. Replaced by u0 from batch.
       "Simulation Options": {
         "max_batch_size": max_batch_size
-      }
+      },
+      "PARAMS_patch_values": {}
     }
 
     batch_first_time_index = 6
@@ -207,9 +212,10 @@ class Test_create_simulation_config(unittest.TestCase):
       "u0":                   [-11, 22222],
       "pending_computation":  batch_init_pending_computation
     }
-
+    params_base = scarabizor.ParamsData([])
+    
     # ----- Execution ----- 
-    sim_config = scarabintheloop.create_simulation_config(experiment_config, batch_init)
+    simulation = scarabintheloop.Simulation(experiment_config, params_base, batch_init)
     
     # ----- Assertions ----- 
 
@@ -218,12 +224,12 @@ class Test_create_simulation_config(unittest.TestCase):
     # number of CPUS is larger that max_batch_size, the expected batch size is max_batch_size.
     expected_batch_size = max_batch_size
 
-    self.assertEqual(sim_config["first_time_index"], batch_first_time_index)
-    self.assertEqual(sim_config["max_time_steps"], expected_batch_size)
-    self.assertEqual(sim_config["last_time_index"], batch_first_time_index + expected_batch_size)
-    self.assertEqual(sim_config["pending_computation"], batch_init_pending_computation)
-    self.assertEqual(sim_config["x0"], [43, 43, 43])
-    self.assertEqual(sim_config["u0"], [-11, 22222])
+    self.assertEqual(simulation.sim_config["first_time_index"], batch_first_time_index)
+    self.assertEqual(simulation.sim_config["max_time_steps"], expected_batch_size)
+    self.assertEqual(simulation.sim_config["last_time_index"], batch_first_time_index + expected_batch_size)
+    self.assertEqual(simulation.sim_config["pending_computation"], batch_init_pending_computation)
+    self.assertEqual(simulation.sim_config["x0"], [43, 43, 43])
+    self.assertEqual(simulation.sim_config["u0"], [-11, 22222])
 
 
   @unittest.skipIf(os.cpu_count() < 4, 
@@ -247,7 +253,8 @@ class Test_create_simulation_config(unittest.TestCase):
       "u0":             [3, 4],  # Ignored. Replaced by u0 from batch.
       "Simulation Options": {
         "max_batch_size": max_batch_size
-      }
+      },
+      "PARAMS_patch_values": {}
     }
 
     batch_init_pending_computation = ComputationData(t_start=0.4, delay=1.2, u=[2,1234])
@@ -258,14 +265,15 @@ class Test_create_simulation_config(unittest.TestCase):
       "u0":                   [-11, 22222],
       "pending_computation":  batch_init_pending_computation
     }
+    params = scarabizor.ParamsData([])
 
     # ----- Execution ----- 
-    sim_config = scarabintheloop.create_simulation_config(experiment_config, batch_init)
+    simulation = scarabintheloop.Simulation(experiment_config, params, batch_init)
     
     # ----- Assertions ----- 
-    self.assertEqual(sim_config["first_time_index"], batch_first_time_index)
-    self.assertEqual(sim_config["max_time_steps"], expected_batch_size)
-    self.assertEqual(sim_config["last_time_index"], experiment_max_time_steps)
+    self.assertEqual(simulation.sim_config["first_time_index"], batch_first_time_index)
+    self.assertEqual(simulation.sim_config["max_time_steps"], expected_batch_size)
+    self.assertEqual(simulation.sim_config["last_time_index"], experiment_max_time_steps)
 
 if __name__ == '__main__':
   unittest.main()

@@ -19,6 +19,7 @@ from enum import Enum
 import traceback
 from contextlib import redirect_stdout
 from scarabintheloop.utils import *
+import scarabintheloop.debug_levels as debug_levels
 
 # Type hinting.
 from typing import List, Set, Dict, Tuple, Union
@@ -37,23 +38,13 @@ assertFileExists('plant_dynamics.py')
 controller_delegator = loadModuleFromWorkingDir("controller_delegator")
 plant_dynamics = loadModuleFromWorkingDir("plant_dynamics")
 
-# Define default debugging levels.
-debug_interfile_communication_level = 0
-debug_optimizer_stats_level = 0
-debug_dynamics_level = 0
-debug_configuration_level = 0
-debug_build_level = 0
-debug_batching_level = 0
-
-
 class ExperimentList:
   def __init__(self, example_dir, config_filename):
     example_dir = os.path.abspath(example_dir)
     self.example_dir = example_dir
 
-    # TODO: Delete "Path"?
-    self.experiments_config_file_path = Path(os.path.join(example_dir, "simulation_configs", config_filename))
-    self.base_config_file_path        = Path(os.path.join(example_dir, 'base_config.json'))
+    self.experiments_config_file_path = os.path.join(example_dir, "simulation_configs", config_filename)
+    self.base_config_file_path        = os.path.join(example_dir, 'base_config.json')
     
     # If the user gave an output directory, then use it. Otherwise, use "experiments/" within the example folder.
     self.experiments_dir = os.path.join(example_dir, "experiments")
@@ -69,23 +60,20 @@ class ExperimentList:
     if not isinstance(self.experiment_config_patches_list, list):
       self.experiment_config_patches_list = [self.experiment_config_patches_list]
 
-    self.label = slugify(self.experiments_config_file_path.stem)
+    self.label = slugify(config_filename)
     self.base_config["experiment_list_label"] = self.label
 
-    self.experiment_list_dir = self.experiments_dir + "/" + slugify(self.experiments_config_file_path.stem) + "--" + time.strftime("%Y-%m-%d--%H-%M-%S") + "/"
-    print(f"experiment_list_dir: {self.experiment_list_dir}")
-    self.experiment_config_patches_list
+    self.experiment_list_dir = os.path.join(self.experiments_dir, self.label + "--" + time.strftime("%Y-%m-%d--%H-%M-%S"))
     self.experiment_result_list = {}
     self.successful_experiment_labels = []
     self.skipped_experiment_labels = []
     self.failed_experiment_labels = []
-    
 
     # Create the experiment_list_dir if it does not exist. An error is created if it already exists.
     os.makedirs(self.experiment_list_dir)
 
     # Create or update the symlink to the latest folder.
-    latest_experiment_list_dir_symlink_path = self.experiment_list_dir + "/latest"
+    latest_experiment_list_dir_symlink_path =  os.path.join(self.experiment_list_dir, "latest")
     try:
       # Try to remove the previous symlink.
       os.remove(latest_experiment_list_dir_symlink_path)
@@ -184,38 +172,26 @@ class Experiment:
     ########### Populate the experiment directory ############
     # Make subdirectory for this experiment.
     self.experiment_dir = experiment_config["experiment_dir"]
-
     
-    if debug_configuration_level >= 2:
+    if debug_levels.debug_configuration_level >= 2:
       printJson("Experiment configuration", experiment_config)
-
     
     # Create PARAMS.generated file containing chip parameters for Scarab.
     PARAMS_src_filename = os.path.join(chip_configs_path, experiment_config["PARAMS_base_file"])
     
     assertFileExists(PARAMS_src_filename)
-    if debug_configuration_level > 1:
+    if debug_levels.debug_configuration_level > 1:
       print(f'Creating chip parameter file.')
       print(f'\tSource: {PARAMS_src_filename}.')
       print(f'\tOutput: {PARAMS_out_filename}.')
     
     self.PARAMS_base = scarabizor.ParamsData.from_file(PARAMS_src_filename)
-    # with open(PARAMS_src_filename) as params_base_file:
-    #   self.PARAM_base_lines = params_base_file.readlines()
-    # create_patched_PARAMS_file(experiment_config, PARAMS_src, PARAMS_out)
 
   def setup_files(self):
     os.makedirs(self.experiment_dir)
-    os.chdir(self.experiment_dir)
-
 
   @indented_print
   def run(self):
-    # """ This function assumes that the working directory is the experiment-list working directory and its parent directory is the example directory, which contains the following:
-    #   - scripts/controller_delegator.py
-    #   - chip_configs/PARAMS.base (and other optional alternative configuration files)
-    #   - simulation_configs/default.json (and other optional alternative configuration files)
-    # """
     
     # Record the start time.
     start_time = time.time()
@@ -274,13 +250,18 @@ class Experiment:
     repr_str += ')'
     return repr_str
 
-
-
-
 class Simulation:
-  def __init__(self, experiment_config, PARAMS_base: list, batch_init=None):
+  def __init__(self,
+               experiment_config: dict,
+               PARAMS_base: scarabizor.ParamsData,
+               batch_init: dict=None):
     # !! We do not, in general, expect experiment_config['u0']==batch_init['u0'] because 
     # !! batch_init overrides the experiment config.
+    assert isinstance(experiment_config, dict)
+    assert isinstance(PARAMS_base, scarabizor.ParamsData), f'type(PARAMS_base)={type(PARAMS_base)}'
+    if batch_init:
+      assert isinstance(batch_init, dict)
+
     self.experiment_config = copy.deepcopy(experiment_config)
     sim_config = copy.deepcopy(experiment_config)
 
@@ -293,9 +274,6 @@ class Simulation:
     last_time_index_in_experiment = experiment_max_time_steps
     experiment_max_batch_size = experiment_config["Simulation Options"]["max_batch_size"]
     
-    
-    # experiment_config = None # Clear experiment_config so that we don't accidentally use or modify it anymore in this function
-
     if batch_init:
       first_time_index    = batch_init["first_time_index"]
       pending_computation = batch_init["pending_computation"]
@@ -328,6 +306,11 @@ class Simulation:
     
     self.label = label
     self.simulation_dir = directory
+    self.controller_log_path = os.path.join(self.simulation_dir, 'controller.log')
+    self.plant_log_path      = os.path.join(self.simulation_dir, 'plant_dynamics.log')
+    # Paths to files needed by controller executable.
+    self.params_file_for_controller = os.path.join(self.simulation_dir, 'PARAMS.generated')
+    self.config_file_for_controller = os.path.join(self.simulation_dir, 'config.json')
     sim_config["simulation_label"] = label
     sim_config["max_time_steps"]   = max_time_steps
     sim_config["simulation_dir"]   = directory
@@ -345,7 +328,6 @@ class Simulation:
     if batch_init:
       assert batch_init["u0"] == sim_config["u0"], \
                 f'batch_u[0] = {batch_u[0]} must equal sim_config["u0"] = {sim_config["u0"]}.'
-                # print(f'WARNING: batch_u[0] = {batch_u[0]} != batch_sim_config["u0"] = {batch_sim_config["u0"]}')
 
     self.sim_config = sim_config
 
@@ -354,7 +336,7 @@ class Simulation:
     # Create the simulation directory if it does not already exist.
     os.makedirs(self.simulation_dir, exist_ok=True)
 
-    # ?? Is it necessary to change directories?
+    # Move into the simulation directory.
     os.chdir(self.simulation_dir)
 
     # Write the configuration to config.json.
@@ -371,41 +353,33 @@ class Simulation:
 
   @indented_print
   def run(self):
-    sim_config = self.sim_config
-    sim_dir = os.path.abspath(sim_config["simulation_dir"])
-    assertFileExists(sim_dir + '/PARAMS.generated')  
-    assertFileExists(sim_dir + '/config.json')  
-
-    # if sim_config["experiment_dir"] != sim_config["simulation_dir"]:
-    #   os.makedirs(sim_dir)
-    #   shutil.copyfile(sim_config["experiment_dir"] + "/PARAMS.generated", chip_params_path)
-    #   writeJson(sim_config["simulation_dir"] + "/config.json", sim_config)
-
-
-    # Get human-readable label for this simulation.
-    # simulation_label = sim_config["simulation_label"]
-
     printHeader2(f"Starting simulation: {self.label}")
-    print(f'↳ Simulation dir: {sim_dir}')
+    print(f'↳ Simulation dir: {self.simulation_dir}')
+    print(f'↳ Controller log: {self.controller_log_path}')
+    print(f'↳      Plant log: {self.plant_log_path}')
+    
+    assertFileExists(self.params_file_for_controller)
+    assertFileExists(self.config_file_for_controller)  
 
     # Open up some loooooooooogs.
-    controller_log_path = sim_dir + '/controller.log'
-    plant_log_path      = sim_dir + '/plant_dynamics.log'
-    with openLog(plant_log_path,      f'Plant Log for "{self.label}"') as plant_log, \
-        openLog(controller_log_path, f'Controller Log for "{self.label}"') as controller_log:
+    with openLog(self.plant_log_path,      f'Plant Log for "{self.label}"') as plant_log, \
+        openLog(self.controller_log_path, f'Controller Log for "{self.label}"') as controller_log:
 
-      simulation_executor = getSimulationExecutor(sim_dir, sim_config, controller_log, plant_log)
+      simulation_executor = getSimulationExecutor(self.simulation_dir, 
+                                                  self.sim_config, 
+                                                  controller_log, 
+                                                  plant_log)
 
       # Execute the simulation.
       simulation_data = simulation_executor.run_simulation()
       printHeader2(f'Finished Simulation: "{self.label}"')
-      print(f'↳ Simulation dir: {sim_dir}')
-      print(f'↳ Controller log: {controller_log_path}')
-      print(f'↳      Plant log: {plant_log_path}')
+      print(f'↳ Simulation dir: {self.simulation_dir}')
+      print(f'↳ Controller log: {self.controller_log_path}')
+      print(f'↳      Plant log: {self.plant_log_path}')
       print(f"↳  Data out file: {os.path.abspath('simulation_data.json')}")
       
-      simulation_data.metadata["controller_log_path"] = controller_log_path
-      simulation_data.metadata["plant_log_path"]      = plant_log_path
+      simulation_data.metadata["controller_log_path"] = self.controller_log_path
+      simulation_data.metadata["plant_log_path"]      = self.plant_log_path
 
       return simulation_data
 
@@ -428,22 +402,7 @@ def main():
   ##################################################################
   ################### CONFIGURE DEBUGGING LEVELS ###################
   ##################################################################
-  debug_levels                        = experiment_list.base_config["==== Debgugging Levels ===="]
-  debug_interfile_communication_level = debug_levels["debug_interfile_communication_level"]
-  debug_optimizer_stats_level         = debug_levels["debug_optimizer_stats_level"]
-  debug_dynamics_level                = debug_levels["debug_dynamics_level"]
-  debug_configuration_level           = debug_levels["debug_configuration_level"]
-  debug_build_level                   = debug_levels["debug_build_level"]
-  utils.debug_shell_calls_level       = debug_levels["debug_shell_calls_level"]
-  debug_batching_level                = debug_levels["debug_batching_level"]
-  scarabizor.debug_scarab_level       = debug_levels["debug_scarab_level"]
-
-  # Set the debugging levels to the plant_runner module.
-  plant_runner.debug_interfile_communication_level = debug_interfile_communication_level
-  plant_runner.debug_dynamics_level = debug_dynamics_level
-
-  plant_dynamics.debug_interfile_communication_level = debug_interfile_communication_level
-  plant_dynamics.debug_dynamics_level = debug_dynamics_level
+  debug_levels.set_from_dictionary(experiment_list.base_config["==== Debgugging Levels ===="])
 
   experiment_list.run_all()
     
@@ -506,7 +465,7 @@ def run_experiment_parallelized(experiment_config, PARAMS_base: list):
       simulation = Simulation(experiment_config, PARAMS_base, batch_init)
       simulation.setup_files()
 
-      if debug_batching_level >= 1:
+      if debug_levels.debug_batching_level >= 1:
         printHeader2( f'Starting batch: {simulation.label} ({simulation.sim_config["max_time_steps"]} time steps)')
         print(f'↳ dir: {batch_sim_config["simulation_dir"]}')
         print(f'↳  Last batch status: {batch_init["Last batch status"]}')
@@ -534,7 +493,7 @@ def run_experiment_parallelized(experiment_config, PARAMS_base: list):
       }    
       batch_data_list.append(batch_data)
 
-      if debug_batching_level >= 1:
+      if debug_levels.debug_batching_level >= 1:
         valid_data_from_batch.printTimingData('valid_data')
 
       # Append all of the valid data (up to the point of rhe missed computation) except for the first index, which overlaps with the last index of the previous batch.
@@ -564,7 +523,7 @@ def run_experiment_parallelized(experiment_config, PARAMS_base: list):
         (all_data_from_batch.u: {batch_data["all_data_from_batch"].u})
         """
 
-      if debug_batching_level >= 1:
+      if debug_levels.debug_batching_level >= 1:
         printHeader2(f'Finished batch {batch_init["i_batch"]}: {batch_sim_config["simulation_label"]}')
         print(f'↳             length of x: {len(batch_x)}')
         print(f'↳             length of u: {len(batch_u)}')
@@ -587,7 +546,7 @@ def run_experiment_parallelized(experiment_config, PARAMS_base: list):
   except Exception as err:
     raise Exception(f'There was an exception when running batch: {batch_init}')
     
-  if debug_batching_level >= 1:
+  if debug_levels.debug_batching_level >= 1:
     actual_time_series.print('--------------- Actualualized Time Series (Concatenated) ---------------')
 
   writeJson(experiment_dir + "/experiment_data.json", experiment_data, label="Experiment data")
@@ -684,6 +643,7 @@ def getSimulationExecutor(sim_dir, sim_config, controller_log, plant_log):
     return executor
 
 
+# TODO: Maybe rename this as "delegator" or "coordinator".
 class SimulationExecutor:
   
   def __init__(self, sim_dir, sim_config, controller_log, plant_log):
@@ -737,7 +697,7 @@ class SimulationExecutor:
     print(f'---- Starting plant dynamics for {sim_label} ----\n' \
           f'\t↳ Simulation dir: {self.sim_dir} \n' \
           f'\t↳      Plant log: {self.plant_log.name}\n')
-    if debug_configuration_level >= 2:
+    if debug_levels.debug_configuration_level >= 2:
       printJson(f"Simulation configuration", self.sim_config)
 
     try:
@@ -751,7 +711,7 @@ class SimulationExecutor:
       raise Exception(f'Plant dynamics for "{sim_label}" had an error. See logs: {self.plant_log.name}') from e
 
     # Print the output in a single call to "print" so that it isn't interleaved with print statements in other threads.
-    if debug_dynamics_level >= 1:
+    if debug_levels.debug_dynamics_level >= 1:
       # print('-- Plant dynamics finshed -- \n' \
       #       f'\t↳ Simulation directory: {self.sim_dir} \n' \
       #       f'\t↳      Simulation data: {self.sim_dir}/simulation_data.json')

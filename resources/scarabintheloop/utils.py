@@ -18,9 +18,9 @@ from typing import Union
 # Import contextmanager to allow defining commands to be used to create "with" blocks.
 from contextlib import contextmanager 
 
+import scarabintheloop.debug_levels as debug_levels
 # Level 1: Print shell commands that are called.
 # Level 2: Also print the current working directory.
-debug_shell_calls_level = 0
 
 try:
     assert False
@@ -83,12 +83,10 @@ def _create_json_string(json_data):
         # print(obj.__dict__())
         return vars(obj)
       elif isinstance(obj, np.ndarray):
-        return nump_vec_to_csv_string(obj)
+        return '[' + nump_vec_to_csv_string(obj) + ']'
       else:
         return repr(obj)
     json_string = json.dumps(json_data, indent=2, default=encode_objs)
-    # json_string = json.dumps(json_data, indent=2, default=vars)
-    # json_string = json.dumps(json_data, indent=2)
     json_string = _remove_linebreaks_in_json_dump_between_number_list_items(json_string)
     return json_string
   except Exception as err:
@@ -178,6 +176,108 @@ def assert_is_column_vector(array: np.ndarray, label="array") -> None:
   assert array.shape[1] == 1, \
     f'array must be a column vector. Instead it was {label}.shape={array.shape}'
 
+#################################
+#####  PIPE READER CLASSES ######
+#################################
+class PipeReader:
+  def __init__(self, filename: str):
+    self.filename = filename
+    if debug_levels.debug_interfile_communication_level >= 1:
+      print(f"About to open reader for {filename}. Waiting for it to available...")
+    self.file = open(filename, 'r', buffering=1)
+
+  def close(self):
+    if debug_levels.debug_interfile_communication_level >= 1:
+      print(f'Closing {self}')
+    self.file.close()
+
+  def read(self):
+    self._wait_for_pipe_content()
+    input_line = self._waitForLineFromFile()
+    input_line = PipeReader.checkAndStripInputLoopNumber(input_line)
+    return input_line
+
+  def __repr__(self):
+    return f'PipeReader(file={self.filename}. Is closed? {self.file.closed})'
+
+  def _waitForLineFromFile(self):
+    if debug_levels.debug_interfile_communication_level >= 1:
+      print(f"Waiting for input_line from {self.file.name}.")
+
+    input_line = ""
+    while not input_line.endswith("\n"):
+      #!! Caution, printing out everytime we read a line will cause massive log 
+      #!! files that can (will) grind my system to a hault.
+      input_line += self.file.readline()
+
+    if debug_levels.debug_interfile_communication_level >= 1:
+      print(f'Received input_line from {os.path.basename(self.filename)}: {repr(input_line)}.')
+    return input_line
+
+  def _wait_for_pipe_content(self):
+
+    # Wait for the pip
+    stat_info = os.stat(self.filename)
+  
+    # Check if the file size is greater than zero (some data has been written)
+    return stat_info.st_size > 0
+
+  @staticmethod
+  def checkAndStripInputLoopNumber(input_line):
+    """ Check that an input line, formatted as "Loop <k>: <data>" 
+    has the expected value of k (given by the argument "expected_k") """
+
+    split_input_line = input_line.split(':')
+    loop_input_str = split_input_line[0]
+
+    # Check that the input line is in the expected format. 
+    if not loop_input_str.startswith('Loop '):
+      raise ValueError(f'The input_line "{input_line}" did not start with a loop label.')
+    
+    # Extract the loop number and convert it to an integer.
+    input_loop_number = int(loop_input_str[len('Loop:'):])
+
+    # if input_loop_number != expected_k:
+    #   # If the first piece of the input line doesn't give the correct loop number.
+    #   raise ValueError(f'The input_loop_number="{input_loop_number}" does not match expected_k={expected_k}.')
+    #   
+    # Return the part of the input line that doesn't contain the loop info.
+    return split_input_line[1]
+
+class PipeFloatReader(PipeReader):
+  
+  def __init__(self, filename: str):
+    super().__init__(filename)
+
+  def read(self):
+    return float(super().read())
+
+class PipeVectorReader(PipeReader):
+
+  def __init__(self, filename: str):
+    super().__init__(filename)
+
+  def read(self):
+    return PipeVectorReader.convertStringToVector(super().read())
+  
+  @staticmethod
+  def convertStringToVector(vector_str: str):
+    vector_str_list = vector_str.split(',') #.strip().split("\t")
+
+    # Convert the list of strings to a list of floats.
+    chars_to_strip = ' []\n'
+    v = np.array([[np.float64(x.strip(chars_to_strip)),] for x in vector_str_list])
+    
+    if debug_levels.debug_interfile_communication_level >= 3:
+      print('convertStringToVector():')
+      printIndented('vector_str:', 1)
+      printIndented(repr(vector_str), 1)
+      printIndented('v:', 1)
+      printIndented(repr(v), 1)
+
+    return v
+
+
 
 #############################
 #####  NUMPY FUNCTIONS ######
@@ -194,7 +294,11 @@ def list_to_column_vec(list_vec: List[float]) -> np.ndarray:
 def nump_vec_to_csv_string(array: np.ndarray) -> str:
   if not isinstance(array, np.ndarray):
     raise ValueError(f'Expected array={array} to be an np.array but instead it is a {type(array)}')
-  string = ', '.join(map(str, array.flatten()))
+  if array.ndim == 2:
+    assert array.shape[0] == 1 or array.shape[1] == 1, f'Array must only have one dimension that is not equal to 1. Its dimension is {array.ndim} and shape is {array.shape}.' 
+    array = array.flatten()
+  assert array.ndim == 1, f'After flattening, array must be 1-dimensional.'
+  string = ', '.join(map(str, array))
   return string
 
 
@@ -335,14 +439,14 @@ def run_shell_cmd(cmd: Union[str, List[str]], log=None, working_dir=None):
   
   # If the working directory is provided, then prepend it to the printed command.
   if working_dir:
-    if debug_shell_calls_level >= 2:
+    if debug_levels.debug_shell_calls_level >= 2:
       cmd_print_string = f"{working_dir}/" + cmd_print_string
-    elif debug_shell_calls_level >= 1:
+    elif debug_levels.debug_shell_calls_level >= 1:
       cmd_print_string = os.path.basename(working_dir) + "/" + cmd_print_string
 
 
   # Print the command and if a log is given, then write the command there too.
-  if debug_shell_calls_level >= 1:
+  if debug_levels.debug_shell_calls_level >= 1:
     # Write the command string to the log, if provided.
     if log:
       log.write(cmd_print_string + "\n")

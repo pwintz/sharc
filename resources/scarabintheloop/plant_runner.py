@@ -23,6 +23,7 @@ from abc import abstractmethod, ABC
 import scarabintheloop.scarabizor as scarabizor
 from scarabintheloop.scarabizor import ScarabPARAMSReader
 from scarabintheloop.utils import *
+import scarabintheloop.debug_levels as debug_levels
 import warnings
 
 import json
@@ -45,68 +46,6 @@ except AssertionError:
 class DataNotRecievedViaFileError(IOError):
   pass
 
-debug_interfile_communication_level = 0
-debug_dynamics_level = 0
-
-class PipeReader:
-  def __init__(self, filename: str):
-    self.filename = filename
-    if debug_interfile_communication_level >= 1:
-      print(f"About to open reader for {filename}. Waiting for it to available...")
-    self.file = open(filename, 'r', buffering=1)
-
-  def close(self):
-    if debug_interfile_communication_level >= 1:
-      print(f'Closing {self}')
-    self.file.close()
-
-  def read(self):
-    self._wait_for_pipe_content()
-    input_line = self._waitForLineFromFile()
-    input_line = checkAndStripInputLoopNumber(input_line)
-    return input_line
-
-  def __repr__(self):
-    return f'PipeReader(file={self.filename}. Is closed? {self.file.closed})'
-
-  def _waitForLineFromFile(self):
-    if debug_interfile_communication_level >= 1:
-      print(f"Waiting for input_line from {self.file.name}.")
-
-    input_line = ""
-    while not input_line.endswith("\n"):
-      #!! Caution, printing out everytime we read a line will cause massive log 
-      #!! files that can (will) grind my system to a hault.
-      input_line += self.file.readline()
-
-    if debug_interfile_communication_level >= 1:
-      print(f'Received input_line from {os.path.basename(self.filename)}: {repr(input_line)}.')
-    return input_line
-
-  def _wait_for_pipe_content(self):
-
-    # Wait for the pip
-    stat_info = os.stat(self.filename)
-  
-    # Check if the file size is greater than zero (some data has been written)
-    return stat_info.st_size > 0
-
-class PipeFloatReader(PipeReader):
-  
-  def __init__(self, filename: str):
-    super().__init__(filename)
-
-  def read(self):
-    return float(super().read())
-
-class PipeVectorReader(PipeReader):
-
-  def __init__(self, filename: str):
-    super().__init__(filename)
-
-  def read(self):
-    return convertStringToVector(super().read())
-
 class DelayProvider(ABC):
 
   @abstractmethod
@@ -124,7 +63,7 @@ class ScarabDelayProvider(DelayProvider):
     self.scarab_params_reader = ScarabPARAMSReader(sim_dir)
 
   def get_delay(self, metadata):
-    if debug_interfile_communication_level >= 2:
+    if debug_levels.debug_interfile_communication_level >= 2:
       print('Waiting for statistics from Scarab.')
 
     self.stats_reader.waitForStatsFile(self._stats_file_number)
@@ -282,7 +221,7 @@ class ControllerInterface(ABC):
     self._write_t_delay(u_delay)
     metadata.update(delay_metadata)
 
-    if debug_interfile_communication_level >= 1:
+    if debug_levels.debug_interfile_communication_level >= 1:
       print('Input strings from C++:')
       printIndented(f"       u: {u}", 1)
       printIndented(f"metadata: {metadata}", 1)
@@ -306,7 +245,7 @@ class PipesControllerInterface(ControllerInterface):
     self.x_outfile         = open(self.sim_dir + 'x_py_to_c++', 'w', buffering=1)
     self.t_delay_outfile   = open(self.sim_dir + 't_delay_py_to_c++', 'w', buffering=1)
     
-    if debug_interfile_communication_level >= 1:
+    if debug_levels.debug_interfile_communication_level >= 1:
       print('Pipes are open') 
 
     return self  # Return the instance so that it's accessible as 'as' target
@@ -326,34 +265,34 @@ class PipesControllerInterface(ControllerInterface):
   def _write_x(self, x: np.ndarray):
     # Pass the string back to C++.
     x_out_string = nump_vec_to_csv_string(x)
-    if debug_interfile_communication_level >= 2:
+    if debug_levels.debug_interfile_communication_level >= 2:
       print(f"Writing x output line: {x_out_string} to {self.x_outfile.name}")
     self.x_outfile.write(x_out_string + "\n")# Write to pipe to C++
 
   def _write_t_delay(self, t_delay: float):
     t_delay_str = f"{t_delay:.8g}"
     
-    if debug_interfile_communication_level >= 2:
+    if debug_levels.debug_interfile_communication_level >= 2:
       print(f"Writing {t_delay_str} to t_delay file: {self.t_delay_outfile.name}")
     self.t_delay_outfile.write(t_delay_str + "\n")
 
   def _read_u(self):
-    if debug_interfile_communication_level >= 2:
+    if debug_levels.debug_interfile_communication_level >= 2:
       print(f"Reading u file: {self.u_reader.filename}")
     return self.u_reader.read()
     
   def _read_x_prediction(self):
-    if debug_interfile_communication_level >= 2:
+    if debug_levels.debug_interfile_communication_level >= 2:
       print(f"Reading x_predict file: {self.x_predict_reader.filename}")
     return self.x_predict_reader.read()
     
   def _read_t_prediction(self):
-    if debug_interfile_communication_level >= 2:
+    if debug_levels.debug_interfile_communication_level >= 2:
       print(f"Reading t_predict file: {self.t_predict_reader.filename}")
     return self.t_predict_reader.read()
     
   def _read_iterations(self):
-    if debug_interfile_communication_level >= 2:
+    if debug_levels.debug_interfile_communication_level >= 2:
       print(f"Reading iterations file: {self.iterations_reader.filename}")
     return self.iterations_reader.read()
       
@@ -627,7 +566,7 @@ class TimeStepSeries:
       assert t_start <= t_mid and t_mid <= t_end, f'We must have t_start={t_start} <= t_mid={t_mid} <= t_end={t_end}'
 
     if t_mid is None:
-      assert len(x_start) == len(x_end)
+      assert len(x_start) == len(x_end), f'len(x_start)={len(x_start)} must equal len(x_end)={len(x_end)}'
       #                           [ Start of time step,  End of time step  ]
       self.k                   += [                  k,                   k] # Step number
       self.i                   += [                  k,               k + 1] # Sample index
@@ -657,14 +596,14 @@ class TimeStepSeries:
                       pending_computation: List, 
                       t_mid=None, 
                       x_mid=None):
-    if len(t_end) != len(x_end):
-      raise ValueError("len(t_end) != len(x_end)")
+    assert len(t_end) == len(x_end), \
+      f"len(t_end)={len(t_end)} must equal len(x_end)={len(x_end)}"
 
-    if len(t_end) != len(u):
-      raise ValueError("len(t_end) != len(u)")
+    assert len(t_end) == len(u), \
+      f"len(t_end)={len(t_end)} must equal len(u)={len(u)}"
     
-    if len(t_end) != len(pending_computation):
-      raise ValueError("len(t_end) != len(pending_computation)")
+    assert len(t_end) == len(pending_computation), \
+      f"len(t_end)={len(t_end)} must equal len(pending_computation)={len(pending_computation)}"
 
     for i in range(len(t_end)):
       if t_mid is None:
@@ -922,7 +861,7 @@ def get_u(t, x, u_before, pending_computation_before: ComputationData, controlle
   This function is tested in <root>/tests/test_scarabintheloop_plant_runner.py/Test_get_u
   """
   
-  if debug_dynamics_level >= 1:
+  if debug_levels.debug_dynamics_level >= 1:
     printHeader2('----- get_u (BEFORE) ----- ')
     print(f'u_before[0]: {u_before[0]}')
     printJson("pending_computation_before", pending_computation_before)
@@ -930,12 +869,12 @@ def get_u(t, x, u_before, pending_computation_before: ComputationData, controlle
   if pending_computation_before is not None and pending_computation_before.t_end > t:
     # If last_computation is provided and the end of the computation is after the current time then we do not update anything. 
     # print(f'Keeping the same pending_computation: {pending_computation_before}')
-    if debug_dynamics_level >= 2:
+    if debug_levels.debug_dynamics_level >= 2:
       print(f'Set u_after = u_before = {u_before}. (Computation pending)')
     u_after = u_before
     pending_computation_after = pending_computation_before
     
-    if debug_dynamics_level >= 1:
+    if debug_levels.debug_dynamics_level >= 1:
       printHeader2('----- get_u (AFTER - no update) ----- ')
       print(f'u_after[0]: {u_after[0]}')
       printJson("pending_computation_after", pending_computation_after)
@@ -945,11 +884,11 @@ def get_u(t, x, u_before, pending_computation_before: ComputationData, controlle
   if pending_computation_before is not None and pending_computation_before.t_end <= t:
     # If the last computation data is "done", then we set u_after to the pending value of u.
     
-    if debug_dynamics_level >= 2:
+    if debug_levels.debug_dynamics_level >= 2:
       print(f'Set u_after = pending_computation_before.u = {pending_computation_before.u}. (computation finished)')
     u_after = pending_computation_before.u
   elif pending_computation_before is None:
-    if debug_dynamics_level >= 2:
+    if debug_levels.debug_dynamics_level >= 2:
       print(f'Set u_after = u_before = {u_before} (no pending computation).')
     u_after = u_before
   else:
@@ -957,7 +896,7 @@ def get_u(t, x, u_before, pending_computation_before: ComputationData, controlle
     
 
   # If there is not pen         ding_computation_before or the given pending_computation_before finishes before the current time t, then we run the computation of the next control value.
-  if debug_dynamics_level >= 2:
+  if debug_levels.debug_dynamics_level >= 2:
     print("About to get the next control value for x = ", repr(x))
 
   u_pending, u_delay, metadata = controller_interface.get_next_control_from_controller(x)
@@ -1101,7 +1040,7 @@ def run(sim_dir: str, config_data: dict, evolveState, controller_interface_selec
         assert_is_column_vector(x_end)
         assert x_end.shape == (n, 1), f'x_end={x_end} did not have the expected shape: {(n, 1)}'
 
-        if debug_dynamics_level >= 2:
+        if debug_levels.debug_dynamics_level >= 2:
           print(f'time_index={time_index}, t_start={t_start}, t_mid={t_mid}, t_end={t_end}, pending_computation_after={pending_computation_after}')
           print(f'u_before={u_before}, u_after={u_after}')
 
@@ -1119,7 +1058,7 @@ def run(sim_dir: str, config_data: dict, evolveState, controller_interface_selec
         time_index += 1
         # assert time_index < 10000:, 'time_index > 10000'
           
-        if debug_dynamics_level >= 1:
+        if debug_levels.debug_dynamics_level >= 1:
           print(f'time_step_series: {time_step_series}')
         writeJson(sim_dir + "simulation_data_incremental.json", time_step_series)
         print('\n=====\n')
@@ -1138,43 +1077,8 @@ def run(sim_dir: str, config_data: dict, evolveState, controller_interface_selec
   print(f'time_step_series at end of run(): {time_step_series}')
   return time_step_series
 
-def convertStringToVector(vector_str: str):
-  vector_str_list = vector_str.split(',') #.strip().split("\t")
-
-  # Convert the list of strings to a list of floats.
-  chars_to_strip = ' []\n'
-  v = np.array([[np.float64(x.strip(chars_to_strip)),] for x in vector_str_list])
-  
-  if debug_interfile_communication_level >= 3:
-    print('convertStringToVector():')
-    printIndented('vector_str:', 1)
-    printIndented(repr(vector_str), 1)
-    printIndented('v:', 1)
-    printIndented(repr(v), 1)
-
-  return v
 
 
-def checkAndStripInputLoopNumber(input_line):
-  """ Check that an input line, formatted as "Loop <k>: <data>" 
-  has the expected value of k (given by the argument "expected_k") """
-
-  split_input_line = input_line.split(':')
-  loop_input_str = split_input_line[0]
-
-  # Check that the input line is in the expected format. 
-  if not loop_input_str.startswith('Loop '):
-    raise ValueError(f'The input_line "{input_line}" did not start with a loop label.')
-  
-  # Extract the loop number and convert it to an integer.
-  input_loop_number = int(loop_input_str[len('Loop:'):])
-
-  # if input_loop_number != expected_k:
-  #   # If the first piece of the input line doesn't give the correct loop number.
-  #   raise ValueError(f'The input_loop_number="{input_loop_number}" does not match expected_k={expected_k}.')
-  #   
-  # Return the part of the input line that doesn't contain the loop info.
-  return split_input_line[1]
 
 if __name__ == "__main__":
   raise ValueError("Not intended to be run directly")

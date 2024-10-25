@@ -136,7 +136,7 @@ class PipeReader {
     }
 
     void close() {
-      PRINT_WITH_FILE_LOCATION("Closing " << filename << "...")
+      PRINT("Closing " << filename << "...")
       pipe_file.close();
     }
 };
