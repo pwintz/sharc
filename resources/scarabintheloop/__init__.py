@@ -350,7 +350,6 @@ class Simulation:
     assertFileExists(self.simulation_dir + "/u_c++_to_py")
     assertFileExists(self.simulation_dir + "/x_py_to_c++")
 
-
   @indented_print
   def run(self):
     printHeader2(f"Starting simulation: {self.label}")
@@ -659,10 +658,8 @@ class SimulationExecutor:
     
     # Get a function that defines the plant dynamics.
     with redirect_stdout(plant_log):
-        # add parent directory to the path
-        sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))) 
-        # add dynamics directory to the path
-        sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'dynamics')))
+        # Add dynamics directory to the path
+        sys.path.append(os.environ['DYNAMICS_DIR'])
         dynamics_class = getattr(importlib.import_module(sim_config["dynamics_module_name"]),  sim_config["dynamics_class_name"])
         dynamics_instance = dynamics_class(sim_config)
         self.evolveState_fnc = dynamics_instance.getDynamicsFunction()
