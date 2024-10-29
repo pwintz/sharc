@@ -102,7 +102,7 @@ def writeJson(filename: str, json_data: Union[Dict,List], label:str=None):
   with open(filename, 'w') as file:
     file.write(json_string)
   if label:
-    print(f'{label}: ' + os.path.abspath(filename))
+    print(f'{label}:\n\t' + os.path.abspath(filename))
     
 
 def printJson(label: str, json_data: Union[Dict,List]):

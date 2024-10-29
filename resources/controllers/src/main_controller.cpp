@@ -76,15 +76,15 @@ std::string string_format( const std::string& format, Args ... args )
 
 template<int rows, int cols>
 void loadMatrixValuesFromJson(mat<rows, cols>& mat_out, nlohmann::json json_data, std::string key) {
-      if (json_data[key].size() != rows*cols)
+      if (json_data.at(key).size() != rows*cols)
       {
         throw std::invalid_argument(string_format(
               "loadMatrixValuesFromJson(): The number of entries (%d) in json_data[\"%s\"] does not match the expected number of entries in mat_out (%dx%d).", 
-              json_data[key].size(),  key.c_str(), rows, cols));
+              json_data.at(key).size(),  key.c_str(), rows, cols));
       }
 
       int i = 0;
-      for (auto& element : json_data[key]) {
+      for (auto& element : json_data.at(key)) {
         mat_out[i] = element;
         i++;
       }
@@ -485,10 +485,12 @@ int main()
 
     u_writer.write(                      "u", i, u);
     x_prediction_writer.write("x prediction", i, x_predict);
-    t_predict_writer.write( "t prediction", i, t_predict);
-    iterations_writer.write( "iterations ", i, -1); // TODO: Fix iterations. Currently sending "-1" because we aren't reading the iterations.
+    t_predict_writer.write(   "t prediction", i, t_predict);
+    iterations_writer.write(   "iterations ", i, -1); // TODO: Fix iterations. Currently sending "-1" because we aren't reading the iterations.
 
     delays_reader.read("t_delay", t_delay_prev);
+
+    PRINT("controller mapped x = " << modelX << " to " << u)
     
     if (debug_interfile_communication_level >= 1) 
     {

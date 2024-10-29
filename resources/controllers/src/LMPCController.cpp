@@ -18,15 +18,15 @@ std::string string_format( const std::string& format, Args ... args )
 template<int rows, int cols>
 void loadMatrixValuesFromJson(mat<rows, cols>& mat_out, const nlohmann::json& json_data, const std::string& key) {
     // assertHasKeys(json_data, key);
-    if (json_data[key].size() != rows*cols)
+    if (json_data.at(key).size() != rows*cols)
     {
       throw std::invalid_argument(string_format(
             "loadMatrixValuesFromJson(): The number of entries (%d) in json_data[\"%s\"] does not match the expected number of entries in mat_out (%dx%d).", 
-            json_data[key].size(),  key.c_str(), rows, cols));
+            json_data.at(key).size(),  key.c_str(), rows, cols));
     }
 
     int i = 0;
-    for (auto& element : json_data[key]) {
+    for (auto& element : json_data.at(key)) {
       mat_out[i] = element;
       i++;
     }

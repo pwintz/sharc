@@ -72,8 +72,8 @@ class ExperimentList:
     # Create the experiment_list_dir if it does not exist. An error is created if it already exists.
     os.makedirs(self.experiment_list_dir)
 
-    # Create or update the symlink to the latest folder.
-    latest_experiment_list_dir_symlink_path =  os.path.join(self.experiment_list_dir, "latest")
+    #### CREATE OR UPDATE THE SYMLINK TO THE LATEST FOLDER ####
+    latest_experiment_list_dir_symlink_path =  os.path.join(example_dir, "latest")
     try:
       # Try to remove the previous symlink.
       os.remove(latest_experiment_list_dir_symlink_path)
@@ -82,32 +82,28 @@ class ExperimentList:
       pass
     os.symlink(self.experiment_list_dir, latest_experiment_list_dir_symlink_path, target_is_directory=True)
 
-
-    print("         Example dir: " + self.example_dir)
-    print(f'        Base config: {self.base_config_file_path}')
-    print(f' Experiments config: {self.experiments_config_file_path}')
-
+    #### BUILD LIST OF EXPERIMENTS ####
     self._experiment_list = []
-
     for experiment_config_patch in self.experiment_config_patches_list:
       # Load human-readable labels.
-      experiment_label = self.label + "/" + slugify(experiment_config_patch["label"])
-
-      # example_dir            = os.path.abspath('../..') # The "root" of this project.
-      # experiment_list_dir    = os.path.abspath('.') # A path like <example_dir>/experiments/default-2024-08-25-16:17:35
-      experiment_dir  = os.path.abspath(self.experiment_list_dir + "/" + slugify(experiment_config_patch['label']))
+      patch_label = experiment_config_patch["label"]
 
       experiment_config = patch_dictionary(self.base_config, experiment_config_patch)
-      experiment_config["experiment_label"] = experiment_label
-      experiment_config["experiment_dir"] = experiment_dir
+      experiment_config["experiment_label"] = f"{self.label}/{slugify(patch_label)}"
+      experiment_config["experiment_dir"] = os.path.join(self.experiment_list_dir, slugify(patch_label))
 
-      chip_configs_path      = self.example_dir + '/chip_configs'
+      chip_configs_path      = os.path.join(self.example_dir, 'chip_configs')
       
       # Check that the expected folders exist.
       assertFileExists(chip_configs_path)
 
       experiment = Experiment(experiment_config, chip_configs_path)
       self._experiment_list.append(experiment)
+
+    printHeader1('Experiment List')
+    print("         Example dir: " + self.example_dir)
+    print(f'        Base config: {self.base_config_file_path}')
+    print(f' Experiments config: {self.experiments_config_file_path}')
     
   def __iter__(self):
     self.iterator_counter = 0
@@ -123,22 +119,29 @@ class ExperimentList:
     return experiment
 
   def run_all(self):
+    incremental_data_file_path = os.path.join(self.experiment_list_dir, "experiment_list_data_incremental.json")
+    complete_data_file_path = os.path.join(self.experiment_list_dir, "experiment_list_data.json")
+
     for experiment in self._experiment_list:
       experiment.setup_files()
       experiment_result = experiment.run()
       if experiment.status == ExperimentStatus.FINISHED:
         self.successful_experiment_labels += [repr(experiment)]
         self.experiment_result_list[experiment.label] = experiment.result
-        writeJson(self.experiment_list_dir + "experiment_result_list_incremental.json", self.experiment_result_list)
-        # print(f'Added "{experiment_result["label"]}" to list of experiment results')
       elif experiment.status == ExperimentStatus.SKIPPED: # No result
-        # print(f'Skipped "{experiment.label}" experiment.')
         self.skipped_experiment_labels += [repr(experiment)]
       elif experiment.status == ExperimentStatus.FAILED:
-        # print(f'Running {experiment.label} failed! Error: {experiment.exception}')
         self.failed_experiment_labels += [repr(experiment)]
-        
+
+      writeJson(incremental_data_file_path, self.experiment_result_list, label="Incremental experiment list data")
+      
       self.print_status()
+    
+    print('Finished running experiments from configuration in\n\t' + self.experiments_config_file_path)
+    writeJson(complete_data_file_path, self.experiment_result_list, label="Complete experiment list data")
+    
+    # Delete the incremental data file.
+    os.remove(incremental_data_file_path)
 
   def print_status(self):
     n_total      = len(self.experiment_config_patches_list)
@@ -150,10 +153,14 @@ class ExperimentList:
     n_pending    = n_total - n_not_pending
     def plural_suffix(n): 
       return '' if n == 1 else 's'
+
+    def list_to_line_by_line(my_list: list):
+      return "\n\t".join([""] + my_list)
+
     print(f"Ran {n_ran} experiment{plural_suffix(n_ran)} of {n_total} experiment{plural_suffix(n_total)}.")
-    print(f'Successful: {n_successful}. ({self.successful_experiment_labels})')
-    print(f'   Skipped: {n_skipped   }. ({self.skipped_experiment_labels})')
-    print(f'    Failed: {n_failed    }. ({self.failed_experiment_labels})')
+    print(f'Successful: {n_successful}. {list_to_line_by_line(self.successful_experiment_labels)}')
+    print(f'   Skipped: {n_skipped   }. {list_to_line_by_line(self.skipped_experiment_labels)}')
+    print(f'    Failed: {n_failed    }. {list_to_line_by_line(self.failed_experiment_labels)}')
     print(f'   Pending: {n_pending   }.')
 
 ExperimentStatus = Enum('ExperimentStatus', ['PENDING', 'RUNNING', 'FINISHED', 'SKIPPED', 'FAILED'])
@@ -164,8 +171,8 @@ class Experiment:
               chip_configs_path):
     self.label = experiment_config["experiment_label"]
     self.exception = None
-    self.result = None
-    self.run_time = None
+    self.result    = None
+    self.run_time  = None
     self.experiment_config = experiment_config
     self.status = ExperimentStatus.PENDING
     
@@ -228,6 +235,8 @@ class Experiment:
     assert isinstance(experiment_data["x"], list)
     assert isinstance(experiment_data["u"], list)
     assert isinstance(experiment_data["t"], list)
+    assert isinstance(experiment_data["k"], list)
+    assert isinstance(experiment_data["i"], list)
     assert isinstance(experiment_data["pending_computations"], list)
     assert isinstance(experiment_data["config"], dict)
 
@@ -260,10 +269,10 @@ class Simulation:
     assert isinstance(experiment_config, dict)
     assert isinstance(PARAMS_base, scarabizor.ParamsData), f'type(PARAMS_base)={type(PARAMS_base)}'
     if batch_init:
-      assert isinstance(batch_init, dict)
+      assert isinstance(batch_init, dict), f'type(batch_init)={type(batch_init)}'
 
     self.experiment_config = copy.deepcopy(experiment_config)
-    sim_config = copy.deepcopy(experiment_config)
+    self.sim_config = copy.deepcopy(experiment_config)
 
     # printJson("experiment_config in create_simulation_config", experiment_config)
     experiment_max_time_steps = experiment_config["max_time_steps"]
@@ -311,25 +320,23 @@ class Simulation:
     # Paths to files needed by controller executable.
     self.params_file_for_controller = os.path.join(self.simulation_dir, 'PARAMS.generated')
     self.config_file_for_controller = os.path.join(self.simulation_dir, 'config.json')
-    sim_config["simulation_label"] = label
-    sim_config["max_time_steps"]   = max_time_steps
-    sim_config["simulation_dir"]   = directory
-    sim_config["x0"]               = x0
-    sim_config["u0"]               = u0
-    sim_config["pending_computation"] = pending_computation
-    sim_config["first_time_index"] = first_time_index
-    sim_config["last_time_index"]  = last_time_index
-    sim_config["time_steps"]       = list(range(first_time_index, last_time_index))
-    sim_config["time_indices"]     = sim_config["time_steps"] + [last_time_index]
+    self.sim_config["simulation_label"] = label
+    self.sim_config["max_time_steps"]   = max_time_steps
+    self.sim_config["simulation_dir"]   = directory
+    self.sim_config["x0"]               = x0
+    self.sim_config["u0"]               = u0
+    self.sim_config["pending_computation"] = pending_computation
+    self.sim_config["first_time_index"] = first_time_index
+    self.sim_config["last_time_index"]  = last_time_index
+    self.sim_config["time_steps"]       = list(range(first_time_index, last_time_index))
+    self.sim_config["time_indices"]     = self.sim_config["time_steps"] + [last_time_index]
     
-    self.PARAMS = PARAMS_base.copy()
-    self.PARAMS = self.PARAMS.patch(sim_config["PARAMS_patch_values"])
+    self.PARAMS = PARAMS_base.patch(self.sim_config["PARAMS_patch_values"])
 
     if batch_init:
-      assert batch_init["u0"] == sim_config["u0"], \
-                f'batch_u[0] = {batch_u[0]} must equal sim_config["u0"] = {sim_config["u0"]}.'
+      assert batch_init["u0"] == self.sim_config["u0"], \
+                f'batch_u[0] = {batch_u[0]} must equal sim_config["u0"] = {self.sim_config["u0"]}.'
 
-    self.sim_config = sim_config
 
   def setup_files(self):
 
@@ -398,18 +405,12 @@ def main():
   args = parser.parse_args()
   experiment_list = ExperimentList(example_dir, args.config_filename)
 
-  ##################################################################
-  ################### CONFIGURE DEBUGGING LEVELS ###################
-  ##################################################################
+  #----- CONFIGURE DEBUGGING LEVELS -----#
   debug_levels.set_from_dictionary(experiment_list.base_config["==== Debgugging Levels ===="])
 
   experiment_list.run_all()
-    
-  # Save all of the experiment results to a file.
-  experiment_list_json_filename = experiment_list.experiment_list_dir + "experiment_result_list.json"
-  writeJson(experiment_list_json_filename, experiment_list.experiment_result_list)
-  print(f'Experiment results for "{experiment_list.label}" experiments are in \n\t{experiment_list_json_filename}.')
 
+  # If there are any failed experiments, return a non-zero exit code.
   if experiment_list.failed_experiment_labels:
     exit(1)
     
@@ -423,6 +424,8 @@ def run_experiment_sequential(experiment_config, PARAMS_base: list):
   experiment_data = {"x": simulation_data.x,
                      "u": simulation_data.u,
                      "t": simulation_data.t,
+                     "k": simulation_data.k, # Time steps
+                     "i": simulation_data.i, # Sample time indices
                      "pending_computations": simulation_data.pending_computation,
                      "batches": None,
                      "config": experiment_config}
@@ -535,6 +538,8 @@ def run_experiment_parallelized(experiment_config, PARAMS_base: list):
                         "x": actual_time_series.x,
                         "u": actual_time_series.u,
                         "t": actual_time_series.t,
+                        "k": actual_time_series.k, # Time steps
+                        "i": actual_time_series.i, # Sample time indices
                         "pending_computations": actual_time_series.pending_computation,
                         "config": experiment_config}
                         
