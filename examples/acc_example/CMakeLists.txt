@@ -110,6 +110,7 @@ add_definitions(
     -DTNU=${TNU}
     -DTNDU=${TNDU}
     -DTNY=${TNY}
+    -O3 # Optimize the executable. 
 )
 
 if(USE_DYNAMORIO)
