@@ -734,25 +734,33 @@ class SimulationExecutor:
   def run_simulation(self):
     """ Run everything needed to simulate the plant and dynamics, in parallel."""
     
-    # Run plant and controller in parallel, on separate threads.
-    N_TASKS = 2
+    # Run the controller in parallel, on a separate thread.
+    N_TASKS = 1
     with ThreadPoolExecutor(max_workers=N_TASKS) as executor:
-      # Create two tasks: One for the controller and another for the plant.
-      plant_task      = executor.submit(self._run_plant)
+      # Start a separate thread to run the controller.
+      print("Starting the controller...")
       controller_task = executor.submit(self._run_controller)
-      print("Waiting for plant_task and controller_task to run.")
-      controller_task.add_done_callback(lambda future: print("Controller done."))
-      plant_task.add_done_callback(lambda future: print("Plant done."))
-      for future in concurrent.futures.as_completed([plant_task, controller_task]):
+      controller_task.add_done_callback(lambda future: print("Controller finished."))
+
+      # Start running the plant in the current thread.
+      print("Starting the plant...")
+      simulation_data = self._run_plant()
+      print('Plant finished')
+
+      # Wait for the controller thread to complete its task.
+      for future in concurrent.futures.as_completed([controller_task]):
         if future.exception():
-          print(f'Failed future.')
+          err = future.exception()
+
+          # Create a list of the causes of the exception.
+          err_repr_list = []
+          while err:
+            err_repr_list = [repr(err)] + err_repr_list
+            err = err.__cause__
           
-        future.result()  # This will raise the exception if one occurred
+          raise Exception('The controller task failed:\n\t' + "\n\t".join(err_repr_list)) from future.exception()
 
-      simulation_data = plant_task.result()
-
-    if simulation_data is None:
-      raise ValueError(f"simulation_data is None before postprocessing in class {type(self)}")
+    assert simulation_data, f"simulation_data={simulation_data} must not be None"
     
     try:
       # Do optional postprocessing (no-op if postprocess_simulation_data is not overridden in subclass)
