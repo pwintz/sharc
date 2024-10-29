@@ -36,7 +36,17 @@ example_dir = os.getcwd()
 assertFileExists('controller_delegator.py')
 assertFileExists('plant_dynamics.py')
 controller_delegator = loadModuleFromWorkingDir("controller_delegator")
-plant_dynamics = loadModuleFromWorkingDir("plant_dynamics")
+
+def remove_suffix(string:str, suffix: str):
+  """
+  Replicate the remove_suffix str method that is added in Python 3.9.
+  """
+  assert isinstance(string, str)
+  assert isinstance(suffix, str)
+  if string.endswith(suffix):
+    return string[:-len(suffix)]
+  else:
+    return string
 
 class ExperimentList:
   def __init__(self, example_dir, config_filename):
@@ -60,7 +70,7 @@ class ExperimentList:
     if not isinstance(self.experiment_config_patches_list, list):
       self.experiment_config_patches_list = [self.experiment_config_patches_list]
 
-    self.label = slugify(config_filename)
+    self.label = slugify(remove_suffix(config_filename, ".json"))
     self.base_config["experiment_list_label"] = self.label
 
     self.experiment_list_dir = os.path.join(self.experiments_dir, self.label + "--" + time.strftime("%Y-%m-%d--%H-%M-%S"))
