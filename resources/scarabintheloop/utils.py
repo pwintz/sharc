@@ -473,7 +473,6 @@ def run_shell_cmd(cmd: Union[str, List[str]], log=None, working_dir=None):
       log.seek(0)
       print(f"({log.name}) ".join([''] + log.readlines()))
     print(err_msg)
-    log.write(err_msg)
     raise Exception(err_msg) from e
     
 
@@ -486,10 +485,18 @@ def loadModuleFromWorkingDir(module_name):
   file_path = os.path.abspath(module_name + ".py")
   return loadModuleFromPath(module_name, file_path)
 
+def loadModuleInDir(module_directory, module_name):
+  """ Load a module and return it. In order for it to be accesible from the scope of the caller, you must assign the return value to a variable.
+  """
+  assertFileExists(module_directory, 'The module directory does not exist.')
+  file_path = os.path.join(module_directory, module_name + ".py")
+
+  return loadModuleFromPath(module_name, file_path)
+
 def loadModuleFromPath(module_name, file_path):
   """ Load a module and return it. In order for it to be accesible from the scope of the caller, you must assign the return value to a variable.
   """
-  assertFileExists(file_path)
+  assertFileExists(file_path, f'The requested module does not exist at {file_path}.')
 
   # Create a spec from the file location
   spec = importlib.util.spec_from_file_location(module_name, file_path)

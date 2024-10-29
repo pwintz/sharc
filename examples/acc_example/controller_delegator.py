@@ -6,6 +6,9 @@ example directory and expirement configuration values.
 
 import subprocess
 import os
+from scarabintheloop.utils import run_shell_cmd
+import scarabintheloop.debug_levels as debug_levels
+from scarabintheloop.controller_delegator_base import BaseControllerExecutableProvider
 
 CMAKE_VERBOSITY_FROM_DEBUG_LEVEL = {
   0: "ERROR",
@@ -13,84 +16,73 @@ CMAKE_VERBOSITY_FROM_DEBUG_LEVEL = {
   2: "VERBOSE"
 }
 
-example_dir = os.path.abspath('.')
+class ControllerExecutableProvider(BaseControllerExecutableProvider):
 
-def get_controller_executable(build_config:dict) -> str:
-  build_dir = example_dir + "/build" 
-  os.makedirs(build_dir, exist_ok=True)
+  def get_controller_executable(self, build_config:dict) -> str:
 
-  debug_build_level = build_config["==== Debgugging Levels ===="]["debug_build_level"]
+    simulation_options      = build_config["Simulation Options"]
+    use_parallel_simulation = simulation_options["parallel_scarab_simulation"]
+    use_fake_delays         = build_config["Simulation Options"]["use_fake_delays"]
+    prediction_horizon      = build_config["system_parameters"]["mpc_options"]["prediction_horizon"]
+    control_horizon         = build_config["system_parameters"]["mpc_options"]["control_horizon"]
+    state_dimension         = build_config["system_parameters"]["state_dimension"]
+    input_dimension         = build_config["system_parameters"]["input_dimension"]
+    disturbance_input_dimension = build_config["system_parameters"]["disturbance_input_dimension"]
+    output_dimension        = build_config["system_parameters"]["output_dimension"]
 
-  simulation_options = build_config["Simulation Options"]
-  use_parallel_simulation = simulation_options["parallel_scarab_simulation"]
-  prediction_horizon = build_config["system_parameters"]["mpc_options"]["prediction_horizon"]
-  control_horizon = build_config["system_parameters"]["mpc_options"]["control_horizon"]
-  state_dimension = build_config["system_parameters"]["state_dimension"]
-  input_dimension = build_config["system_parameters"]["input_dimension"]
-  disturbance_input_dimension = build_config["system_parameters"]["disturbance_input_dimension"]
-  output_dimension = build_config["system_parameters"]["output_dimension"]
+    # Construct the base executable name, given the system and simulation options.
+    executable_name = f"main_controller_{prediction_horizon}_{control_horizon}"
 
-  use_fake_delays = build_config["Simulation Options"]["use_fake_delays"]
+    # We use DynamoRio only if we are using the parallelized scheme with real delays.
+    use_dynamorio = use_parallel_simulation and not use_fake_delays
+    if use_dynamorio:
+      executable_name += "_dynamorio"
 
-  executable_name = f"main_controller_{prediction_horizon}_{control_horizon}"
+    executable_path = os.path.join(self.build_dir, executable_name)
 
-  use_dynamorio = use_parallel_simulation and not use_fake_delays
+    cmake_arguments_from_config = [f"-DPREDICTION_HORIZON={prediction_horizon}", 
+                                  f"-DCONTROL_HORIZON={control_horizon}",
+                                  f"-DTNX={state_dimension}",
+                                  f"-DTNU={input_dimension}",
+                                  f"-DTNDU={disturbance_input_dimension}",
+                                  f"-DTNY={output_dimension}",
+                                  ]
 
-  if use_dynamorio:
-    executable_name += "_dynamorio"
+    if use_dynamorio:
+      cmake_arguments_from_config += [f"-DUSE_DYNAMORIO=ON"]
+    else:
+      cmake_arguments_from_config += [f"-DUSE_DYNAMORIO=OFF"]
 
-  executable_path = build_dir + "/" + executable_name
+    if debug_levels.debug_build_level:
+      print("== Running CMake to generate build tree ==")
 
-  def shell(cmd_list):
-    if debug_build_level >= 2:
-      print(f"Calling subprocess.check_call({cmd_list})")
-    if debug_build_level >= 1:
-      print(f">> {' '.join(cmd_list)}")
-    subprocess.check_call(cmd_list)
-
-  def cmake(args:list):
-    cmake_verbosity = CMAKE_VERBOSITY_FROM_DEBUG_LEVEL[debug_build_level]
-    cmake_cmd = ["cmake", "--log-level=" + cmake_verbosity] + args
-    shell(cmake_cmd)
-
-  def cmake_build(build_dir:str, args:list=[]):
-    cmake_cmd = ["cmake", "--build", build_dir] 
+    cmake_generate_tree_args = ["-S", f"{self.example_dir}", 
+                                "-B", f"{self.build_dir}"] + cmake_arguments_from_config
+    self.cmake(cmake_generate_tree_args)
     
-    if debug_build_level >= 2:
+    if debug_levels.debug_build_level:
+      print("== Running CMake to build controller executable ==")
+    # When we build the project, we don't need to pass the arguments from "build_config" to cmake, since they have already been incorporated into the build process during the prior call of cmake. 
+    self.cmake_build(executable_path)
+
+    return executable_path
+
+  def cmake(self, args:list):
+    cmake_verbosity = CMAKE_VERBOSITY_FROM_DEBUG_LEVEL[debug_levels.debug_build_level]
+    cmake_cmd = ["cmake", "--log-level=" + cmake_verbosity] + args
+    run_shell_cmd(cmake_cmd, working_dir=self.build_dir)
+
+  def cmake_build(self, executable_path, args:list=[]):
+    cmake_cmd = ["cmake", "--build", self.build_dir] 
+    
+    if debug_levels.debug_build_level >= 2:
       cmake_cmd += ["--verbose"]
       
     cmake_cmd += args
 
-    if debug_build_level == 0:
+    if debug_levels.debug_build_level == 0:
       cmake_cmd += ["--", "--quiet"]
 
-    shell(cmake_cmd)
+    run_shell_cmd(cmake_cmd)
     if not os.path.exists(executable_path):
       raise IOError(f'The expected executable file "{executable_path}" was not build.')
-
-  cmake_arguments_from_config = [f"-DPREDICTION_HORIZON={prediction_horizon}", 
-                                 f"-DCONTROL_HORIZON={control_horizon}",
-                                 f"-DTNX={state_dimension}",
-                                 f"-DTNU={input_dimension}",
-                                 f"-DTNDU={disturbance_input_dimension}",
-                                 f"-DTNY={output_dimension}",
-                                 ]
-
-  if use_dynamorio:
-    cmake_arguments_from_config += [f"-DUSE_DYNAMORIO=ON"]
-  else:
-    cmake_arguments_from_config += [f"-DUSE_DYNAMORIO=OFF"]
-
-  if debug_build_level:
-    print("== Running CMake to generate build tree ==")
-
-  cmake_generate_tree_args = ["-S", f"{example_dir}", 
-                              "-B", f"{build_dir}"] + cmake_arguments_from_config
-  cmake(cmake_generate_tree_args)
-  
-  if debug_build_level:
-    print("== Running CMake to build controller executable ==")
-  # When we build the project, we don't need to pass the arguments from "build_config" to cmake, since they have already been incorporated into the build process during the prior call of cmake. 
-  cmake_build(build_dir)
-
-  return executable_path

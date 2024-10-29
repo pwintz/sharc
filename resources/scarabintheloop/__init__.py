@@ -31,11 +31,7 @@ import importlib
 
 import scarabintheloop.plant_runner as plant_runner
 
-######## Load the controller and plant modules from the current directory #########
-example_dir = os.getcwd()
-assertFileExists('controller_delegator.py')
-assertFileExists('plant_dynamics.py')
-controller_delegator = loadModuleFromWorkingDir("controller_delegator")
+controller_executable_provider = None
 
 def remove_suffix(string:str, suffix: str):
   """
@@ -153,14 +149,35 @@ class ExperimentList:
     # Delete the incremental data file.
     os.remove(incremental_data_file_path)
 
+  def n_total(self):
+    return len(self.experiment_config_patches_list)
+
+  def n_successful(self):
+    return len(self.successful_experiment_labels)
+
+  def n_failed(self):
+    return len(self.failed_experiment_labels)
+
+  def n_skipped(self):
+    return len(self.skipped_experiment_labels)
+    
+  def n_ran(self):
+    return self.n_successful() + self.n_failed() 
+    
+  def n_not_pending(self):
+    return self.n_successful() + self.n_failed() + self.n_skipped()
+
+  def n_pending(self):
+    return self.n_total() - self.n_not_pending()
+
   def print_status(self):
-    n_total      = len(self.experiment_config_patches_list)
-    n_successful = len(self.successful_experiment_labels)
-    n_failed     = len(self.failed_experiment_labels)
-    n_skipped    = len(self.skipped_experiment_labels)
-    n_ran        = n_successful + n_failed 
-    n_not_pending= n_successful + n_failed + n_skipped
-    n_pending    = n_total - n_not_pending
+    n_total      = self.n_total()
+    n_successful = self.n_successful()
+    n_failed     = self.n_failed()
+    n_skipped    = self.n_skipped()
+    n_ran        = self.n_ran()
+    n_not_pending= self.n_not_pending()
+    n_pending    = self.n_pending()
     def plural_suffix(n): 
       return '' if n == 1 else 's'
 
@@ -399,8 +416,33 @@ class Simulation:
 
       return simulation_data
 
-def main():
+def run(example_dir:str, config_filename:str):
+  """
+  This function is the entry point for running scarbintheloop 
+  from other Python scripts (e.g., in unit testint). 
+  When running from command line, the entry point is main(), instead,
+  which then calls this function. 
+  """
+  global controller_executable_provider
+
+  ######## Load the controller and plant modules from the current directory #########
+  if example_dir is None:
+    example_dir = os.getcwd()
+  # assertFileExists('controller_delegator.py')
+  controller_delegator_module = loadModuleInDir(example_dir, "controller_delegator")
+  controller_executable_provider = controller_delegator_module.ControllerExecutableProvider(example_dir)
   
+  experiment_list = ExperimentList(example_dir, config_filename)
+
+  #----- CONFIGURE DEBUGGING LEVELS -----#
+  debug_levels.set_from_dictionary(experiment_list.base_config["==== Debgugging Levels ===="])
+
+  experiment_list.run_all()
+
+  return experiment_list
+    
+def main(example_dir=None):
+
   # Create the argument parser
   parser = argparse.ArgumentParser(description="Run a set of experiments.")
 
@@ -413,17 +455,11 @@ def main():
 
   # Parse the arguments from the command line
   args = parser.parse_args()
-  experiment_list = ExperimentList(example_dir, args.config_filename)
+  example_dir = os.path.abspath('.')
+  experiment_list = run(example_dir, args.config_filename)
 
-  #----- CONFIGURE DEBUGGING LEVELS -----#
-  debug_levels.set_from_dictionary(experiment_list.base_config["==== Debgugging Levels ===="])
-
-  experiment_list.run_all()
-
-  # If there are any failed experiments, return a non-zero exit code.
-  if experiment_list.failed_experiment_labels:
+  if experiment_list.n_failed():
     exit(1)
-    
 
 def run_experiment_sequential(experiment_config, PARAMS_base: list):
   print(f'Start of run_experiment_sequential(<{experiment_config["experiment_label"]}>)')
@@ -661,6 +697,7 @@ def getSimulationExecutor(sim_dir, sim_config, controller_log, plant_log):
 class SimulationExecutor:
   
   def __init__(self, sim_dir, sim_config, controller_log, plant_log):
+    global controller_executable_provider
     self.sim_dir = sim_dir
     self.sim_config = sim_config
     self.controller_log = controller_log
@@ -668,7 +705,7 @@ class SimulationExecutor:
 
     # Create the executable.
     with redirect_stdout(controller_log):
-      self.controller_executable = controller_delegator.get_controller_executable(sim_config)
+      self.controller_executable = controller_executable_provider.get_controller_executable(sim_config)
     assertFileExists(self.controller_executable)
     
     # Get a function that defines the plant dynamics.
