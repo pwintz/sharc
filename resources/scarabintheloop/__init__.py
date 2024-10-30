@@ -70,7 +70,7 @@ class ExperimentList:
     self.base_config["experiment_list_label"] = self.label
 
     self.experiment_list_dir = os.path.join(self.experiments_dir, self.label + "--" + time.strftime("%Y-%m-%d--%H-%M-%S"))
-    self.experiment_result_list = {}
+    self.experiment_result_dict = {}
     self.successful_experiment_labels = []
     self.skipped_experiment_labels = []
     self.failed_experiment_labels = []
@@ -130,24 +130,34 @@ class ExperimentList:
 
     for experiment in self._experiment_list:
       experiment.setup_files()
+      
       experiment_result = experiment.run()
+
+      assert experiment_result is not None
+      assert isinstance(experiment_result, dict)
       if experiment.status == ExperimentStatus.FINISHED:
         self.successful_experiment_labels += [repr(experiment)]
-        self.experiment_result_list[experiment.label] = experiment.result
+        self.experiment_result_dict[experiment.label] = experiment.result
       elif experiment.status == ExperimentStatus.SKIPPED: # No result
         self.skipped_experiment_labels += [repr(experiment)]
       elif experiment.status == ExperimentStatus.FAILED:
         self.failed_experiment_labels += [repr(experiment)]
 
-      writeJson(incremental_data_file_path, self.experiment_result_list, label="Incremental experiment list data")
+      writeJson(incremental_data_file_path, self.experiment_result_dict, label="Incremental experiment list data")
       
       self.print_status()
     
     print('Finished running experiments from configuration in\n\t' + self.experiments_config_file_path)
-    writeJson(complete_data_file_path, self.experiment_result_list, label="Complete experiment list data")
+    writeJson(complete_data_file_path, self.experiment_result_dict, label="Complete experiment list data")
     
     # Delete the incremental data file.
     os.remove(incremental_data_file_path)
+
+  def get_results(self):
+    """
+    Return a list of all of the experiment results.
+    """
+    return list(self.experiment_result_dict.values())
 
   def n_total(self):
     return len(self.experiment_config_patches_list)
@@ -275,7 +285,8 @@ class Experiment:
       "experiment wall time": end_time - start_time
     }
 
-    writeJson("experiment_result.json", self.result)
+    writeJson(os.path.join(self.experiment_dir, "experiment_result.json"), self.result)
+    return self.result
 
   def __repr__(self):
     repr_str = f'Experiment("{self.label}", {self.status.name}'
@@ -370,8 +381,6 @@ class Simulation:
     # Create the simulation directory if it does not already exist.
     os.makedirs(self.simulation_dir, exist_ok=True)
 
-    # Move into the simulation directory.
-    os.chdir(self.simulation_dir)
 
     # Write the configuration to config.json.
     writeJson(os.path.join(self.simulation_dir, "config.json"), self.sim_config)
@@ -394,27 +403,47 @@ class Simulation:
     assertFileExists(self.params_file_for_controller)
     assertFileExists(self.config_file_for_controller)  
 
-    # Open up some loooooooooogs.
-    with openLog(self.plant_log_path,      f'Plant Log for "{self.label}"') as plant_log, \
-        openLog(self.controller_log_path, f'Controller Log for "{self.label}"') as controller_log:
+    use_fake_delays = self.sim_config["Simulation Options"]["use_fake_delays"]
+    if use_fake_delays:
+      # Create some fake delay data.
+      max_time_steps = self.sim_config["max_time_steps"]
+      sample_time    = self.sim_config['system_parameters']["sample_time"]
+      # Create a list of delays that are shorter than the sample time
+      fake_delays = [0.1*sample_time]*max_time_steps
 
+      # Update one of the queued delays to be longer than the sample time
+      index_for_delay = 2
+      if len(fake_delays) >= index_for_delay+1:
+        fake_delays[index_for_delay] = 1.1*sample_time
+    else:
+      fake_delays = None
+
+    # Open up some loooooooooogs.
+    with openLog(self.plant_log_path,      f'Plant Log for "{self.label}"')      as plant_log, \
+         openLog(self.controller_log_path, f'Controller Log for "{self.label}"') as controller_log:
+
+      # Move into the simulation directory.
       simulation_executor = getSimulationExecutor(self.simulation_dir, 
                                                   self.sim_config, 
                                                   controller_log, 
-                                                  plant_log)
+                                                  plant_log,
+                                                  fake_delays = fake_delays)
 
       # Execute the simulation.
       simulation_data = simulation_executor.run_simulation()
+      
+
+      sim_data_path = os.path.join(self.simulation_dir, 'simulation_data.json')
       printHeader2(f'Finished Simulation: "{self.label}"')
       print(f'↳ Simulation dir: {self.simulation_dir}')
       print(f'↳ Controller log: {self.controller_log_path}')
       print(f'↳      Plant log: {self.plant_log_path}')
-      print(f"↳  Data out file: {os.path.abspath('simulation_data.json')}")
+      print(f"↳  Data out file: {sim_data_path}")
       
       simulation_data.metadata["controller_log_path"] = self.controller_log_path
       simulation_data.metadata["plant_log_path"]      = self.plant_log_path
 
-      return simulation_data
+    return simulation_data
 
 def run(example_dir:str, config_filename:str):
   """
@@ -426,9 +455,11 @@ def run(example_dir:str, config_filename:str):
   global controller_executable_provider
 
   ######## Load the controller and plant modules from the current directory #########
-  if example_dir is None:
-    example_dir = os.getcwd()
-  # assertFileExists('controller_delegator.py')
+  assert example_dir is not None
+  example_dir = os.path.abspath(example_dir)
+  assertFileExists(example_dir, f'The current working directory is {os.getcwd()}')
+  
+
   controller_delegator_module = loadModuleInDir(example_dir, "controller_delegator")
   controller_executable_provider = controller_delegator_module.ControllerExecutableProvider(example_dir)
   
@@ -438,7 +469,8 @@ def run(example_dir:str, config_filename:str):
   debug_levels.set_from_dictionary(experiment_list.base_config["==== Debgugging Levels ===="])
 
   experiment_list.run_all()
-
+  
+  assert isinstance(experiment_list, ExperimentList)
   return experiment_list
     
 def main(example_dir=None):
@@ -645,30 +677,16 @@ def processBatchSimulationData(batch_init:dict, batch_simulation_data: dict, sam
   return valid_data_from_batch, next_batch_init
 
 
-def getSimulationExecutor(sim_dir, sim_config, controller_log, plant_log):
+def getSimulationExecutor(sim_dir, sim_config, controller_log, plant_log, fake_delays=None):
   """ 
   This function implements the "Factory" design pattern, where it returns objects of various classes depending on the imputs.
   """
 
-  use_parallel_scarab_simulation = sim_config["Simulation Options"]["parallel_scarab_simulation"]
-  
-  use_fake_delays = sim_config["Simulation Options"]["use_fake_delays"]
-  if use_fake_delays:
-    # Create some fake delay data.
-    max_time_steps = sim_config["max_time_steps"]
-    sample_time    = sim_config['system_parameters']["sample_time"]
-    # Create a list of delays that are shorter than the sample time
-    fake_delays = [0.1*sample_time]*max_time_steps
-
-    # Update one of the queued delays to be longer than the sample time
-    index_for_delay = 2
-    if len(fake_delays) >= index_for_delay+1:
-      fake_delays[index_for_delay] = 1.1*sample_time
-    
+  use_parallel_scarab_simulation = sim_config["Simulation Options"]["parallel_scarab_simulation"]    
   if use_parallel_scarab_simulation:
     print("Using ParallelSimulationExecutor.")
 
-    if use_fake_delays:
+    if fake_delays:
       # Create the mock Scarab runner.
       trace_processor = scarabizor.MockTracesToComputationTimesProcessor(sim_dir, delays=fake_delays)
     else:
@@ -680,16 +698,18 @@ def getSimulationExecutor(sim_dir, sim_config, controller_log, plant_log):
     print("Using SerialSimulationExecutor.")
     executor = SerialSimulationExecutor(sim_dir, sim_config, controller_log, plant_log)
     delay_provider_config = sim_config["Simulation Options"]["in-the-loop_delay_provider"]
-    assert delay_provider_config == "execution-driven scarab" or delay_provider_config == "fake execution-driven scarab", \
-      f'delay_provider_config={delay_provider_config} must be either "execution-driven scarab" or "fake execution-driven scarab"'
+    assert delay_provider_config == "execution-driven scarab", \
+      f'delay_provider_config={delay_provider_config} must be "execution-driven scarab" when doing serial execution.'
     
-    
-    if use_fake_delays:
+    if fake_delays:
       # Create the mock Scarab runner.
-      executor.scarab_runner = scarabizor.MockExecutionDrivenScarabRunner(queued_delays=fake_delays, controller_log=controller_log)
+      executor.scarab_runner = scarabizor.MockExecutionDrivenScarabRunner(sim_dir=sim_dir,
+                                                                          queued_delays=fake_delays,
+                                                                          controller_log=controller_log)
     else:
-      executor.scarab_runner = scarabizor.ExecutionDrivenScarabRunner(controller_log)
-      
+      executor.scarab_runner = scarabizor.ExecutionDrivenScarabRunner(sim_dir=sim_dir,
+                                                                      controller_log=controller_log)
+    
     return executor
 
 
@@ -728,15 +748,13 @@ class SimulationExecutor:
           f'      Executable: {self.controller_executable} \n'\
           f'  Simulation dir: {self.sim_dir} \n'\
           f'  Controller log: {self.controller_log.name}')
-    
     try:
-      assertFileExists('config.json') # config.json is read by the controller.
+      assertFileExists(os.path.join(self.sim_dir, 'config.json')) # config.json is read by the controller.
       self.run_controller()
-      print('Controller finished.') 
     except Exception as err:
-      # if hasattr(err, 'output') and err.output:
-      #   print(f'Error output: {err.output}')
+      # TODO: When the controller fails, we need to notify the plant_runner to stop running.
       raise Exception(f'Running the controller \n\t{type(self.controller_executable)}\nusing {type(self)} failed! \nSee logs: {self.controller_log.name}') from err
+    print('SimulationExecutor._run_controller() finished.') 
 
   def _run_plant(self):
     """ 
@@ -751,9 +769,9 @@ class SimulationExecutor:
 
     try:
       with redirect_stdout(self.plant_log):
-        print('Start of Plant Dynamics thread.')
+        print('Start of SimulationExecutor._run_plant() (Plant Dynamics task).')
         plant_result = plant_runner.run(self.sim_dir, self.sim_config, self.evolveState_fnc)
-        print('Successfully finished running Plant Dynamics.')
+        print('Successfully SimulationExecutor._run_plant() (Plant Dynamics task).')
 
     except Exception as e:
       self.plant_log.write(f'Plant dynamics had an error: {e}')
@@ -761,23 +779,19 @@ class SimulationExecutor:
 
     # Print the output in a single call to "print" so that it isn't interleaved with print statements in other threads.
     if debug_levels.debug_dynamics_level >= 1:
-      # print('-- Plant dynamics finshed -- \n' \
-      #       f'\t↳ Simulation directory: {self.sim_dir} \n' \
-      #       f'\t↳      Simulation data: {self.sim_dir}/simulation_data.json')
       print('-- Plant dynamics finshed -- \n' \
             f'\t↳ Simulation directory: {self.sim_dir}')
     return plant_result
 
   def run_simulation(self):
     """ Run everything needed to simulate the plant and dynamics, in parallel."""
-    
     # Run the controller in parallel, on a separate thread.
     N_TASKS = 1
     with ThreadPoolExecutor(max_workers=N_TASKS) as executor:
       # Start a separate thread to run the controller.
       print("Starting the controller...")
       controller_task = executor.submit(self._run_controller)
-      controller_task.add_done_callback(lambda future: print("Controller finished."))
+      controller_task.add_done_callback(lambda future: print("Controller task finished."))
 
       # Start running the plant in the current thread.
       print("Starting the plant...")
@@ -796,6 +810,8 @@ class SimulationExecutor:
             err = err.__cause__
           
           raise Exception('The controller task failed:\n\t' + "\n\t".join(err_repr_list)) from future.exception()
+        else:
+          print("Controller task was successful.")
 
     assert simulation_data, f"simulation_data={simulation_data} must not be None"
     
@@ -838,7 +854,7 @@ class SerialSimulationExecutor(SimulationExecutor):
     try:
       self.scarab_runner.run(cmd)
     except Exception as err:
-      print(f'Failed to run command with {type(self.scarab_runner)}: "{cmd}"')
+      print(f'Failed to run command with {type(self.scarab_runner)}: "{cmd}".\n{type(err)}: {err}\n{traceback.format_exc()}')
       raise err
     
 class ParallelSimulationExecutor(SimulationExecutor):

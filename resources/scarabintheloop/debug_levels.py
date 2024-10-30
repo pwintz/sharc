@@ -1,5 +1,5 @@
 """
-This package stores global debug levels.
+This package stores global debugging message levels.
 """
 
 # Define default debugging levels.

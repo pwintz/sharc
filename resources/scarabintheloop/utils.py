@@ -182,6 +182,7 @@ def assert_is_column_vector(array: np.ndarray, label="array") -> None:
 class PipeReader:
   def __init__(self, filename: str):
     self.filename = filename
+    assertFileExists(self.filename)
     if debug_levels.debug_interfile_communication_level >= 1:
       print(f"About to open reader for {filename}. Waiting for it to available...")
     self.file = open(filename, 'r', buffering=1)
@@ -409,26 +410,28 @@ def openLog(filename, headerText=None):
     # Clean up
     log_file.close()
 
-@contextmanager
-def in_working_dir(path):
-  """
-  Temporarily change the working directory within a "with" block.
-  Usage:
-
-    with cwd('/home/bwayne'):
-      <do stuff in the /home/bwayne/ directory>
-
-  """
-  oldpwd = os.getcwd()
-  try:
-    os.chdir(path)
-  except FileNotFoundError as e:
-    raise FileNotFoundError(f"The directory {path} does not exist (absolute path: {os.path.abspath(path)}).") from e
-  try:
-      yield
-  finally:
-    # Change back to initial working directory
-    os.chdir(oldpwd)
+# @contextmanager
+# def in_working_dir(path):
+#   """
+#   Temporarily change the working directory within a "with" block.
+#   Usage:
+# 
+#     with cwd('/home/bwayne'):
+#       <do stuff in the /home/bwayne/ directory>
+# 
+#   """
+#   oldpwd = os.getcwd()
+#   
+#   assert os.getcwd() == '/dev-workspace/integration_tests'
+#   try:
+#     os.chdir(path)
+#   except FileNotFoundError as e:
+#     raise FileNotFoundError(f"The directory {path} does not exist (absolute path: {os.path.abspath(path)}).") from e
+#   try:
+#       yield
+#   finally:
+#     # Change back to initial working directory
+#     os.chdir(oldpwd)
 
 
 def run_shell_cmd(cmd: Union[str, List[str]], log=None, working_dir=None):
@@ -453,7 +456,6 @@ def run_shell_cmd(cmd: Union[str, List[str]], log=None, working_dir=None):
       log.flush()
     # Print to standard out.
     print(cmd_print_string)
-
 
   # We update the working directory after printing the string so that it is 
   # more evident to the developer that no working directory was explicitly given

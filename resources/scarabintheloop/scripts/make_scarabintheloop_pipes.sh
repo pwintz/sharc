@@ -1,6 +1,8 @@
 #! /usr/bin/bash
 # Script for creating the pipe files needed to communicate between controller and plant dynamics when running a Scarab simulation in execution-driven mode. 
 
+set -Eeuo pipefail
+
 ## Declare an array variable
 declare -a list_of_pipes=("x_predict_c++_to_py" \
                           "t_predict_c++_to_py" \

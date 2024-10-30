@@ -18,7 +18,7 @@ from scarab_globals import scarab_paths
 
 debug_scarab_level = 0
 
-params_in_dir = 'docker_user_home'
+# params_in_dir = 'docker_user_home'
 log_dir_regex = re.compile(r"\nLog directory is (.*?)\n")
 trace_file_regex = re.compile(r"\nCreated thread trace file (.*?)\n")
 
@@ -258,7 +258,7 @@ class ScarabStatsReader:
 
 class ExecutionDrivenScarabRunner:
 
-  def __init__(self, controller_log=None, sim_dir='.'):
+  def __init__(self, sim_dir, controller_log=None):
     self.controller_log = controller_log
     self.instruction_limit = int(1e9)
     self.heartbeat_interval = int(1e6) # How often to print progress.
@@ -267,13 +267,16 @@ class ExecutionDrivenScarabRunner:
     self.params_in_file  = os.path.join(self.sim_dir, 'PARAMS.in')
     self.params_out_file = os.path.join(self.sim_dir, 'PARAMS.out')
 
+    # Check that the simulation directory exists.
+    assertFileExists(self.sim_dir)
+  
     # Check that the necessary PARAMs.generated file exists. 
     # This constructor is run before we start multiprocessing, so it is easier to 
     # debug errors that are raised here.
-    assertFileExists(self.params_src_file)
+    assertFileExists(self.params_src_file, f'PARAMS.generated should exist in the sim_dir={self.sim_dir}')
 
   def run(self, cmd):
-    print(f"ExecutionDrivenScarabRunner.run({cmd})")
+    print(f"ExecutionDrivenScarabRunner.run({cmd}) in {self.sim_dir}")
 
     # If 'PARAMS.generated' does not exist, then Scarab fails with unclear 
     # error messages, so we check it here to ensure it is there.
@@ -292,28 +295,21 @@ class ExecutionDrivenScarabRunner:
         # '--num_heartbeats 1'
         # '--power_intf_on 1']
       ]
-    if self.sim_dir:
-      # If sim_dir is given, provide it to Scarab. 
-      # This changes the working directory.
-      scarab_cmd_argv += [
-        '--simdir', self.sim_dir 
-      ]
-
-
+    run_shell_cmd(scarab_cmd_argv, working_dir=self.sim_dir, log=self.controller_log)
     # There is a bug in Scarab that causes it to sometimes crash when run in the terminal and the terminal is resized. To avoid this bug, we run it in a different thread, which appears to fix the problem.
-    def task():
-      # raise ValueError(f'FORCE ERROR')
-      
-      run_shell_cmd(scarab_cmd_argv, working_dir=self.sim_dir, log=self.controller_log)
-
-    with ThreadPoolExecutor() as executor:
-      future = executor.submit(task)
-      if future.exception(): # Waits until finished or failed.
-        raise Exception(f'Failed to execute {scarab_cmd_argv} in {sim_dir}. \nLogs: {controller_log.name}.') from future.exception()
-         
-      # Wait for the background task to finish before exiting
-      future.result()
-        
+    
+    # There is a bug in Scarab that causes it to sometimes crash when run in the terminal and the terminal is resized. To avoid this bug, we run it in a different thread, which appears to fix the problem.
+    # def task():
+    #  # raise ValueError(f'FORCE ERROR')
+    #  run_shell_cmd(scarab_cmd_argv, working_dir=self.sim_dir, log=self.controller_log)
+    # with ThreadPoolExecutor() as executor:
+    #   future = executor.submit(task)
+    #   if future.exception(): # Waits until finished or failed.
+    #     raise Exception(f'Failed to execute {scarab_cmd_argv} in {sim_dir}. \nLogs: {controller_log.name}.') from future.exception()
+    #      
+    #   # Wait for the background task to finish before exiting
+    #   future.result()
+    #     
     
 
 class MockExecutionDrivenScarabRunner(ExecutionDrivenScarabRunner):
@@ -329,11 +325,7 @@ class MockExecutionDrivenScarabRunner(ExecutionDrivenScarabRunner):
       super().__init__(*args, **kwargs)
 
     def run(self, cmd):
-      # print("Running MockExecutionDrivenScarabRunner.")
-      if self.sim_dir:
-        sim_dir = os.path.abspath(self.sim_dir)
-      else:
-        sim_dir = os.getcwd()
+      assertFileExists(self.sim_dir)
       
       if self.delay_queue.qsize() == 0:
         raise ValueError(f'Delay queue is empty!')
@@ -365,27 +357,27 @@ class MockExecutionDrivenScarabRunner(ExecutionDrivenScarabRunner):
           f"NODE_INST_COUNT_count, {mock_instruction_count}",
           # f"NODE_INST_COUNT_total_count,       1"
         ])
-        
+
         # print(f"About to save a mock out file: {stat_out_roi_file_name}")
         # with open(os.path.join(sim_dir, stat_out_roi_file_name), 'w', buffering=1) as stat_out_roi_file:
           # stat_out_roi_file.write(stat_out_roi_file_contents + "\n")
           # print(f"Saved a mock out file: {stat_out_roi_file.name}")
         # print(f"About to save a mock out file: {stat_csv_roi_file_name}")
-        with open(os.path.join(sim_dir, stat_csv_roi_file_name), 'w', buffering=1) as stat_csv_roi_file:
+        with open(os.path.join(self.sim_dir, stat_csv_roi_file_name), 'w', buffering=1) as stat_csv_roi_file:
           stat_csv_roi_file.write(stat_csv_roi_file_contents + "\n")
 
-      # Copy file
+      # Copy file PARAMS file, imitating the behavior of Scarb.
       assertFileExists(self.params_src_file)
       shutil.copyfile(self.params_src_file, self.params_in_file)
       shutil.copyfile(self.params_src_file, self.params_out_file)
 
-      run_shell_cmd(cmd, working_dir=sim_dir, log=self.controller_log)
-
+      run_shell_cmd(cmd, working_dir=self.sim_dir, log=self.controller_log)
 
 class TracesToComputationTimesProcessor(ABC):
 
   def __init__(self, sim_dir):
     self.sim_dir = os.path.abspath(sim_dir)
+    assertFileExists(self.sim_dir)
 
   @abstractmethod
   def get_computation_time_from_trace(self):
@@ -583,143 +575,142 @@ class MockTracesToComputationTimesProcessor(TracesToComputationTimesProcessor):
     # return data
     return delay
 
-class Scarab:
+# class Scarab:
+# 
+#     def __init__(self, 
+#                  traces_path=None, 
+#                  dynamorio_root=None, 
+#                  scarab_root=None, 
+#                  scarab_out_path=None, 
+#                  subprocess_run=run):
+#         if traces_path:
+#           self.TRACES_PATH = traces_path
+#         else:
+#           self.TRACES_PATH = os.environ['TRACES_PATH']
+#           
+#         if dynamorio_root:
+#           self.DYNAMORIO_ROOT = dynamorio_root
+#         else:
+#           self.DYNAMORIO_ROOT = os.environ['DYNAMORIO_ROOT']
+# 
+#         if scarab_root:
+#           self.SCARAB_ROOT = scarab_root
+#         else:
+#           self.SCARAB_ROOT = os.environ['SCARAB_ROOT']
+# 
+#         if scarab_out_path:
+#           self.SCARAB_OUT_PATH = scarab_out_path
+#         else:
+#           self.SCARAB_OUT_PATH = os.environ['SCARAB_OUT_PATH']
+#             
+#         self.subprocess_run = subprocess_run
+#         self.verbose = False
+# 
+#     def clear_trace_dir(self):
+#         folder = self.TRACES_PATH
+# 
+#         for filename in os.listdir(folder):
+#             file_path = os.path.join(folder, filename)
+#             if os.path.isdir(file_path):
+#                 # Check that we are deleting the right directories.
+#                 if not file_path.endswith('.dir'):
+#                     raise ValueError('Unexpected path: ' + file_path)
+#                 # Delete directory and subtree.
+#                 shutil.rmtree(file_path)
+# 
+#     def trace_cmd(self, cmd, args=[]):
+#         if self.verbose:
+#             print('\n=== Starting DyanmRIO ===')
+# 
+#         self.clear_trace_dir()
+# 
+#         # Starting DynamaRIO
+#         dyanmrio_cmd = ["drrun", \
+#                         "-root", self.DYNAMORIO_ROOT, \
+#                         # Not sure what this option does.
+#                         "-t",  "drcachesim", \
+#                         # Store trace files for offline analysis
+#                         "-offline", \
+#                         "-outdir", self.TRACES_PATH, \
+#                         # Increase the verbosity so that the trace file 
+#                         # path is printed, allowing us to parse it. 
+#                         "-verbose", "4", \
+#                         # Tell DynamoRIO which command to trace
+#                         "--", cmd]
+#         result, stdout, stderr = self.subprocess_run(dyanmrio_cmd, args)
+#         if result.returncode: # is not 0
+#             # print("result:" + str(result))
+#             raise ValueError("Subprocess failed. stderr=\n" + stderr)
+#         
+#         log_dir_regex_result = re.search(log_dir_regex, stderr);
+#         if not log_dir_regex_result:
+#             raise ValueError("No log directory found in output. stderr=\n" + stderr)
+#         log_dir = log_dir_regex_result.group(1)
+#         # trace_file = re.search(trace_file_regex, stderr).group(1)
+# 
+#         # print("Log directory: " + log_dir)
+#         # print("Trace file: " + trace_file)
+# 
+#         # Split the path, parts to greet,
+#         trace_directory = "/".join(log_dir.split("/")[:-1])
+# 
+#         # print("Trace directory: " + trace_directory)
+#         # print("")
+# 
+#         # Run "run_portabilize_trace.sh" to copy binary dependencies to a local directory.
+#         # This produces two new 
+#         self.subprocess_run(['bash', self.SCARAB_ROOT + "/utils/memtrace/run_portabilize_trace.sh"], cwd=self.TRACES_PATH)
+# 
+#         # print(f'Contents of {self.TRACES_PATH} after portablizing')
+#         # subprocess.run(['ls', trace_directory], capture_output=True)
+#         # print()
+# 
+#         # print("Return value: trace_directory="+trace_directory)
+#         # print('stdout:')
+#         # print(stdout)
+#         # print('stderr:')
+#         # print(stderr)
+#         return trace_directory,stdout,stderr
 
-    def __init__(self, 
-                 traces_path=None, 
-                 dynamorio_root=None, 
-                 scarab_root=None, 
-                 scarab_out_path=None, 
-                 subprocess_run=run):
-        if traces_path:
-          self.TRACES_PATH = traces_path
-        else:
-          self.TRACES_PATH = os.environ['TRACES_PATH']
-          
-        if dynamorio_root:
-          self.DYNAMORIO_ROOT = dynamorio_root
-        else:
-          self.DYNAMORIO_ROOT = os.environ['DYNAMORIO_ROOT']
-
-        if scarab_root:
-          self.SCARAB_ROOT = scarab_root
-        else:
-          self.SCARAB_ROOT = os.environ['SCARAB_ROOT']
-
-        if scarab_out_path:
-          self.SCARAB_OUT_PATH = scarab_out_path
-        else:
-          self.SCARAB_OUT_PATH = os.environ['SCARAB_OUT_PATH']
-            
-        self.subprocess_run = subprocess_run
-        self.verbose = False
-
-    def clear_trace_dir(self):
-        folder = self.TRACES_PATH
-
-        for filename in os.listdir(folder):
-            file_path = os.path.join(folder, filename)
-            if os.path.isdir(file_path):
-                # Check that we are deleting the right directories.
-                if not file_path.endswith('.dir'):
-                    raise ValueError('Unexpected path: ' + file_path)
-                # Delete directory and subtree.
-                shutil.rmtree(file_path)
-
-    def trace_cmd(self, cmd, args=[]):
-        if self.verbose:
-            print('\n=== Starting DyanmRIO ===')
-
-        self.clear_trace_dir()
-
-        # Starting DynamaRIO
-        dyanmrio_cmd = ["drrun", \
-                        "-root", self.DYNAMORIO_ROOT, \
-                        # Not sure what this option does.
-                        "-t",  "drcachesim", \
-                        # Store trace files for offline analysis
-                        "-offline", \
-                        "-outdir", self.TRACES_PATH, \
-                        # Increase the verbosity so that the trace file 
-                        # path is printed, allowing us to parse it. 
-                        "-verbose", "4", \
-                        # Tell DynamoRIO which command to trace
-                        "--", cmd]
-        result, stdout, stderr = self.subprocess_run(dyanmrio_cmd, args)
-        if result.returncode: # is not 0
-            # print("result:" + str(result))
-            raise ValueError("Subprocess failed. stderr=\n" + stderr)
-        
-        log_dir_regex_result = re.search(log_dir_regex, stderr);
-        if not log_dir_regex_result:
-            raise ValueError("No log directory found in output. stderr=\n" + stderr)
-        log_dir = log_dir_regex_result.group(1)
-        # trace_file = re.search(trace_file_regex, stderr).group(1)
-
-        # print("Log directory: " + log_dir)
-        # print("Trace file: " + trace_file)
-
-        # Split the path, parts to greet,
-        trace_directory = "/".join(log_dir.split("/")[:-1])
-
-        # print("Trace directory: " + trace_directory)
-        # print("")
-
-        # Run "run_portabilize_trace.sh" to copy binary dependencies to a local directory.
-        # This produces two new 
-        self.subprocess_run(['bash', self.SCARAB_ROOT + "/utils/memtrace/run_portabilize_trace.sh"], cwd=self.TRACES_PATH)
-
-        # print(f'Contents of {self.TRACES_PATH} after portablizing')
-        # subprocess.run(['ls', trace_directory], capture_output=True)
-        # print()
-
-        # print("Return value: trace_directory="+trace_directory)
-        # print('stdout:')
-        # print(stdout)
-        # print('stderr:')
-        # print(stderr)
-        return trace_directory,stdout,stderr
-
-    def get_computation_time_from_trace_with_scarab(self, trace_dir):
-        if self.verbose:
-            print('\n=== Starting Scarab ===')
-
-        # Change the working directory to the place where the Scarab parameters file is stored.
-        initial_wd = os.getcwd()
-        os.chdir(params_in_dir)
-        scarab_cmd = ["scarab", \
-                "--output_dir", self.SCARAB_OUT_PATH, \
-                "--frontend", "memtrace", \
-                "--inst_limit", "150000000", \
-                "--fetch_off_path_ops", "0", \
-                f"--cbp_trace_r0={trace_dir}/trace",\
-                f"--memtrace_modules_log={trace_dir}/bin"
-                ]
-        result, stdout, stderr = self.subprocess_run(scarab_cmd)
-        
-        # Restore working directory.
-        os.chdir(initial_wd)
-
-        # print(str(stdout))
-
-        regex_result = re.search(time_regex, stdout)
-        if not regex_result:
-            raise ValueError(f"Time regular expresion not found in Scarab output. Standard out:\n{stdout}\nStandard error:\n{stderr}")
-
-        # print(result)
-        femtoseconds_to_run = float(regex_result.group(1))
-        # print("femtoseconds_to_run: " + femtoseconds_to_run)
-        
-        return femtoseconds_to_run
-    
-    # Trace and simulate a command using DyanmRIO and Scarab. 
-    # The return value is the (simulation) time in femptoseconds for the command to be executed on the simulated platform.
-    def simulate(self, cmd, args=[]):
-        trace_dir,stdout,stderr = self.trace_cmd(cmd, args)
-        time_in_fs = self.get_computation_time_from_trace_with_scarab(trace_dir)
-        # print(f"time: {time_in_fs:0.6} seconds ({time_in_fs*SECONDS_PER_MICROSECOND:0.4} microseconds).")
-        data = ScarabData(time_in_fs, stdout, stderr)
-        return data
+#     def get_computation_time_from_trace_with_scarab(self, trace_dir):
+#         if self.verbose:
+#             print('\n=== Starting Scarab ===')
+# 
+#         raise NotImplementedError(f'This seems to be deprecated??')
+#         
+#         scarab_cmd = ["scarab", \
+#                 "--output_dir", self.SCARAB_OUT_PATH, \
+#                 "--frontend", "memtrace", \
+#                 "--inst_limit", "150000000", \
+#                 "--fetch_off_path_ops", "0", \
+#                 f"--cbp_trace_r0={trace_dir}/trace",\
+#                 f"--memtrace_modules_log={trace_dir}/bin"
+#                 ]
+#           
+#         # run_shell_cmd(scarab_cmd, workind_dir=params_in_dir)
+#         result, stdout, stderr = self.subprocess_run(scarab_cmd)
+#         
+#         # Restore working directory.
+#         os.chdir(initial_wd)
+#         
+#         regex_result = re.search(time_regex, stdout)
+#         if not regex_result:
+#             raise ValueError(f"Time regular expresion not found in Scarab output. Standard out:\n{stdout}\nStandard error:\n{stderr}")
+# 
+#         # print(result)
+#         femtoseconds_to_run = float(regex_result.group(1))
+#         # print("femtoseconds_to_run: " + femtoseconds_to_run)
+#         
+#         return femtoseconds_to_run
+    # 
+    # # Trace and simulate a command using DyanmRIO and Scarab. 
+    # # The return value is the (simulation) time in femptoseconds for the command to be executed on the simulated platform.
+    # def simulate(self, cmd, args=[]):
+    #     trace_dir,stdout,stderr = self.trace_cmd(cmd, args)
+    #     time_in_fs = self.get_computation_time_from_trace_with_scarab(trace_dir)
+    #     # print(f"time: {time_in_fs:0.6} seconds ({time_in_fs*SECONDS_PER_MICROSECOND:0.4} microseconds).")
+    #     data = ScarabData(time_in_fs, stdout, stderr)
+    #     return data
 
 
 # if __name__ == "__main__":

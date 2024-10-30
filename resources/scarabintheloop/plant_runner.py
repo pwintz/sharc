@@ -233,17 +233,26 @@ class PipesControllerInterface(ControllerInterface):
   def __init__(self, computational_delay_provider: DelayProvider, sim_dir):
     self.computational_delay_provider = computational_delay_provider
     self.sim_dir = sim_dir
+    assertFileExists(self.sim_dir)
+
+    self.u_reader          = None
+    self.x_predict_reader  = None
+    self.t_predict_reader  = None
+    self.iterations_reader = None
+    self.x_outfile         = None
+    self.t_delay_outfile   = None
 
   def open(self):
     """
     Open resources that need to be closed when finished.
     """
-    self.u_reader         = PipeVectorReader(self.sim_dir + '/u_c++_to_py') 
-    self.x_predict_reader = PipeVectorReader(self.sim_dir + '/x_predict_c++_to_py') 
-    self.t_predict_reader  = PipeFloatReader(self.sim_dir + '/t_predict_c++_to_py') 
-    self.iterations_reader = PipeFloatReader(self.sim_dir + '/iterations_c++_to_py') 
-    self.x_outfile         = open(self.sim_dir + 'x_py_to_c++', 'w', buffering=1)
-    self.t_delay_outfile   = open(self.sim_dir + 't_delay_py_to_c++', 'w', buffering=1)
+    assertFileExists(self.sim_dir + '/u_c++_to_py')
+    self.u_reader          = PipeVectorReader(os.path.join(self.sim_dir, 'u_c++_to_py'))
+    self.x_predict_reader  = PipeVectorReader(os.path.join(self.sim_dir, 'x_predict_c++_to_py'))
+    self.t_predict_reader  = PipeFloatReader(os.path.join(self.sim_dir, 't_predict_c++_to_py'))
+    self.iterations_reader = PipeFloatReader(os.path.join(self.sim_dir, 'iterations_c++_to_py'))
+    self.x_outfile         = open(os.path.join(self.sim_dir, 'x_py_to_c++'), 'w', buffering=1)
+    self.t_delay_outfile   = open(os.path.join(self.sim_dir, 't_delay_py_to_c++'), 'w', buffering=1)
     
     if debug_levels.debug_interfile_communication_level >= 1:
       print('Pipes are open') 
@@ -254,13 +263,18 @@ class PipesControllerInterface(ControllerInterface):
     """ 
     Close all of the files we opened.
     """
-    # Code to release the resource (e.g., close a file, database connection)
-    self.u_reader.close()
-    self.x_predict_reader.close()
-    self.t_predict_reader.close()
-    self.iterations_reader.close()
-    self.x_outfile.close()
-    self.t_delay_outfile.close()
+    if self.u_reader:
+      self.u_reader.close()
+    if self.x_predict_reader:
+      self.x_predict_reader.close()
+    if self.t_predict_reader:
+      self.t_predict_reader.close()
+    if self.iterations_reader:
+      self.iterations_reader.close()
+    if self.x_outfile:
+      self.x_outfile.close()
+    if self.t_delay_outfile:
+      self.t_delay_outfile.close()
 
   def _write_x(self, x: np.ndarray):
     # Pass the string back to C++.
@@ -990,10 +1004,6 @@ def run(sim_dir: str, config_data: dict, evolveState, controller_interface_selec
 
   with controller_interface_factory(controller_interface_selection, computation_delay_provider, sim_dir) as controller_interface:
 
-    # computational_delay_provider = ScarabDelayProvider(sim_dir)
-    # computational_delay_provider = OneTimeStepDelayProvider(sample_time)
-    # computational_delay_provider = GaussianDelayProvider(mean=0.24, std_dev=0.05)
-
     try:
       x_start = x0
       u_before = u0
@@ -1001,7 +1011,7 @@ def run(sim_dir: str, config_data: dict, evolveState, controller_interface_selec
       pending_computation_before = pending_computation0
       time_index = first_time_index
       
-      assert x_start.shape == (n, 1), f'x_start={x_start} did not have the expected shape: {(n, 1)}'
+      assert x_start.shape  == (n, 1), f'x_start={x_start} did not have the expected shape: {(n, 1)}'
       assert u_before.shape == (m, 1), f'u_before={u_before} did not have the expected shape: {(m, 1)}'
 
       # The number of time steps that the controller has been computed. 
