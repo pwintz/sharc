@@ -1,5 +1,4 @@
-from scarabintheloop.plant_runner import DelayProvider, ControllerInterface
-import scarabintheloop.plant_runner as plant_runner
+from scarabintheloop import ControllerInterface, DelayProvider
 import queue
 
 

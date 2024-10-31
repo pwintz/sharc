@@ -258,7 +258,7 @@ class ScarabStatsReader:
 
 class ExecutionDrivenScarabRunner:
 
-  def __init__(self, sim_dir, controller_log=None):
+  def __init__(self, sim_dir='.', controller_log=None):
     self.controller_log = controller_log
     self.instruction_limit = int(1e9)
     self.heartbeat_interval = int(1e6) # How often to print progress.

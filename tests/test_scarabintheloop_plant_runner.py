@@ -2,8 +2,6 @@
 
 import unittest
 import scarabintheloop
-# from scarabintheloop.plant_runner import DelayProvider, ControllerInterface
-import scarabintheloop.plant_runner as plant_runner
 import copy
 from scarabintheloop.plant_runner import ComputationData
 from scarabintheloop_mocks import MockDelayProvider, MockControllerInterface
@@ -15,7 +13,6 @@ class Test_get_u(unittest.TestCase):
   def setUp(self):
     self.computational_delay_interface = MockDelayProvider()
     self.controller_interface = MockControllerInterface(self.computational_delay_interface)
-
   
   def test_without_pending(self):
     t0 = 0.111
@@ -26,12 +23,11 @@ class Test_get_u(unittest.TestCase):
     self.controller_interface.set_next_u(u_pending)
     expected_pending_computation = ComputationData(t_start=t0, delay=delay, u=u_pending, metadata={})
 
-    u_new, pending_computation_new, did_start_computation = plant_runner.get_u(
+    u_new, pending_computation_new, did_start_computation = self.controller_interface.get_u(
                                     t        = t0,
                                     x        = 2.3,
                                     u_before = u0,
-                                    pending_computation_before = None,
-                                    controller_interface = self.controller_interface)
+                                    pending_computation_before = None)
       
     self.assertTrue(did_start_computation)
     self.assertEqual(u_new,  u0)
@@ -66,12 +62,11 @@ class Test_get_u(unittest.TestCase):
     self.computational_delay_interface.put_delay(expected_delay)
     self.controller_interface.set_next_u(expected_u_pending)
     pending_computation_prev = ComputationData(t_start=0, delay=0.9, u=expected_u_new)
-    u_new, pending_computation_new, did_start_computation = plant_runner.get_u(
+    u_new, pending_computation_new, did_start_computation = self.controller_interface.get_u(
                                     t = 1.0,
                                     x = 2.3,
                                     u_before = [0.0],
-                                    pending_computation_before = pending_computation_prev,
-                                    controller_interface = self.controller_interface)
+                                    pending_computation_before = pending_computation_prev)
     self.assertTrue(did_start_computation)
     self.assertEqual(u_new, expected_u_new)
     self.assertEqual(pending_computation_new.delay, expected_delay)
@@ -92,18 +87,15 @@ class Test_get_u(unittest.TestCase):
     pending_computation_prev = ComputationData(t_start=0, delay=10000.9, u=u_pending)
     expected_pending_computation = pending_computation_prev.copy()
 
-    u_new, pending_computation_new, did_start_computation = plant_runner.get_u(
+    u_new, pending_computation_new, did_start_computation = self.controller_interface.get_u(
                                     t = 1.0,
                                     x = 2.3,
                                     u_before = u0,
-                                    pending_computation_before = pending_computation_prev,
-                                    controller_interface = self.controller_interface)
+                                    pending_computation_before = pending_computation_prev)
       
     self.assertFalse(did_start_computation)
     self.assertEqual(u_new,  u0)
     self.assertEqual(pending_computation_new, expected_pending_computation)
-
-
 
 
 if __name__ == '__main__':

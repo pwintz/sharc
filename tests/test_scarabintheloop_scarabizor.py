@@ -15,11 +15,14 @@ PARAMS_data_in = """# Here is a comment
 """
 
 class Test_ParamsData(unittest.TestCase):
-  def test_from_file(self):
+
+  @patch('os.path.exists')
+  def test_from_file(self, patched_exists):
     # ---- Setup ---- 
-    
-    # ---- Execution ----
+    patched_exists.return_value = True
     with patch("builtins.open", mock_open(read_data=PARAMS_data_in)) as mock_file:
+
+      # ---- Execution ----
       data = ParamsData.from_file("path/to/PARAMS.in")
 
     # ---- Assertions ---- 

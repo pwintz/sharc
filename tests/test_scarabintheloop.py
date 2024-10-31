@@ -182,7 +182,7 @@ class Test_Simulation(unittest.TestCase):
     self.assertEqual(simulation.sim_config["u0"], [3, 4])
     self.assertEqual(simulation.sim_config["simulation_dir"], '.')
     self.assertEqual(simulation.sim_config["simulation_label"], 'my_label')
-    self.assertEqual(simulation.PARAMS["chip_cycle_time"], 999)
+    self.assertEqual(simulation.PARAMS.to_dict()["chip_cycle_time"], 999)
 
   @unittest.skipIf(os.cpu_count() < 4, 
         """In order for this test to be valid, we need 

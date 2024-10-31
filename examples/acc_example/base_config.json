@@ -31,7 +31,6 @@
     "debug_batching_level": 0, 
     "debug_scarab_level": 0
   },
-  "==== Model Parameters ====": "",
   "system_parameters": {
     "state_dimension": 5, 
     "input_dimension": 1,

@@ -9,7 +9,6 @@ import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 import subprocess
 import re
-import time
 import copy
 import argparse
 from warnings import warn
@@ -20,6 +19,8 @@ import traceback
 from contextlib import redirect_stdout
 from scarabintheloop.utils import *
 import scarabintheloop.debug_levels as debug_levels
+from scarabintheloop.data_types import *
+from abc import abstractmethod, ABC
 
 # Type hinting.
 from typing import List, Set, Dict, Tuple, Union
@@ -131,11 +132,11 @@ class ExperimentList:
     for experiment in self._experiment_list:
       experiment.setup_files()
       
-      experiment_result = experiment.run()
+      experiment.run()
 
-      assert experiment_result is not None
-      assert isinstance(experiment_result, dict)
       if experiment.status == ExperimentStatus.FINISHED:
+        assert experiment.result
+        assert isinstance(experiment.result, dict)
         self.successful_experiment_labels += [repr(experiment)]
         self.experiment_result_dict[experiment.label] = experiment.result
       elif experiment.status == ExperimentStatus.SKIPPED: # No result
@@ -286,7 +287,6 @@ class Experiment:
     }
 
     writeJson(os.path.join(self.experiment_dir, "experiment_result.json"), self.result)
-    return self.result
 
   def __repr__(self):
     repr_str = f'Experiment("{self.label}", {self.status.name}'
@@ -310,7 +310,6 @@ class Simulation:
       assert isinstance(batch_init, dict), f'type(batch_init)={type(batch_init)}'
 
     self.experiment_config = copy.deepcopy(experiment_config)
-    self.sim_config = copy.deepcopy(experiment_config)
 
     # printJson("experiment_config in create_simulation_config", experiment_config)
     experiment_max_time_steps = experiment_config["max_time_steps"]
@@ -328,17 +327,22 @@ class Simulation:
       u0                  = batch_init["u0"]
       
       # Truncate the index to not extend past the last index
-      max_time_steps_per_batch = min(os.cpu_count(), experiment_max_batch_size, experiment_max_time_steps - first_time_index)
+      time_steps_in_sim = min(os.cpu_count(), \
+                              experiment_max_batch_size, \
+                              experiment_max_time_steps, \
+                              experiment_max_time_steps - first_time_index)
+      # print(f'        first_time_index={first_time_index}')
+      # print(f'time_steps_in_sim={time_steps_in_sim}')
 
-      # Add "max_time_steps_per_batch" steps to the first index to get the last index.
-      last_time_index_in_batch = first_time_index + max_time_steps_per_batch
+      # Add "time_steps_in_sim" steps to the first index to get the last index.
+      last_time_index_in_batch = first_time_index + time_steps_in_sim
 
       assert last_time_index_in_batch <= last_time_index_in_experiment, 'last_time_index_in_batch must not be past the end of experiment.'
 
       batch_label    = f'batch{batch_init["i_batch"]}_steps{first_time_index}-{last_time_index_in_batch}'
       directory      = experiment_directory + "/" + batch_label
       label          = experiment_label     + "/" + batch_label
-      max_time_steps = min(experiment_max_time_steps, max_time_steps_per_batch)
+      # max_time_steps = min(experiment_max_time_steps, max_time_steps_per_batch)
 
     else:
       first_time_index    = 0
@@ -347,9 +351,9 @@ class Simulation:
       u0                  = experiment_u0
       directory           = experiment_directory
       label               = experiment_label
-      max_time_steps      = experiment_max_time_steps
+      time_steps_in_sim = experiment_max_time_steps
 
-    last_time_index = first_time_index + max_time_steps
+    last_time_index = first_time_index + time_steps_in_sim
     
     self.label = label
     self.simulation_dir = directory
@@ -358,8 +362,10 @@ class Simulation:
     # Paths to files needed by controller executable.
     self.params_file_for_controller = os.path.join(self.simulation_dir, 'PARAMS.generated')
     self.config_file_for_controller = os.path.join(self.simulation_dir, 'config.json')
+    
+    self.sim_config = copy.deepcopy(experiment_config)
     self.sim_config["simulation_label"] = label
-    self.sim_config["max_time_steps"]   = max_time_steps
+    self.sim_config["max_time_steps"]   = time_steps_in_sim
     self.sim_config["simulation_dir"]   = directory
     self.sim_config["x0"]               = x0
     self.sim_config["u0"]               = u0
@@ -380,7 +386,6 @@ class Simulation:
 
     # Create the simulation directory if it does not already exist.
     os.makedirs(self.simulation_dir, exist_ok=True)
-
 
     # Write the configuration to config.json.
     writeJson(os.path.join(self.simulation_dir, "config.json"), self.sim_config)
@@ -422,15 +427,22 @@ class Simulation:
     with openLog(self.plant_log_path,      f'Plant Log for "{self.label}"')      as plant_log, \
          openLog(self.controller_log_path, f'Controller Log for "{self.label}"') as controller_log:
 
-      # Move into the simulation directory.
-      simulation_executor = getSimulationExecutor(self.simulation_dir, 
-                                                  self.sim_config, 
-                                                  controller_log, 
-                                                  plant_log,
-                                                  fake_delays = fake_delays)
+      controller_interface_selection="pipes"
+      in_the_loop_delay_proiver =  self.sim_config["Simulation Options"]["in-the-loop_delay_provider"]
+      computation_delay_provider = computation_delay_provider_factory(in_the_loop_delay_proiver, self.simulation_dir, sample_time, fake_delays)
+      
+      with controller_interface_factory(controller_interface_selection, computation_delay_provider, self.simulation_dir) as controller_interface:
 
-      # Execute the simulation.
-      simulation_data = simulation_executor.run_simulation()
+
+        simulation_executor = getSimulationExecutor(self.simulation_dir, 
+                                                    self.sim_config, 
+                                                    controller_interface,
+                                                    controller_log, 
+                                                    plant_log,
+                                                    fake_delays = fake_delays)
+
+        # Execute the simulation.
+        simulation_data = simulation_executor.run_simulation()
       
 
       sim_data_path = os.path.join(self.simulation_dir, 'simulation_data.json')
@@ -677,7 +689,7 @@ def processBatchSimulationData(batch_init:dict, batch_simulation_data: dict, sam
   return valid_data_from_batch, next_batch_init
 
 
-def getSimulationExecutor(sim_dir, sim_config, controller_log, plant_log, fake_delays=None):
+def getSimulationExecutor(sim_dir, sim_config, controller_interface, controller_log, plant_log, fake_delays=None):
   """ 
   This function implements the "Factory" design pattern, where it returns objects of various classes depending on the imputs.
   """
@@ -693,10 +705,10 @@ def getSimulationExecutor(sim_dir, sim_config, controller_log, plant_log, fake_d
       # The "real" trace processor
       trace_processor = scarabizor.ScarabTracesToComputationTimesProcessor(sim_dir)
 
-    return ParallelSimulationExecutor(sim_dir, sim_config, controller_log, plant_log, trace_processor)
+    return ParallelSimulationExecutor(sim_dir, sim_config, controller_interface, controller_log, plant_log, trace_processor)
   else:
     print("Using SerialSimulationExecutor.")
-    executor = SerialSimulationExecutor(sim_dir, sim_config, controller_log, plant_log)
+    executor = SerialSimulationExecutor(sim_dir, sim_config, controller_interface, controller_log, plant_log)
     delay_provider_config = sim_config["Simulation Options"]["in-the-loop_delay_provider"]
     assert delay_provider_config == "execution-driven scarab", \
       f'delay_provider_config={delay_provider_config} must be "execution-driven scarab" when doing serial execution.'
@@ -716,12 +728,13 @@ def getSimulationExecutor(sim_dir, sim_config, controller_log, plant_log, fake_d
 # TODO: Maybe rename this as "delegator" or "coordinator".
 class SimulationExecutor:
   
-  def __init__(self, sim_dir, sim_config, controller_log, plant_log):
+  def __init__(self, sim_dir, sim_config, controller_interface, controller_log, plant_log):
     global controller_executable_provider
     self.sim_dir = sim_dir
     self.sim_config = sim_config
     self.controller_log = controller_log
     self.plant_log = plant_log
+    self.controller_interface = controller_interface
 
     # Create the executable.
     with redirect_stdout(controller_log):
@@ -770,7 +783,7 @@ class SimulationExecutor:
     try:
       with redirect_stdout(self.plant_log):
         print('Start of SimulationExecutor._run_plant() (Plant Dynamics task).')
-        plant_result = plant_runner.run(self.sim_dir, self.sim_config, self.evolveState_fnc)
+        plant_result = plant_runner.run(self.sim_dir, self.sim_config, self.evolveState_fnc, self.controller_interface)
         print('Successfully SimulationExecutor._run_plant() (Plant Dynamics task).')
 
     except Exception as e:
@@ -859,8 +872,8 @@ class SerialSimulationExecutor(SimulationExecutor):
     
 class ParallelSimulationExecutor(SimulationExecutor):
 
-  def __init__(self, sim_dir, sim_config, controller_log, plant_log, trace_processor):
-    super().__init__(sim_dir, sim_config, controller_log, plant_log)
+  def __init__(self, sim_dir, sim_config, controller_interface, controller_log, plant_log, trace_processor):
+    super().__init__(sim_dir, sim_config, controller_interface, controller_log, plant_log)
     self.trace_processor = trace_processor
 
   def run_controller(self):
@@ -884,6 +897,388 @@ class ParallelSimulationExecutor(SimulationExecutor):
           """
     simulation_data.overwrite_computation_times(computation_times)
     return simulation_data
+
+
+
+class DelayProvider(ABC):
+
+  @abstractmethod
+  def get_delay(self, metadata):
+    """ 
+    return t_delay, metadata 
+    """
+    pass # Abstract method must be overridden.
+
+class ScarabDelayProvider(DelayProvider):
+  """
+  Read the stats files produced by Execution-driven Scarab to get the delay.
+  """
+
+  def __init__(self, sim_dir):
+    self._stats_file_number = 0
+    self._stats_reader         = scarabizor.ScarabStatsReader(sim_dir)
+    self._scarab_params_reader = scarabizor.ScarabPARAMSReader(sim_dir)
+
+  def get_delay(self, metadata):
+    if debug_levels.debug_interfile_communication_level >= 2:
+      print('Waiting for statistics from Scarab.')
+
+    self._stats_reader.waitForStatsFile(self._stats_file_number)
+    t_delay           = self._stats_reader.readTime(self._stats_file_number)
+    instruction_count = self._stats_reader.readInstructionCount(self._stats_file_number)
+    cycles_count      = self._stats_reader.readCyclesCount(self._stats_file_number)
+    self._stats_file_number += 1
+
+    delay_metadata = {}
+    params_out = self._scarab_params_reader.params_out_to_dictionary()
+    delay_metadata.update(params_out)
+    delay_metadata["instruction_count"] = instruction_count
+    delay_metadata["cycles_count"] = cycles_count
+    return t_delay, delay_metadata
+
+class OneTimeStepDelayProvider(DelayProvider):
+
+  def __init__(self, sample_time, sim_dir, use_fake_scarab):
+    self.trace_dir_index = 0
+    self.sample_time     = sample_time
+    self.sim_dir         = sim_dir
+    self.use_fake_scarab = use_fake_scarab
+    
+  def get_delay(self, metadata):
+    t_delay = self.sample_time
+    metadata = {}
+
+    if self.use_fake_scarab:
+      fake_trace_dir = os.path.join(self.sim_dir, f'dynamorio_trace_{self.trace_dir_index}')
+      # Create a fake trace directory.
+      os.makedirs(fake_trace_dir)
+      # Create a README file in the fake trace directory.
+      with open(os.path.join(fake_trace_dir, 'README.txt'), 'w') as file:
+        file.write(f'This is a fake trace directory created by {type(self)} for the purpose of faking Scarab data for faster testing.')
+      # Increment the trace directory index.
+      self.trace_dir_index += 1
+
+    return t_delay, metadata
+
+class NoneDelayProvider(DelayProvider):
+
+  def __init__(self):
+    pass
+
+  def get_delay(self, metadata):
+    t_delay = None
+    metadata = {}
+    return t_delay, metadata
+
+class GaussianDelayProvider(DelayProvider):
+
+  def __init__(self, mean, std_dev):
+    self.mean = mean
+    self.std_dev = std_dev
+
+  def get_delay(self, metadata):
+    # Generate a random number from the Gaussian distribution
+    t_delay = np.random.normal(self.mean, self.std_dev)
+    metadata = {}
+    return t_delay, metadata
+
+class LinearBasedOnIteraionsDelayProvider(DelayProvider):
+  
+  def __init__(self):
+    pass
+
+  def get_delay(self, metadata):
+    # TODO: Move the computation delays generated by a model out of the plant_runner module.
+    iterations = metadata["iterations"]
+    delay_model_slope       = config_data["computation_delay_model"]["computation_delay_slope"]
+    delay_model_y_intercept = config_data["computation_delay_model"]["computation_delay_y-intercept"]
+    if delay_model_slope:
+      if not delay_model_y_intercept:
+        raise ValueError(f"delay_model_slope was set but delay_model_y_intercept was not.")
+      t_delay = delay_model_slope * iterations + delay_model_y_intercept
+      print(f"t_delay = {t_delay:.8g} = {delay_model_slope:.8g} * {iterations:.8g} + {delay_model_y_intercept:.8g}")
+    else:
+      print('Using constant delay times.')
+      t_delay = config_data["computation_delay_model"]["fake_computation_delay_times"]
+    return t_delay, metadata
+
+
+
+class ControllerInterface(ABC):
+  """ 
+  Create an Abstract Base Class (ABC) for a controller interface. 
+  This handles communication to and from the controller, whether that is an executable or (for testing) a mock controller.
+  """
+
+  def __init__(self, computational_delay_provider: DelayProvider):
+    self.computational_delay_provider = computational_delay_provider
+
+  def open(self):
+    """
+    Open any resources that need to be closed.
+    """
+    pass
+
+  def close(self):
+    """
+    Do cleanup of opened resources.
+    """
+    pass
+
+  @abstractmethod
+  def _write_x(self, x: np.ndarray):
+    pass
+
+  @abstractmethod
+  def _write_t_delay(self, t: float):
+    pass
+    
+  @abstractmethod
+  def _read_u(self) -> np.ndarray:
+    return u
+    
+  @abstractmethod
+  def _read_x_prediction(self) -> np.ndarray:
+    return x_prediction
+    
+  @abstractmethod
+  def _read_t_prediction(self) -> float:
+    return t_prediction
+
+  @abstractmethod
+  def _read_iterations(self) -> int:
+    return iterations
+    
+  def _read_metadata(self) -> int:
+    x_prediction = self._read_x_prediction()
+    t_prediction = self._read_t_prediction()
+    iterations = self._read_iterations()
+    if isinstance(x_prediction, np.ndarray):
+      x_prediction = column_vec_to_list(x_prediction)
+    metadata = {
+      "x_prediction": x_prediction,
+      "t_prediction": t_prediction,
+      "iterations": iterations
+    }
+
+    return metadata
+    
+
+  def get_u(self, t, x, u_before, pending_computation_before: ComputationData):
+    """ 
+    Get an (possibly) updated value of u. 
+    Returns: u, u_delay, u_pending, u_pending_time, metadata,
+    where u is the value of u that should start being applied immediately (at t). 
+    
+    If the updated value requires calling the controller, then u_delay does so.
+
+    This function is tested in <root>/tests/test_scarabintheloop_plant_runner.py/Test_get_u
+    """
+    
+    if debug_levels.debug_dynamics_level >= 1:
+      printHeader2('----- get_u (BEFORE) ----- ')
+      print(f'u_before[0]: {u_before[0]}')
+      printJson("pending_computation_before", pending_computation_before)
+
+    if pending_computation_before is not None and pending_computation_before.t_end > t:
+      # If last_computation is provided and the end of the computation is after the current time then we do not update anything. 
+      # print(f'Keeping the same pending_computation: {pending_computation_before}')
+      if debug_levels.debug_dynamics_level >= 2:
+        print(f'Set u_after = u_before = {u_before}. (Computation pending)')
+      u_after = u_before
+      pending_computation_after = pending_computation_before
+      
+      if debug_levels.debug_dynamics_level >= 1:
+        printHeader2('----- get_u (AFTER - no update) ----- ')
+        print(f'u_after[0]: {u_after[0]}')
+        printJson("pending_computation_after", pending_computation_after)
+      did_start_computation = False
+      return u_after, pending_computation_after, did_start_computation
+
+    if pending_computation_before is not None and pending_computation_before.t_end <= t:
+      # If the last computation data is "done", then we set u_after to the pending value of u.
+      
+      if debug_levels.debug_dynamics_level >= 2:
+        print(f'Set u_after = pending_computation_before.u = {pending_computation_before.u}. (computation finished)')
+      u_after = pending_computation_before.u
+    elif pending_computation_before is None:
+      if debug_levels.debug_dynamics_level >= 2:
+        print(f'Set u_after = u_before = {u_before} (no pending computation).')
+      u_after = u_before
+    else:
+      raise ValueError(f'Unexpected case.')
+      
+
+    # If there is no pending_computation_before or the given pending_computation_before finishes before the current time t, then we run the computation of the next control value.
+    if debug_levels.debug_dynamics_level >= 2:
+      print("About to get the next control value for x = ", repr(x))
+
+    u_pending, u_delay, metadata = self.get_next_control_from_controller(x)
+    did_start_computation = True
+    pending_computation_after = ComputationData(t, u_delay, u_pending, metadata)
+
+    if debug_levels.debug_dynamics_level >= 1:
+      printHeader2('----- get_u (AFTER - With update) ----- ')
+      print(f'u_after: {u_after}')
+      printJson("pending_computation_after", pending_computation_after)
+    # if u_delay == 0:
+    #   # If there is no delay, then we update immediately.
+    #   return u_pending, None
+    assert u_delay > 0, 'Expected a positive value for u_delay.'
+      # print(f'Updated pending_computation: {pending_computation_after}')
+    return u_after, pending_computation_after, did_start_computation
+
+
+  def get_next_control_from_controller(self, x: np.ndarray):
+    """
+    Send the current state to the controller and wait for the responses. 
+    Return values: u, x_prediction, t_prediction, iterations.
+    """
+
+    # The order of writing and reading to the pipe files must match the order in the controller.
+    self._write_x(x)
+    u = self._read_u()
+    metadata = self._read_metadata()
+    u_delay, delay_metadata = self.computational_delay_provider.get_delay(metadata)
+    self._write_t_delay(u_delay)
+    metadata.update(delay_metadata)
+
+    if debug_levels.debug_interfile_communication_level >= 1:
+      print('Input strings from C++:')
+      printIndented(f"       u: {u}", 1)
+      printIndented(f"metadata: {metadata}", 1)
+
+    return u, u_delay, metadata
+    
+class PipesControllerInterface(ControllerInterface):
+
+  def __init__(self, computational_delay_provider: DelayProvider, sim_dir):
+    self.computational_delay_provider = computational_delay_provider
+    self.sim_dir = sim_dir
+    assertFileExists(self.sim_dir)
+
+    self.u_reader          = None
+    self.x_predict_reader  = None
+    self.t_predict_reader  = None
+    self.iterations_reader = None
+    self.x_outfile         = None
+    self.t_delay_outfile   = None
+
+  def open(self):
+    """
+    Open resources that need to be closed when finished.
+    """
+    assertFileExists(self.sim_dir + '/u_c++_to_py')
+    self.u_reader          = PipeVectorReader(os.path.join(self.sim_dir, 'u_c++_to_py'))
+    self.x_predict_reader  = PipeVectorReader(os.path.join(self.sim_dir, 'x_predict_c++_to_py'))
+    self.t_predict_reader  = PipeFloatReader(os.path.join(self.sim_dir, 't_predict_c++_to_py'))
+    self.iterations_reader = PipeFloatReader(os.path.join(self.sim_dir, 'iterations_c++_to_py'))
+    self.x_outfile         = open(os.path.join(self.sim_dir, 'x_py_to_c++'), 'w', buffering=1)
+    self.t_delay_outfile   = open(os.path.join(self.sim_dir, 't_delay_py_to_c++'), 'w', buffering=1)
+    
+    if debug_levels.debug_interfile_communication_level >= 1:
+      print('Pipes are open') 
+
+    return self  # Return the instance so that it's accessible as 'as' target
+
+  def close(self):
+    """ 
+    Close all of the files we opened.
+    """
+    if self.u_reader:
+      self.u_reader.close()
+    if self.x_predict_reader:
+      self.x_predict_reader.close()
+    if self.t_predict_reader:
+      self.t_predict_reader.close()
+    if self.iterations_reader:
+      self.iterations_reader.close()
+    if self.x_outfile:
+      self.x_outfile.close()
+    if self.t_delay_outfile:
+      self.t_delay_outfile.close()
+
+  def _write_x(self, x: np.ndarray):
+    # Pass the string back to C++.
+    x_out_string = nump_vec_to_csv_string(x)
+    if debug_levels.debug_interfile_communication_level >= 2:
+      print(f"Writing x output line: {x_out_string} to {self.x_outfile.name}")
+    self.x_outfile.write(x_out_string + "\n")# Write to pipe to C++
+
+  def _write_t_delay(self, t_delay: float):
+    t_delay_str = f"{t_delay:.8g}"
+    
+    if debug_levels.debug_interfile_communication_level >= 2:
+      print(f"Writing {t_delay_str} to t_delay file: {self.t_delay_outfile.name}")
+    self.t_delay_outfile.write(t_delay_str + "\n")
+
+  def _read_u(self):
+    if debug_levels.debug_interfile_communication_level >= 2:
+      print(f"Reading u file: {self.u_reader.filename}")
+    return self.u_reader.read()
+    
+  def _read_x_prediction(self):
+    if debug_levels.debug_interfile_communication_level >= 2:
+      print(f"Reading x_predict file: {self.x_predict_reader.filename}")
+    return self.x_predict_reader.read()
+    
+  def _read_t_prediction(self):
+    if debug_levels.debug_interfile_communication_level >= 2:
+      print(f"Reading t_predict file: {self.t_predict_reader.filename}")
+    return self.t_predict_reader.read()
+    
+  def _read_iterations(self):
+    if debug_levels.debug_interfile_communication_level >= 2:
+      print(f"Reading iterations file: {self.iterations_reader.filename}")
+    return self.iterations_reader.read()
+      
+
+@contextmanager
+def controller_interface_factory(controller_interface_selection, computation_delay_provider, sim_dir):
+  """ 
+  Generate the desired ControllerInterface object based on the value of "controller_interface_selection". Typically the value will be the string "pipes", but a ControllerInterface interface object can also be passed in directly to allow for testing.
+  
+  Example usage:
+
+    with controller_interface_factory("pipes", computation_delay_provider, sim_dir) as controller_interface: 
+        <do stuff with controller_interface>
+    
+  When the "with" block is left, controller_interface.close() is called to clean up resources.
+  """
+
+  if isinstance(controller_interface_selection, str):
+    controller_interface_selection = controller_interface_selection.lower()
+
+  if controller_interface_selection == "pipes":
+    controller_interface = PipesControllerInterface(computation_delay_provider, sim_dir)
+  elif isinstance(controller_interface_selection, ControllerInterface):
+    controller_interface = controller_interface_selection
+  else:
+    raise ValueError(f'Unexpected controller_interface: {controller_interface}')
+
+  try:
+    yield controller_interface.open()
+  finally:
+    controller_interface.close()
+
+
+def computation_delay_provider_factory(computation_delay_name: str, sim_dir, sample_time, use_fake_scarab):
+  if isinstance(computation_delay_name, str):
+    computation_delay_name = computation_delay_name.lower()
+
+  if computation_delay_name == "none":
+    return NoneDelayProvider()
+  elif computation_delay_name == "gaussian":
+    return GaussianDelayProvider(mean=0.24, std_dev=0.05)
+  elif computation_delay_name == "execution-driven scarab":
+    return ScarabDelayProvider(sim_dir)
+  elif computation_delay_name == "onestep":
+    return OneTimeStepDelayProvider(sample_time, sim_dir, use_fake_scarab)
+  elif isinstance(computation_delay_name, DelayProvider):
+    return computation_delay_name
+  else:
+    raise ValueError(f'Unexpected computation_delay_name: {computation_delay_name}.')
+    
 
 # -> Run several iterations of Cache sizes
 

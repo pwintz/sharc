@@ -73,19 +73,23 @@ class TestConsistency(unittest.TestCase):
     baseline_data = baseline_result["experiment data"]
     for result in results:
       this_data = result["experiment data"]
-      # self.assertEqual(len(this_data['x']), len(baseline_data['x']))
-      # self.assertEqual(len(this_data['u']), len(baseline_data['u']))
-      # self.assertEqual(len(this_data['t']), len(baseline_data['t']))
-      # self.assertEqual(len(this_data['k']), len(baseline_data['k']))
-      # self.assertEqual(len(this_data['i']), len(baseline_data['i']))
-      self.assertEqual(this_data['x'], baseline_data['x'])
-      self.assertAlmostEqual(this_data['u'], baseline_data['u'])
-      self.assertEqual(this_data['t'], baseline_data['t'])
-      self.assertEqual(this_data['k'], baseline_data['k'])
+      self.assertEqual(this_data['k'], baseline_data['k'], \
+        f'Result: {result["label"]} (max_steps={result["experiment config"]["max_time_steps"]}), baseline result: {baseline_result["label"]}  (max_steps={baseline_result["experiment config"]["max_time_steps"]})')
       self.assertEqual(this_data['i'], baseline_data['i'])
+      self.assertEqual(len(this_data['x']), len(baseline_data['x']), f'The length of x is different')
+      self.assertEqual(len(this_data['u']), len(baseline_data['u']))
+      self.assertEqual(len(this_data['t']), len(baseline_data['t']))
+      self.assertEqual(len(this_data['k']), len(baseline_data['k']))
+      self.assertEqual(len(this_data['i']), len(baseline_data['i']))
+      self.assertEqual(len(this_data['pending_computations']), len(baseline_data['pending_computations']))
+      for i, x_i in enumerate(this_data['x']):
+        self.assertAlmostEqual(x_i, baseline_data['x'][i])
+      for i, u_i in enumerate(this_data['u']):
+        self.assertAlmostEqual(u_i, baseline_data['u'][i])
+      self.assertEqual(this_data['t'], baseline_data['t'])
       self.assertAlmostEqual(this_data['pending_computations'], baseline_data['pending_computations'])
 
 
 if __name__ == '__main__':
-  # Bcause some of the tests are very slow, we want to fail fast in case earlier tests have an error.
+  # Because some of the tests are very slow, we use failfast=True so that fail when the first test fails. In general, the fast tests are run first.
   unittest.main(failfast=True)
