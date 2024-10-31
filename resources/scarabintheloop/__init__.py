@@ -431,18 +431,17 @@ class Simulation:
       in_the_loop_delay_proiver =  self.sim_config["Simulation Options"]["in-the-loop_delay_provider"]
       computation_delay_provider = computation_delay_provider_factory(in_the_loop_delay_proiver, self.simulation_dir, sample_time, fake_delays)
       
-      with controller_interface_factory(controller_interface_selection, computation_delay_provider, self.simulation_dir) as controller_interface:
+      controller_interface = controller_interface_factory(controller_interface_selection, computation_delay_provider, self.simulation_dir)
 
+      simulation_executor = getSimulationExecutor(self.simulation_dir, 
+                                                  self.sim_config, 
+                                                  controller_interface,
+                                                  controller_log, 
+                                                  plant_log,
+                                                  fake_delays = fake_delays)
 
-        simulation_executor = getSimulationExecutor(self.simulation_dir, 
-                                                    self.sim_config, 
-                                                    controller_interface,
-                                                    controller_log, 
-                                                    plant_log,
-                                                    fake_delays = fake_delays)
-
-        # Execute the simulation.
-        simulation_data = simulation_executor.run_simulation()
+      # Execute the simulation.
+      simulation_data = simulation_executor.run_simulation()
       
 
       sim_data_path = os.path.join(self.simulation_dir, 'simulation_data.json')
@@ -693,7 +692,7 @@ def getSimulationExecutor(sim_dir, sim_config, controller_interface, controller_
   """ 
   This function implements the "Factory" design pattern, where it returns objects of various classes depending on the imputs.
   """
-
+  assert controller_interface is not None
   use_parallel_scarab_simulation = sim_config["Simulation Options"]["parallel_scarab_simulation"]    
   if use_parallel_scarab_simulation:
     print("Using ParallelSimulationExecutor.")
@@ -734,6 +733,7 @@ class SimulationExecutor:
     self.sim_config = sim_config
     self.controller_log = controller_log
     self.plant_log = plant_log
+    assert controller_interface is not None
     self.controller_interface = controller_interface
 
     # Create the executable.
@@ -781,6 +781,7 @@ class SimulationExecutor:
       printJson(f"Simulation configuration", self.sim_config)
 
     try:
+      self.controller_interface.open()
       with redirect_stdout(self.plant_log):
         print('Start of SimulationExecutor._run_plant() (Plant Dynamics task).')
         plant_result = plant_runner.run(self.sim_dir, self.sim_config, self.evolveState_fnc, self.controller_interface)
@@ -789,6 +790,9 @@ class SimulationExecutor:
     except Exception as e:
       self.plant_log.write(f'Plant dynamics had an error: {e}')
       raise Exception(f'Plant dynamics for "{sim_label}" had an error. See logs: {self.plant_log.name}') from e
+      
+    finally:
+      self.controller_interface.close()
 
     # Print the output in a single call to "print" so that it isn't interleaved with print statements in other threads.
     if debug_levels.debug_dynamics_level >= 1:
@@ -1168,12 +1172,12 @@ class PipesControllerInterface(ControllerInterface):
     """
     Open resources that need to be closed when finished.
     """
-    assertFileExists(self.sim_dir + '/u_c++_to_py')
+    assertFileExists(os.path.join(self.sim_dir, 'u_c++_to_py'))
     self.u_reader          = PipeVectorReader(os.path.join(self.sim_dir, 'u_c++_to_py'))
     self.x_predict_reader  = PipeVectorReader(os.path.join(self.sim_dir, 'x_predict_c++_to_py'))
     self.t_predict_reader  = PipeFloatReader(os.path.join(self.sim_dir, 't_predict_c++_to_py'))
     self.iterations_reader = PipeFloatReader(os.path.join(self.sim_dir, 'iterations_c++_to_py'))
-    self.x_outfile         = open(os.path.join(self.sim_dir, 'x_py_to_c++'), 'w', buffering=1)
+    self.x_outfile         = open(os.path.join(self.sim_dir, 'x_py_to_c++'),       'w', buffering=1)
     self.t_delay_outfile   = open(os.path.join(self.sim_dir, 't_delay_py_to_c++'), 'w', buffering=1)
     
     if debug_levels.debug_interfile_communication_level >= 1:
@@ -1207,6 +1211,7 @@ class PipesControllerInterface(ControllerInterface):
 
   def _write_t_delay(self, t_delay: float):
     t_delay_str = f"{t_delay:.8g}"
+    assert t_delay_str, f't_delay_str={t_delay_str} must not be empty.'
     
     if debug_levels.debug_interfile_communication_level >= 2:
       print(f"Writing {t_delay_str} to t_delay file: {self.t_delay_outfile.name}")
@@ -1232,8 +1237,6 @@ class PipesControllerInterface(ControllerInterface):
       print(f"Reading iterations file: {self.iterations_reader.filename}")
     return self.iterations_reader.read()
       
-
-@contextmanager
 def controller_interface_factory(controller_interface_selection, computation_delay_provider, sim_dir):
   """ 
   Generate the desired ControllerInterface object based on the value of "controller_interface_selection". Typically the value will be the string "pipes", but a ControllerInterface interface object can also be passed in directly to allow for testing.
@@ -1250,16 +1253,11 @@ def controller_interface_factory(controller_interface_selection, computation_del
     controller_interface_selection = controller_interface_selection.lower()
 
   if controller_interface_selection == "pipes":
-    controller_interface = PipesControllerInterface(computation_delay_provider, sim_dir)
+    return PipesControllerInterface(computation_delay_provider, sim_dir)
   elif isinstance(controller_interface_selection, ControllerInterface):
-    controller_interface = controller_interface_selection
+    return controller_interface_selection
   else:
     raise ValueError(f'Unexpected controller_interface: {controller_interface}')
-
-  try:
-    yield controller_interface.open()
-  finally:
-    controller_interface.close()
 
 
 def computation_delay_provider_factory(computation_delay_name: str, sim_dir, sample_time, use_fake_scarab):

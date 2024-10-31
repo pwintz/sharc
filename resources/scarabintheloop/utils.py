@@ -217,7 +217,7 @@ class PipeReader:
 
   def _wait_for_pipe_content(self):
 
-    # Wait for the pip
+    # Wait for the pipe.
     stat_info = os.stat(self.filename)
   
     # Check if the file size is greater than zero (some data has been written)

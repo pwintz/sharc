@@ -5,6 +5,9 @@
 #include <regex> // Used to find and rename Dynamorio trace directories.
 #include "controller.h"
 
+#include <chrono>
+#include <thread>
+
 #include "nlohmann/json.hpp"
 using json = nlohmann::json;
 
@@ -38,7 +41,7 @@ using cvec = Eigen::Matrix<double, N, 1>;
 // fstream provides I/O to file pipes.
 #include <fstream>
  
-Eigen::IOFormat fmt(3, // precision
+Eigen::IOFormat fmt(3,    // precision
                     0,    // flags
                     ", ", // coefficient separator
                     "\n", // row prefix
@@ -117,12 +120,10 @@ int debug_interfile_communication_level;
 int debug_optimizer_stats_level;
 int debug_dynamics_level;
 
-std::string example_path;
-
 class PipeReader {
   protected:
     std::string filename;
-    std::ifstream pipe_file;
+    std::ifstream pipe_file_stream;
 
   public:
     PipeReader(std::string _filename) {
@@ -132,12 +133,46 @@ class PipeReader {
     void open() {
       assertFileExists(filename);
       PRINT_WITH_FILE_LOCATION("Opening " << filename << ". Waiting for writer...");
-      pipe_file.open(filename, std::ofstream::in);
+      pipe_file_stream.open(filename, std::ofstream::in);
     }
 
     void close() {
       PRINT("Closing " << filename << "...")
-      pipe_file.close();
+      pipe_file_stream.close();
+    }
+
+  protected:
+    void read_line(std::string& label, std::string& entire_line) {
+      // Read an entire line, rereading until the line ends with a '\n' character.
+      
+      // Check debug level and print the appropriate message
+      if (debug_interfile_communication_level >= 2) {
+          PRINT_WITH_FILE_LOCATION("Reading '" << label << "' line from Python...");
+      }
+      for (int i = 0; i < 300; i++) {
+        std::string line_from_py;
+        std::getline(pipe_file_stream, line_from_py);
+        entire_line += line_from_py;
+        if (line_from_py.length() > 0 && line_from_py.back() != '\n') {
+          if (debug_interfile_communication_level >= 2)
+          {
+            PRINT_WITH_FILE_LOCATION("Line received from Python:")
+            PRINT_WITH_FILE_LOCATION("\t" << label << ": " << line_from_py);
+            PRINT_WITH_FILE_LOCATION("Entire Line received from Python:")
+            PRINT_WITH_FILE_LOCATION("\t" << label << ": " << entire_line);
+          }
+          return;
+        } else {
+          // Sleep a very short time so that the process is not running at 100%.
+          std::this_thread::sleep_for(std::chrono::milliseconds(10));
+          if (i % 100 == 0){
+            PRINT_WITH_FILE_LOCATION("WAITNG FOR " << label << " (i=" << i << "). entire_line: " << entire_line << ". line_from_py:" << line_from_py);
+          }
+        }
+      }
+      PRINT_WITH_FILE_LOCATION("Never received full line from Python:")
+      PRINT_WITH_FILE_LOCATION("\t" << label << ": " << entire_line);
+      throw std::runtime_error("Reading " + label + " timed out!");
     }
 };
 
@@ -147,21 +182,10 @@ class PipeDoubleReader : public PipeReader {
     PipeDoubleReader (std::string filename) : PipeReader (filename) {}
 
     void read(std::string label, double& value) {
-      // Check debug level and print the appropriate message
-      if (debug_interfile_communication_level >= 2) {
-          PRINT_WITH_FILE_LOCATION("Getting '" << label << "' line from Python...");
-      }
-
       std::string value_in_line_from_py;
+      read_line(label, value_in_line_from_py);
 
-      std::getline(pipe_file, value_in_line_from_py);
-      if (debug_interfile_communication_level >= 2)
-      {
-        PRINT_WITH_FILE_LOCATION("Lines received from Python:")
-        PRINT_WITH_FILE_LOCATION("\t" << label << ": " << value_in_line_from_py);
-      }
-
-      // Create a stringstream to parse the string
+      // Create a stringstream to parse the string.
       std::stringstream value_ss(value_in_line_from_py);
       value_ss >> value;
   }
@@ -175,14 +199,7 @@ class PipeVectorReader : public PipeReader {
     template<int rows>
     void read(std::string label, cvec<rows>& x) {
         std::string x_in_line_from_py;
-
-        // Check debug level and print the appropriate message
-        if (debug_interfile_communication_level >= 2) {
-            PRINT_WITH_FILE_LOCATION("Getting '" << label << "' line from Python: ");
-        }
-
-        // Get the line from the file
-        std::getline(pipe_file, x_in_line_from_py);
+        read_line(label, x_in_line_from_py);
 
         // Parse the line into the x object
         std::stringstream x_ss(x_in_line_from_py);
@@ -201,22 +218,23 @@ class PipeVectorReader : public PipeReader {
 class PipeWriter {
   protected:
     std::string filename;
-    std::ofstream pipe_file;
+    std::ofstream pipe_file_stream;
 
   public:
     PipeWriter(std::string _filename) {
       filename = _filename;
+      assertFileExists(filename);
     }
 
     void open() {
       assertFileExists(filename);
       PRINT_WITH_FILE_LOCATION("Opening " << filename << ". Waiting for reader...");
-      pipe_file.open(filename, std::ofstream::out);
+      pipe_file_stream.open(filename, std::ofstream::out);
     }
 
     void close() {
       PRINT_WITH_FILE_LOCATION("Closing " << filename << "...")
-      pipe_file.close();
+      pipe_file_stream.close();
     }
 };
 
@@ -231,7 +249,7 @@ class PipeDoubleWriter : public PipeWriter {
       {
         PRINT_WITH_FILE_LOCATION(label << " (send to Python): " << x);
       } 
-      pipe_file << "Loop " << i_loop << ": " << x << std::endl;
+      pipe_file_stream << "Loop " << i_loop << ": " << x << std::endl;
     }
 };
 
@@ -248,7 +266,7 @@ class PipeVectorWriter : public PipeWriter {
       {
         PRINT_WITH_FILE_LOCATION("Send \"" << label << "\" to Python: " << out_str);
       } 
-      pipe_file << "Loop " << i_loop << ": " << out_str << std::endl;
+      pipe_file_stream << "Loop " << i_loop << ": " << out_str << std::endl;
       if (debug_interfile_communication_level >= 2) 
       {
         PRINT_WITH_FILE_LOCATION("SENT \"" << label << "\" to Python: " << out_str);
@@ -289,10 +307,10 @@ int main()
   PRINT_WITH_FILE_LOCATION("Simulation directory: " << sim_dir)
 
   // Writers
-  PipeDoubleWriter    t_predict_writer(sim_dir + "t_predict_c++_to_py");
-  PipeVectorWriter x_prediction_writer(sim_dir + "x_predict_c++_to_py");
-  PipeDoubleWriter   iterations_writer(sim_dir + "iterations_c++_to_py");
   PipeVectorWriter            u_writer(sim_dir + "u_c++_to_py");
+  PipeVectorWriter x_prediction_writer(sim_dir + "x_predict_c++_to_py");
+  PipeDoubleWriter    t_predict_writer(sim_dir + "t_predict_c++_to_py");
+  PipeDoubleWriter   iterations_writer(sim_dir + "iterations_c++_to_py");
   // Readers
   PipeVectorReader      x_reader(sim_dir + "x_py_to_c++");
   PipeDoubleReader delays_reader(sim_dir + "t_delay_py_to_c++");
