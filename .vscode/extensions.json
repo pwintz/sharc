@@ -6,9 +6,9 @@
 	"recommendations": [
 		"ms-vscode-remote.remote-containers",
 		"ms-vscode-remote.remote-wsl",
-		"ms-vscode.cpptools-extension-pack",
-		"ms-python.python"
-	],
+    "ms-vscode.cpptools-extension-pack",
+    "zainchen.json"
+  ],
 	// List of extensions recommended by VS Code that should not be recommended for users of this workspace.
 	"unwantedRecommendations": [
 		

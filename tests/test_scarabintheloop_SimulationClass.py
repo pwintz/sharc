@@ -2,10 +2,267 @@
 
 import unittest
 import scarabintheloop
-from scarabintheloop.plant_runner import TimeStepSeries, ComputationData
-import copy
+from scarabintheloop import Simulation, BatchInit, Batch
 import scarabintheloop.scarabizor as scarabizor
+from scarabintheloop.data_types import *
+import numpy as np
+import copy
 import os
+
+class TestSimulation(unittest.TestCase):
+  
+  def test_initialization(self):
+    # ---- Setup ---- 
+    label = "My Label"
+    first_time_index = 0
+    last_time_index  = 2
+    x0 = np.array([[1], [2], [3]])
+    u0 = np.array([[-12]])
+    pending_computation = None
+    simulation_dir = '/my/path/'
+    sim_config = {}
+    params = scarabizor.ParamsData.from_file('PARAMS.generated')
+    
+    # ---- Execution ----
+    simulation = Simulation(label, first_time_index, last_time_index, x0, u0, pending_computation, simulation_dir, sim_config, params) 
+    
+    # ---- Assertions ----
+    self.assertEqual(simulation.label, label)
+    self.assertEqual(simulation.x0.tolist(), x0.tolist())
+    self.assertEqual(simulation.u0.tolist(), u0.tolist())
+    self.assertEqual(simulation.simulation_dir, simulation_dir)
+    self.assertEqual(simulation.first_time_index, first_time_index)
+    self.assertEqual(simulation.last_time_index, last_time_index)
+    self.assertEqual(simulation.n_time_steps,   2)
+    self.assertEqual(simulation.n_time_indices, 3)
+    self.assertEqual(simulation.time_steps,     [0, 1])
+    self.assertEqual(simulation.time_indices, [0,  1,  2])
+    self.assertEqual(simulation.pending_computation, pending_computation)
+    self.assertEqual(simulation.params, params)
+
+  def test_from_experiment_config_unbatched(self):
+    # ---- Setup ---- 
+    pending_computation = None
+    experiment_config = {
+      "label": "My Label",
+      "experiment_dir": '/my/path/',
+      'max_time_steps': 3,
+      "x0": [1, 2, 3],
+      "u0": [-12], 
+      "PARAMS_patch_values": {
+        "l1_size": 12334
+      }
+    }
+    params_base = scarabizor.ParamsData.from_file('PARAMS.generated')
+    
+    # ---- Execution ----
+    simulation = Simulation.from_experiment_config_unbatched(experiment_config, params_base) 
+    
+    # ---- Assertions ----
+    self.assertEqual(simulation.label, "My Label")
+    self.assertEqual(simulation.x0.tolist(), [[1], [2], [3]])
+    self.assertEqual(simulation.u0.tolist(), [[-12]])
+    self.assertEqual(simulation.simulation_dir, '/my/path/')
+    self.assertEqual(simulation.first_time_index, 0)
+    self.assertEqual(simulation.last_time_index, 3)
+    self.assertEqual(simulation.n_time_steps,   3)
+    self.assertEqual(simulation.n_time_indices, 4)
+    self.assertEqual(simulation.time_steps,    [0, 1, 2])# Three time steps
+    self.assertEqual(simulation.time_indices, [0, 1, 2, 3])# Four time indices
+    self.assertEqual(simulation.pending_computation, None)
+
+    # Check to make sure we did not modify the input PARAMS values.
+    self.assertNotEqual(params_base.to_dict()["l1_size"], 12334)
+
+    # Check that we *did* modify the params options for the simulation, 
+    # based on the values given in PARAMS_patch_values in the experiment config.
+    self.assertEqual(simulation.params.to_dict()["l1_size"], 12334)
+
+    
+  def test_from_experiment_config_batched(self):
+    # ---- Setup ---- 
+    pending_computation = None
+    experiment_config = {
+      "label": "My Label",
+      "experiment_dir": '/my/path/',
+      'max_time_steps': 3000, # Very large 
+      "x0": [1, 2, 3],
+      "u0": [-12], 
+      "PARAMS_patch_values": {
+        "chip_cycle_time": 555555
+      },
+      "Simulation Options": {
+        "max_batch_size": 1 # Force exactly one step.
+      }
+    }
+    params_base = scarabizor.ParamsData.from_file('PARAMS.generated')
+    pending_computation = ComputationData(t_start=1.2, delay=0.22, u=[345])
+    batch_init = BatchInit(
+      i_batch = 4,
+      k0 = 15,
+      pending_computation = pending_computation,
+      x0 = [10, 20, 30],
+      u0 = [-120],
+      t0 = 0.4
+    )
+
+    # ---- Execution ----
+    simulation = Simulation.from_experiment_config_batched(experiment_config, params_base, batch_init) 
+    
+    # ---- Assertions ----
+    self.assertEqual(simulation.first_time_index, 15)
+    self.assertEqual(simulation.last_time_index, 16)
+    self.assertEqual(simulation.label, "My Label/batch4_steps15-16")
+    self.assertEqual(simulation.x0.tolist(), [[10], [20], [30]])
+    self.assertEqual(simulation.u0.tolist(), [[-120]])
+    self.assertEqual(simulation.simulation_dir, '/my/path/batch4_steps15-16')
+    self.assertEqual(simulation.n_time_steps,   1)
+    self.assertEqual(simulation.n_time_indices, 2)
+    self.assertEqual(simulation.time_steps,    [15])# Three time steps
+    self.assertEqual(simulation.time_indices,[15, 16])# Four time indices
+    self.assertEqual(simulation.pending_computation, pending_computation)
+
+    # Check to make sure we did not modify the input PARAMS values.
+    self.assertNotEqual(params_base.to_dict()["chip_cycle_time"], 555555)
+
+    # Check that we *did* modify the params options for the simulation, 
+    # based on the values given in PARAMS_patch_values in the experiment config.
+    self.assertEqual(simulation.params.to_dict()["chip_cycle_time"], 555555)
+
+  @unittest.skipIf(os.cpu_count() < 4, 
+        """In order for this test to be valid, we need 
+        there to be more CPUs than the max batch size. 
+        Otherwise, the CPU count will restrict the max size.""")
+  def test_from_experiment_config_batched_with_steps_limited_by_max_batch_size(self):
+
+    # ---- Setup ---- 
+    pending_computation = None
+    experiment_config = {
+      'max_time_steps': 3000, # Very large 
+      "Simulation Options": {
+        "max_batch_size": 2# This should be smaller than the number of CPUs
+      },
+      # The following values are unimportant for this test. 
+      "label": "My Label", "experiment_dir": '/my/path/',
+      "x0": [1, 2, 3], "u0": [-12], 
+      "PARAMS_patch_values": {}
+    }
+    params_base = scarabizor.ParamsData.from_file('PARAMS.generated')
+    pending_computation = ComputationData(t_start=1.2, delay=0.22, u=[345])
+    batch_init = BatchInit(
+      i_batch = 4,
+      k0 = 15,
+      pending_computation = pending_computation,
+      x0 = [10, 20, 30],
+      u0 = [-120],
+      t0 = 0.4
+    )
+
+    # ---- Execution ----
+    simulation = Simulation.from_experiment_config_batched(experiment_config, params_base, batch_init) 
+    
+    # ---- Assertions ----
+    # Check the indexing and time steps.
+    self.assertEqual(simulation.first_time_index, 15)
+    self.assertEqual(simulation.last_time_index, 17)
+    self.assertEqual(simulation.n_time_steps,   2)
+    self.assertEqual(simulation.n_time_indices, 3)
+    self.assertEqual(simulation.time_steps,    [15, 16])# Three time steps
+    self.assertEqual(simulation.time_indices,[15, 16, 17])# Four time indices
+
+  @unittest.skipIf(os.cpu_count() > 64, 
+        """In order for this test to be valid, we need 
+        there to be less CPUs than the max batch size and the experiment's max_time_steps. 
+        so that the CPU will restrict the max size.""")
+  def test_from_experiment_config_batched_with_steps_limited_by_CPU_count(self):
+    # ---- Setup ---- 
+    pending_computation = None
+    experiment_config = {
+      'max_time_steps': 3000, # Very large 
+      "Simulation Options": {
+        "max_batch_size": 100# This should be larger than the number of CPUs
+      },
+      # The following values are unimportant for this test. 
+      "label": "My Label", "experiment_dir": '/my/path/',
+      "x0": [1, 2, 3], "u0": [-12], 
+      "PARAMS_patch_values": {}
+    }
+    params_base = scarabizor.ParamsData.from_file('PARAMS.generated')
+    pending_computation = ComputationData(t_start=1.2, delay=0.22, u=[345])
+    batch_init = BatchInit(
+      i_batch = 4,
+      k0 = 15,
+      pending_computation = pending_computation,
+      x0 = [10, 20, 30],
+      u0 = [-120],
+      t0 = 0.4
+    )
+
+    # ---- Execution ----
+    simulation = Simulation.from_experiment_config_batched(experiment_config, params_base, batch_init) 
+    
+    # ---- Assertions ----
+    # Check the indexing and time steps.
+    self.assertEqual(simulation.n_time_steps,   os.cpu_count())
+    self.assertEqual(simulation.n_time_indices, os.cpu_count() + 1)
+
+  @unittest.skipIf(os.cpu_count() < 4, 
+      """In order for this test to be valid, we need 
+      there to be less CPUs than the max batch size and the experiment's max_time_steps. 
+      so that the CPU will restrict the max size.""")
+  def test_from_experiment_config_batched_with_steps_limited_by_steps_remaining_in_experiment(self):
+    # ---- Setup ---- 
+    pending_computation = None
+    experiment_config = {
+      'max_time_steps': 100,
+      "Simulation Options": {
+        "max_batch_size": 10000 # This should be larger than the number of CPUs and remaining steps.
+      },
+      # The following values are unimportant for this test. 
+      "label": "My Label", "experiment_dir": '/my/path/',
+      "x0": [1, 2, 3], "u0": [-12], 
+      "PARAMS_patch_values": {}
+    }
+    params_base = scarabizor.ParamsData.from_file('PARAMS.generated')
+    pending_computation = ComputationData(t_start=1.2, delay=0.22, u=[345])
+    batch_init = BatchInit(
+      i_batch = 4,
+      k0 = 98,
+      pending_computation = pending_computation,
+      x0 = [10, 20, 30],
+      u0 = [-120],
+      t0 = 0.4
+    )
+
+    # ---- Execution ----
+    simulation = Simulation.from_experiment_config_batched(experiment_config, params_base, batch_init) 
+    
+    # ---- Assertions ----
+    # Check the indexing and time steps.
+    self.assertEqual(simulation.n_time_steps,   2)
+    self.assertEqual(simulation.n_time_indices, 3)
+    
+    self.assertEqual(simulation.last_time_index, 100)
+    self.assertEqual(simulation.time_steps,    [98, 99])    # Two time steps
+    self.assertEqual(simulation.time_indices,[98, 99 , 100])# Three time indices
+
+class Test_BatchInit(unittest.TestCase):
+  def test_first(self):
+    # ---- Setup ---- 
+    x0 = [1, 2, 3]
+    u0 = [-1, 2]
+    
+    # ---- Execution ----
+    batch_init = BatchInit.first(x0, u0)
+  
+    # ---- Assertions ---- 
+    self.assertEqual(batch_init.i_batch, 0)
+    self.assertEqual(batch_init.k0, 0)
+    self.assertEqual(batch_init.t0, 0.0)
+    # self.assertEqual(batch_init.x0, )
+    # self.assertEqual(batch_init.u0, 0)
+    self.assertEqual(batch_init.pending_computation, None)
+
 
 class TestProcessBatchSimulationData(unittest.TestCase):
   def test_no_step_OK(self):
@@ -271,9 +528,10 @@ class Test_Simulation(unittest.TestCase):
     simulation = scarabintheloop.Simulation(experiment_config, params, batch_init)
     
     # ----- Assertions ----- 
-    self.assertEqual(simulation.sim_config["first_time_index"], batch_first_time_index)
-    self.assertEqual(simulation.sim_config["max_time_steps"], expected_batch_size)
-    self.assertEqual(simulation.sim_config["last_time_index"], experiment_max_time_steps)
+    self.assertEqual(simulation.first_time_index, batch_first_time_index)
+    self.assertEqual(simulation.max_time_steps,   expected_batch_size)
+    self.assertEqual(simulation.last_time_index,  experiment_max_time_steps)
+
 
 if __name__ == '__main__':
   unittest.main()

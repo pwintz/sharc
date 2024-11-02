@@ -55,6 +55,7 @@ class TestConsistency(unittest.TestCase):
     self.assert_all_results_almost_equal(experiment_list)
 
   def assert_all_results_equal(self, experiment_list):
+    self.assertEqual(experiment_list.n_failed(), 0)
     results = experiment_list.get_results()
     baseline_result = results[0]
     baseline_data = baseline_result["experiment data"]
@@ -68,6 +69,7 @@ class TestConsistency(unittest.TestCase):
       self.assertEqual(this_data['pending_computations'], baseline_data['pending_computations'])
 
   def assert_all_results_almost_equal(self, experiment_list):
+    self.assertEqual(experiment_list.n_failed(), 0)
     results = experiment_list.get_results()
     baseline_result = results[0]
     baseline_data = baseline_result["experiment data"]

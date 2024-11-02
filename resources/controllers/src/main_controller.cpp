@@ -38,6 +38,10 @@ using cvec = Eigen::Matrix<double, N, 1>;
 #define PRINT(x) std::cout << x << std::endl;
 #define PRINT_WITH_FILE_LOCATION(x) std::cout << __FILE__  << ":" << __LINE__ << ": " << x << std::endl;
 
+int debug_interfile_communication_level;
+int debug_optimizer_stats_level;
+int debug_dynamics_level;
+
 // fstream provides I/O to file pipes.
 #include <fstream>
  
@@ -79,6 +83,13 @@ std::string string_format( const std::string& format, Args ... args )
 
 template<int rows, int cols>
 void loadMatrixValuesFromJson(mat<rows, cols>& mat_out, nlohmann::json json_data, std::string key) {
+    
+      // Check debug level and print the appropriate message
+      if (debug_interfile_communication_level >= 2) {
+          PRINT_WITH_FILE_LOCATION("Building a matrix from key='" << key << "'...");
+          PRINT("Value: " << json_data.at(key))
+      }
+
       if (json_data.at(key).size() != rows*cols)
       {
         throw std::invalid_argument(string_format(
@@ -90,6 +101,11 @@ void loadMatrixValuesFromJson(mat<rows, cols>& mat_out, nlohmann::json json_data
       for (auto& element : json_data.at(key)) {
         mat_out[i] = element;
         i++;
+      }
+      
+      // Check debug level and print the appropriate message
+      if (debug_interfile_communication_level >= 2) {
+          PRINT_WITH_FILE_LOCATION("Built a matrix from key='" << key << "': " << mat_out);
       }
 }
 
@@ -115,10 +131,6 @@ std::vector<double> matToStdVector(mat<rows,cols>& matrix){
   }
   return matrix_entries;
 }
-
-int debug_interfile_communication_level;
-int debug_optimizer_stats_level;
-int debug_dynamics_level;
 
 class PipeReader {
   protected:

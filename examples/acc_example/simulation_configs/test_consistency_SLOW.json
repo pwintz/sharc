@@ -1,0 +1,130 @@
+[
+  {
+    "label": "Serial Without Scarab 1",
+    "skip": false,
+    "only_update_control_at_sample_times": true,
+    "max_time_steps": 4,
+    "Simulation Options": {
+      "in-the-loop_delay_provider": "execution-driven scarab",
+      "use_fake_delays": true
+    },
+    "system_parameters": {
+      "sample_time": 0.25, 
+      "osqp_options": {
+        "maximum_iteration": 10
+      }
+    }
+  },
+  {
+    "label": "Serial Without Scarab 2",
+    "skip": false,
+    "only_update_control_at_sample_times": true,
+    "max_time_steps": 4,
+    "Simulation Options": {
+      "in-the-loop_delay_provider": "execution-driven scarab",
+      "use_fake_delays": true
+    },
+    "system_parameters": {
+      "sample_time": 0.25, 
+      "osqp_options": {
+        "maximum_iteration": 10
+      }
+    }
+  },
+  {
+    "label": "Serial With Scarab 1",
+    "skip": false,
+    "only_update_control_at_sample_times": true,
+    "max_time_steps": 4,
+    "Simulation Options": {
+      "in-the-loop_delay_provider": "execution-driven scarab"
+    },
+    "system_parameters": {
+      "sample_time": 0.25, 
+      "osqp_options": {
+        "maximum_iteration": 10
+      }
+    }
+  },
+  {
+    "label": "Serial With Scarab 2",
+    "skip": false,
+    "only_update_control_at_sample_times": true,
+    "max_time_steps": 4,
+    "Simulation Options": {
+      "in-the-loop_delay_provider": "execution-driven scarab"
+    },
+    "system_parameters": {
+      "sample_time": 0.25, 
+      "osqp_options": {
+        "maximum_iteration": 10
+      }
+    }
+  },
+  {
+    "label": "Parallel Without Scarab 1",
+    "skip": false,
+    "only_update_control_at_sample_times": true,
+    "max_time_steps": 4,
+    "Simulation Options": {
+      "in-the-loop_delay_provider": "onestep",
+      "parallel_scarab_simulation": true, 
+      "use_fake_delays": true
+    },
+    "system_parameters": {
+      "sample_time": 0.25, 
+      "osqp_options": {
+        "maximum_iteration": 10
+      }
+    }
+  },
+  {
+    "label": "Parallel Without Scarab 2",
+    "skip": false,
+    "only_update_control_at_sample_times": true,
+    "max_time_steps": 4,
+    "Simulation Options": {
+      "in-the-loop_delay_provider": "onestep",
+      "parallel_scarab_simulation": true, 
+      "use_fake_delays": true
+    },
+    "system_parameters": {
+      "sample_time": 0.25, 
+      "osqp_options": {
+        "maximum_iteration": 10
+      }
+    }
+  },
+  {
+    "label": "Parallel With Scarab 1",
+    "skip": false,
+    "only_update_control_at_sample_times": true,
+    "max_time_steps": 4,
+    "Simulation Options": {
+      "in-the-loop_delay_provider": "onestep",
+      "parallel_scarab_simulation": true
+    },
+    "system_parameters": {
+      "sample_time": 0.25, 
+      "osqp_options": {
+        "maximum_iteration": 10
+      }
+    }
+  },
+  {
+    "label": "Parallel With Scarab 2",
+    "skip": false,
+    "only_update_control_at_sample_times": true,
+    "max_time_steps": 4,
+    "Simulation Options": {
+      "in-the-loop_delay_provider": "onestep",
+      "parallel_scarab_simulation": true
+    },
+    "system_parameters": {
+      "sample_time": 0.25, 
+      "osqp_options": {
+        "maximum_iteration": 10
+      }
+    }
+  }
+]
