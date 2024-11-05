@@ -14,6 +14,8 @@ PARAMS_data_in = """# Here is a comment
 --chip_cycle_time               100000000
 """
 
+TESTS_FOLDER = '/dev-workspace/tests'
+
 class Test_ParamsData(unittest.TestCase):
 
   @patch('os.path.exists')
@@ -43,13 +45,13 @@ class Test_ParamsData(unittest.TestCase):
 
 class TestScarabPARAMSReader(unittest.TestCase):
   def test_load(self):
-    scarab_params_reader = ScarabPARAMSReader('.')
+    scarab_params_reader = ScarabPARAMSReader(TESTS_FOLDER)
     params_in = scarab_params_reader.params_in_to_dictionary()
     self.assertTrue(params_in is not None)
     
   def test_read_params_file(self):
     scarab_params_reader = ScarabPARAMSReader()
-    params_lines = scarab_params_reader.read_params_file('PARAMS.out')
+    params_lines = scarab_params_reader.read_params_file(TESTS_FOLDER + '/PARAMS.out')
     self.assertTrue(len(params_lines) > 100)
 
 
@@ -71,7 +73,7 @@ class TestMockExecutionDrivenScarabRunner(unittest.TestCase):
     # Get the contents of the Mock files.
     csv_stat_file_contents = mock_file().write.call_args_list[0][0][0]
 
-    stats_reader = ScarabStatsReader('', is_using_roi=True)
+    stats_reader = ScarabStatsReader(TESTS_FOLDER, is_using_roi=True)
     
     time_in_femtosecs = stats_reader.find_stat_in_lines('EXECUTION_TIME', csv_stat_file_contents.split('\n'))
     time_in_secs = float(time_in_femtosecs) * SECONDS_PER_FEMTOSECOND

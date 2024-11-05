@@ -27,7 +27,7 @@ class Test_JSON(unittest.TestCase):
     self.assertRegex(json_string, expected_json_string)
     
   def test_numpy_1D_array(self):
-    numpy_array = np.array([1, 2, 3])
+    numpy_array = np.array([[1], [2], [3]])
     expected_json_string = r"\[1, 2, 3\]"
 
     json_string = utils._create_json_string(numpy_array)

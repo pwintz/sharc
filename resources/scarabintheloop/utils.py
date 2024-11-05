@@ -2,6 +2,7 @@
 This package provides several utility functions that are used by Scarab-in-the-loop.
 """
 
+import io
 import os
 import sys
 import re
@@ -83,7 +84,8 @@ def _create_json_string(json_data):
         # print(obj.__dict__())
         return vars(obj)
       elif isinstance(obj, np.ndarray):
-        return '[' + nump_vec_to_csv_string(obj) + ']'
+        return column_vec_to_list(obj)
+        # return '[' + nump_vec_to_csv_string(obj) + ']'
       else:
         return repr(obj)
     json_string = json.dumps(json_data, indent=2, default=encode_objs)
@@ -180,26 +182,51 @@ def assert_is_column_vector(array: np.ndarray, label="array") -> None:
 #####  PIPE READER CLASSES ######
 #################################
 class PipeReader:
+  filename: str
+  file: io.TextIOWrapper
+
   def __init__(self, filename: str):
     self.filename = filename
+    self.file = None
+    try:
+      os.mkfifo(filename)
+    except FileExistsError: 
+      raise FileExistsError(f"A pipe at {filename} cannot be created because it already exists.")
+    
+  @property
+  def is_open(self):
+    return not self.is_closed
+  
+  @property
+  def is_closed(self):
+    return self.file is None or self.file.closed
+
+  def open(self):
     assertFileExists(self.filename)
+    assert self.is_closed, 'File must not already be open.'
     if debug_levels.debug_interfile_communication_level >= 1:
-      print(f"About to open reader for {filename}. Waiting for it to available...")
-    self.file = open(filename, 'r', buffering=1)
+      print(f"About to open reader for {self.filename}. Waiting for it to available...")
+    self.file = open(self.filename, 'r', buffering=1)
 
   def close(self):
+    if self.is_closed:
+      if debug_levels.debug_interfile_communication_level >= 1:
+        print(f'{self} is already closed.')
+      return
     if debug_levels.debug_interfile_communication_level >= 1:
       print(f'Closing {self}')
     self.file.close()
+    self.file = None
 
   def read(self):
+    assert self.is_open, 'File must be open.'
     self._wait_for_pipe_content()
     input_line = self._waitForLineFromFile()
     input_line = PipeReader.checkAndStripInputLoopNumber(input_line)
     return input_line
 
   def __repr__(self):
-    return f'PipeReader(file={self.filename}. Is closed? {self.file.closed})'
+    return f'PipeReader(file={self.filename}. Is open? {self.is_open})'
 
   def _waitForLineFromFile(self):
     if debug_levels.debug_interfile_communication_level >= 1:
@@ -278,7 +305,67 @@ class PipeVectorReader(PipeReader):
 
     return v
 
+##########################
+#####  PIPE WRITER  ######
+##########################
+class PipeWriter:
+  filename: str
+  file: io.TextIOWrapper
+  
+  def __init__(self, filename: str):
+    self.filename = filename
+    if debug_levels.debug_interfile_communication_level >= 1:
+      print(f"Opening writer for {filename}....")
+    self.file = None
+    os.mkfifo(filename)
+  
+  @property
+  def is_open(self):
+    return self.file is not None
+  
+  @property
+  def is_closed(self):
+    return self.file is None
+  
+  def open(self):
+    assert self.file is None, "File must not be open to open it."
+    self.file = open(self.filename, 'w', buffering=1)
 
+  def close(self):
+    if debug_levels.debug_interfile_communication_level >= 1:
+      print(f'Closing {self}')
+    assert self.file is not None, "File must be open to close it."
+    try:
+      self.file.write("END OF PIPE\n")
+      self.file.close()
+    except:
+      pass
+    self.file = None
+
+  def write(self, value):
+    assert self.file is not None, "File must be open to write to it."
+      
+    if debug_levels.debug_interfile_communication_level >= 2:
+      print(f'Writing "{value}" to {self.filename}')
+
+    self.file.write(value + "\n", )
+
+  def __repr__(self):
+    return f'PipeWriter(file={self.filename}. Is open? {self.file is not None})'
+
+class PipeVectorWriter(PipeWriter):
+
+  def write(self, x: np.ndarray):
+    assert isinstance(x, np.ndarray)
+    x_string = nump_vec_to_csv_string(x)
+    super().write(x_string)
+
+class PipeFloatWriter(PipeWriter):
+  def write(self, x: float):
+    assert isinstance(x, float)
+    x_string = f"{x:.8g}"
+    assert x_string, f't_delay_str={x_string} must not be empty.'
+    super().write(x_string)
 
 #############################
 #####  NUMPY FUNCTIONS ######
@@ -301,7 +388,6 @@ def nump_vec_to_csv_string(array: np.ndarray) -> str:
   assert array.ndim == 1, f'After flattening, array must be 1-dimensional.'
   string = ', '.join(map(str, array))
   return string
-
 
 # def checkBatchConfig(batch_config):
 #   pass
@@ -379,33 +465,23 @@ def printHeader(header: str, level=1):
   else:
     raise ValueError(f"Unexpected value of level = {level}")
 
-
 @contextmanager
-def openLog(filename, headerText=None):
-  if not headerText:
-    headerText=f"Log: {filename}"
+def openLog(filename, header_text=None):
+  if not header_text:
+    header_text=f"Log: {filename}"
   log_path = os.path.abspath(filename)
-  print(f"Opening log: {log_path}")
+  if debug_levels.debug_program_flow_level >= 2:
+    print(f"Opening log: {log_path}")
   if not os.path.isdir(os.path.dirname(log_path)):
     raise ValueError(f'The parent of the given path is not a directory: {log_path}')
-    
+
   try:
-    # Use buffering=1 for line buffering.
     log_file = open(filename, 'w+', buffering=1)
-
     # Write a header for the log file.
-    log_file.write(f'===={"="*len(headerText)}==== \n')
-    log_file.write(f'=== {headerText} === \n')
-    log_file.write(f'===={"="*len(headerText)}==== \n')
-    # log_file.flush()
-
+    log_file.write(f'===={"="*len(header_text)}==== \n')
+    log_file.write(f'=== {header_text} === \n')
+    log_file.write(f'===={"="*len(header_text)}==== \n')
     yield log_file
-  # except SystemExit as err:
-  #   print("SystemExit receieved")
-  #   raise err
-  # except KeyboardInterrupt as err:
-  #   print("KeyboardInterrupt receieved")
-  #   raise err
   finally:
     # Clean up
     log_file.close()

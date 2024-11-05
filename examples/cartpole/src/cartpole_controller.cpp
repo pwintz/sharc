@@ -250,7 +250,7 @@ int main()
   json json_data = json::parse(config_json_file);
   config_json_file.close();
 
-  int max_time_steps = json_data.at("max_time_steps");
+  int n_time_steps = json_data.at("n_time_steps");
   auto time_indices = json_data.at("time_indices");
   for (int time_index : time_indices){
     PRINT("time_index" << time_index)
@@ -351,9 +351,9 @@ int main()
     scarab_begin(); // Tell Scarab to stop "fast forwarding". This is needed for '--pintool_args -fast_forward_to_start_inst 1'
   }
 
-  for (int i = 0; i < max_time_steps; i++)
+  for (int i = 0; i < n_time_steps; i++)
   {
-    PRINT(std::endl << "====== Starting loop #" << i+1 << " of " << max_time_steps << " ======");
+    PRINT(std::endl << "====== Starting loop #" << i+1 << " of " << n_time_steps << " ======");
     PRINT("x=" << modelX.transpose().format(fmt));
     PRINT("u=" << u.transpose().format(fmt));
 
@@ -523,7 +523,7 @@ int main()
     // }
     
   } 
-  PRINT_WITH_FILE_LOCATION("Finshed looping through " << max_time_steps << " time steps.")
+  PRINT_WITH_FILE_LOCATION("Finshed looping through " << n_time_steps << " time steps.")
   // printVector("y", y);
 
   if (use_external_dynamics_computation)

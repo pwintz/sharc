@@ -11,8 +11,9 @@ class DataNotRecievedViaFileError(IOError):
   pass
 
 class ComputationData:
+
   def __init__(self, t_start: float, delay: float, u: float, metadata: dict = None):
-      # Using setters to assign initial values, enforcing validation
+      # Using setters to assign initial values, enforcing validation.
       self.t_start = t_start
       self.delay = delay
       self.u = u
@@ -40,14 +41,14 @@ class ComputationData:
       self._t_end = self._t_start + self._delay  # Update t_end whenever delay changes
 
   @property
-  def u(self) -> Union[float, np.ndarray]:
+  def u(self) -> np.ndarray:
       return self._u
 
   @u.setter
   def u(self, value: float):
       if not isinstance(value, (float, int, np.ndarray, list)):
-          raise ValueError(f"u must be a float, int, or numpy array. instead it was {type(value)}")
-      self._u = value
+          raise ValueError(f"u must be a float, int, or numpy array. type(value)={type(value)}")
+      self._u = list_to_column_vec(value)
 
   @property
   def metadata(self) -> dict:
@@ -93,7 +94,7 @@ class ComputationData:
     return self.t_start == other.t_start \
        and self.delay == other.delay     \
        and self.t_end == other.t_end     \
-       and self.u == other.u #            \
+       and np.array_equal(self.u, other.u) #            \
       #  and self.metadata == other.metadata 
 
   def next_batch_initialization_summary(self) -> str:
@@ -103,6 +104,50 @@ class ComputationData:
       return f't_end={self.t_end}, u[0]={self.u[0]}'
 
 class TimeStepSeries:
+  k0: int
+  i0: int
+  t0: float
+  x0: list
+  x: list
+  u: list
+  t: list
+  k: list
+  i: list
+  metadata: dict
+  pending_computation_prior: ComputationData
+  pending_computation: ComputationData
+  cause_of_termination: str
+  # datetime_of_run
+  # _walltime_start
+  # walltime
+
+  @staticmethod
+  def _from_lists(k0, t_list, x_list, u_list, delay_list): 
+    # Make copies of the lists so that modificaitons don't effect the 
+    # lists where this function is called.
+    t_list     = t_list.copy()    
+    x_list     = x_list.copy()
+    u_list     = u_list.copy()
+    delay_list = delay_list.copy()
+
+    assert isinstance(k0, int)
+    assert isinstance(t_list, list)
+    assert isinstance(x_list, list)
+    assert isinstance(u_list, list)
+    assert isinstance(delay_list, list)
+    assert len(t_list) > 1
+    assert len(t_list) == len(x_list), f'len(t_list)={len(t_list)} must equal = len(x_list) = {len(x_list)}'
+    assert len(t_list) == len(u_list) + 1 , f'len(t_list)={len(t_list)} must equal = len(u_list) + 1 = {len(u_list) + 1}'
+    
+    pc_list = []
+    for i in range(len(delay_list)):
+      pc_list.append(ComputationData(t_list[i], delay_list[i], 0.0))
+
+    t0 = t_list.pop(0) # Pop first element.
+    x0 = x_list.pop(0) # Pop first element.
+    time_series = TimeStepSeries(k0, t0, x0)
+    time_series.append_multiple(t_list, x_list, u_list, pc_list)
+    return time_series
 
   def __init__(self, k0, t0, x0, pending_computation_prior=None):
     assert k0 is not None, f"k0={k0} must not be None"
@@ -111,7 +156,7 @@ class TimeStepSeries:
 
     k0 = int(k0)
     t0 = float(t0)
-    assert isinstance(k0, int), f'k_0={k_0} had an unexpected type: {type(k_0)}. Must be an int.'
+    assert isinstance(k0, int), f'k_0={k0} had an unexpected type: {type(k0)}. Must be an int.'
     assert isinstance(t0, (float, int)), f't0={t0} had an unexpected type: {type(t0)}.'
     assert isinstance(x0, (list, np.ndarray)), f'x0={x0} had an unexpected type: {type(x0)}.'
     
@@ -122,7 +167,7 @@ class TimeStepSeries:
     self.x0 = TimeStepSeries.cast_vector(x0)
 
     # Unlike k0, t0, and x0, "pending_computation_prior" is not stored in the data arrays. 
-    # Instead, it simple is used to record what the 'incoming' computation was, if any.
+    # Instead, it is used to record what the 'incoming' computation was, if any.
     self.pending_computation_prior = pending_computation_prior
     
     ### Time-index aligned values ###
@@ -142,7 +187,6 @@ class TimeStepSeries:
     self.walltime = None
     self.cause_of_termination: str = "In Progress"
     self.datetime_of_run = datetime.datetime.now().isoformat()
-
 
   def finish(self, cause_of_termination=None):
     self.walltime = time.time() - self._walltime_start
@@ -168,19 +212,18 @@ class TimeStepSeries:
     
     return self.pending_computation[ndx]
 
-
   def __repr__(self):
 
       # Create lists of fixed-width columns.
-      i_str = [f'{i_val:13d}' for i_val in self.i]
-      k_str = [f'{k_val:13d}' for k_val in self.k]
+      i_str = [f'{i_val:13d}'   for i_val in self.i]
+      k_str = [f'{k_val:13d}'   for k_val in self.k]
       t_str = [f'{t_val:13.2f}' for t_val in self.t]
       pending_computations_str = [f'[{pc.t_start:5.2f},{pc.t_end:5.2f}]' if pc else f'         None' for pc in self.pending_computation]
 
-      # Truncate 
-      if self.n_time_steps() > 8:
+      # Truncate the string.
+      if self.n_time_steps > 8:
         n_kept_on_ends = 4
-        n_omitted = self.n_time_steps()
+        n_omitted = self.n_time_steps
         omitted_text = f'[{n_omitted} of {n_omitted + 2*n_kept_on_ends} entries hidden]'
         k_str = k_str[:n_kept_on_ends] + [omitted_text] + k_str[-n_kept_on_ends:]
         i_str = i_str[:n_kept_on_ends] + [omitted_text] + i_str[-n_kept_on_ends:]
@@ -202,6 +245,9 @@ class TimeStepSeries:
 
   def __eq__(self, other):
     """ Check the equality of the time series EXCLUDING metadata. """
+    if not isinstance(other, TimeStepSeries):
+      raise ValueError(f'Cannot compare this TimeStepSeries to an object of type {type}')
+      
     return self.k0 == other.k0 \
        and self.t0 == other.t0 \
        and self.x0 == other.x0 \
@@ -244,9 +290,9 @@ class TimeStepSeries:
     if x_end is None:
       raise ValueError(f'x_end is None')
 
-    if pending_computation and pending_computation.t_end > t_end:
-      # raise ValueError(f"pending_computation.t_end = {pending_computation.t_end:.3} > t_end = {t_end:.3}")
-      warnings.warn("pending_computation.t_end = {pending_computation.t_end:.3} > t_end = {t_end:.3}", Warning)
+    # if pending_computation and pending_computation.t_end > t_end:
+    #   # raise ValueError(f"pending_computation.t_end = {pending_computation.t_end:.3f} > t_end = {t_end:.3f}")
+    #   warnings.warn(f"pending_computation.t_end = {pending_computation.t_end:.3f} > t_end = {t_end:.3f}", Warning)
 
     if len(self.t) == 0:
       k       = self.k0
@@ -334,12 +380,11 @@ class TimeStepSeries:
     
     # assert not any(delay is None for delay in computation_times), f"computation_times={computation_times} must not contain any None values."
 
-    if len(computation_times) != self.n_time_indices():
-      raise ValueError(f"len(computation_times) = {len(computation_times)} != self.n_time_indices = {self.n_time_indices()}.\nself: {self}.\ncomputation_times: {computation_times}")
+    if len(computation_times) != self.n_time_steps:
+      raise ValueError(f"len(computation_times) = {len(computation_times)} != self.n_time_steps = {self.n_time_steps}.\nself: {self}.\ncomputation_times: {computation_times}")
 
     if len(self.pending_computation) != 2*len(computation_times):
       raise ValueError(f'len(self.pending_computation)={len(self.pending_computation)} != 2*len(computation_times) = {2*len(computation_times)}')
-      
       
     # print(f'Overwriting computation times. computation_times={computation_times}, self.pending_computation={self.pending_computation}.')
     i_pending_computation = 0
@@ -362,12 +407,10 @@ class TimeStepSeries:
     if not isinstance(other, TimeStepSeries):
       raise ValueError(f'Cannot concatenate this TimeStepSeries with a {type(other)} object.')
     
-    # if self.is_empty():
-    #   raise ValueError('Cannot concatenate onto an empty TimeStepSeries')
-    if other.is_empty():
+    if other.is_empty:
       return self
 
-    if not self.is_empty():
+    if not self.is_empty:
       if self.k[-1] + 1 != other.k0:
         raise ValueError(f"Initial k does not match: self.k[-1] + 1 = {self.k[-1] + 1} != other.k0 = {other.k0}")
       if self.t[-1] != other.t0:
@@ -389,13 +432,13 @@ class TimeStepSeries:
     """
     Truncate this series to end at the last index in time step "last_k".
     """
-    assert not self.is_empty(), "Cannot truncate an empty time series."
+    assert not self.is_empty, "Cannot truncate an empty time series."
     assert last_k in self.k, f'last_k={last_k} must be in self.k={self.k}'
     # assert last_k >= self.k[0], "last_k must not be less than the first time step."
 
     n_time_steps = last_k - self.k0
 
-    if self.n_time_steps() <= n_time_steps:
+    if self.n_time_steps <= n_time_steps:
       return self.copy()
     
     truncated = self.copy()
@@ -410,44 +453,49 @@ class TimeStepSeries:
     truncated.i                    = self.i[ndxs]
     truncated.pending_computation  = self.pending_computation[ndxs]
 
-    if truncated.n_time_steps() > 0:
+    if truncated.n_time_steps > 0:
       assert truncated.k[-2] == truncated.k[-1]
       assert truncated.t[-2] < truncated.t[-1]
 
     return truncated 
 
+  @property
   def is_empty(self):
     return len(self.t) == 0
 
+  @property
   def n_time_indices(self):
-    if self.is_empty():
-      return 0
-    return self.i[-1] - self.i[0]
+    return self.n_time_steps + 1
 
+  @property
   def n_time_steps(self):
-    if self.is_empty():
+    if self.is_empty:
       return 0
-    return self.k[-1] - self.k[0]
+    return self.k[-1] - self.k[0] + 1
 
-  def get_first_sample_time_index(self):
+  @property
+  def first_time_index(self):
     if len(self.i) == 0:
       return self.i0
     else:
       return self.i[0]
     
-  def get_last_sample_time_index(self):
+  @property
+  def last_time_index(self):
     if len(self.i) == 0:
       return self.i0
     else:
       return self.i[-1]
     
-  def get_first_time_step_index(self):
+  @property
+  def first_time_step(self):
     if len(self.k) == 0:
       return self.k0
     else:
       return self.k[0]
     
-  def get_last_time_step_index(self):
+  @property
+  def last_time_step(self):
     if len(self.k) == 0:
       return self.k0
     else:
@@ -458,7 +506,7 @@ class TimeStepSeries:
       if pc is not None and pc.delay > sample_time:
         has_missed_computation_time = True
         first_late_timestep = self.k[i_step]
-        print(f'first_late_timestep: {first_late_timestep}')
+        # print(f'first_late_timestep: {first_late_timestep}')
         return first_late_timestep, has_missed_computation_time 
     
     has_missed_computation_time = False
@@ -472,11 +520,11 @@ class TimeStepSeries:
       "k":  self.k,
       "i":  self.i
     }
-    printJson(label + ' (timing data)', timing_data)
+    # printJson(label + ' (timing data)', timing_data)
     
-    print(f'{label}')
+    print(f'{label} timing data:')
     TimeStepSeries.print_sample_time_values("k_time_step", self.k)
-    TimeStepSeries.print_sample_time_values("i_sample_ndx", self.k)
+    TimeStepSeries.print_sample_time_values("i_sample_ndx", self.i)
     TimeStepSeries.print_sample_time_values("t(k)", self.t)
 
   def print(self, label):

@@ -10,7 +10,7 @@
   },
   "dynamics_module_name": "dynamics.dynamics",
   "dynamics_class_name": "CartPoleDynamics",
-  "max_time_steps": 20,
+  "n_time_steps": 20,
   "==== Initial Condition ====": "",
   "x0":      [0.0, 0.1, 0, 0],
   "u0":      [0],

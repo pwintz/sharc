@@ -258,14 +258,14 @@ class ScarabStatsReader:
 
 class ExecutionDrivenScarabRunner:
 
-  def __init__(self, sim_dir='.', controller_log=None):
-    self.controller_log = controller_log
+  def __init__(self, sim_dir='.'):
     self.instruction_limit = int(1e9)
     self.heartbeat_interval = int(1e6) # How often to print progress.
     self.sim_dir         = os.path.abspath(sim_dir)
     self.params_src_file = os.path.join(self.sim_dir, 'PARAMS.generated')
     self.params_in_file  = os.path.join(self.sim_dir, 'PARAMS.in')
     self.params_out_file = os.path.join(self.sim_dir, 'PARAMS.out')
+    self.controller_log  = None
 
     # Check that the simulation directory exists.
     assertFileExists(self.sim_dir)
@@ -274,6 +274,9 @@ class ExecutionDrivenScarabRunner:
     # This constructor is run before we start multiprocessing, so it is easier to 
     # debug errors that are raised here.
     assertFileExists(self.params_src_file, f'PARAMS.generated should exist in the sim_dir={self.sim_dir}')
+
+  def set_log(self, controller_log):
+    self.controller_log=controller_log
 
   def run(self, cmd):
     print(f"ExecutionDrivenScarabRunner.run({cmd}) in {self.sim_dir}")
@@ -425,8 +428,8 @@ class TracesToComputationTimesProcessor(ABC):
       dynamorio_trace_dirs.append(trace_dir)
       trace_dir_dict[trace_index] = trace_dir
 
-    if len(trace_dir_dict) == 0:
-      raise ValueError(f"No DynamoRIO trace directories were found in {self.sim_dir}")
+    # if len(trace_dir_dict) == 0:
+    #   raise ValueError(f"No DynamoRIO trace directories were found in {self.sim_dir}")
 
     sorted_indices = sorted(trace_dir_dict)
     return sorted_indices
@@ -434,7 +437,6 @@ class TracesToComputationTimesProcessor(ABC):
   def _get_trace_directories(self):
     indices = self._get_trace_directories_indices()
     path_format = lambda ndx: os.path.join(self.sim_dir, f'dynamorio_trace_{ndx}')
-    # trace_dirs = [os.path.join(self.sim_dir, f'dynamorio_trace_{ndx}') for ndx in indices]
     trace_dirs = map(path_format, indices)
     return trace_dirs
 

@@ -1,4 +1,4 @@
-from scarabintheloop import ControllerInterface, DelayProvider
+from scarabintheloop import ControllerInterface, DelayProvider, SimulatorStatus
 import queue
 
 
@@ -29,6 +29,7 @@ class MockControllerInterface(ControllerInterface):
     self.x_prediction = 0
     self.t_prediction = 0
     self.iterations = 0
+    self.simulator_status = None
 
   def get_last_x_written(self):
     return self.x_last_write
@@ -47,6 +48,10 @@ class MockControllerInterface(ControllerInterface):
     
   def set_next_iterations(self, iterations):
     self.iterations = iterations
+
+  def _write_simulator_status(self, status: SimulatorStatus):
+    self.simulator_status = status
+    
 
   # Override abstract superclass function 
   def _write_x(self, x):

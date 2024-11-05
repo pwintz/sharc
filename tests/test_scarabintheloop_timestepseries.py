@@ -4,6 +4,7 @@ import unittest
 from scarabintheloop.plant_runner import TimeStepSeries, ComputationData
 import copy
 import numpy as np
+from io import StringIO
 
 from unittest.mock import patch, mock_open
 
@@ -62,8 +63,9 @@ class Test_TimeStepSeries(unittest.TestCase):
       u=[0.0001], 
       pending_computation=None
     )
-    time_step_series.print('My label')
-    time_step_series.printTimingData('My label')
+    with patch('sys.stdout', new = StringIO()) as std_out:
+      time_step_series.print('My label')
+      time_step_series.printTimingData('My label')
     # print('representation: ', representation)
 
 
@@ -276,8 +278,9 @@ class Test_truncate(unittest.TestCase):
       pending_computation=pending_computations
     )
     truncated_series = ts_series.truncate(last_k=2)
-    # self.assertEqual(truncated_series.n_time_steps(), 0) #TODO
+    # self.assertEqual(truncated_series.n_time_steps, 0) #TODO
     self.assertEqual(truncated_series.k, [k0, k0])
+    self.assertEqual(truncated_series.i, [k0, k0+1])
     self.assertEqual(truncated_series.t, [t0, 1.1])
     self.assertEqual(truncated_series.x, [x0, [10]])
     self.assertEqual(truncated_series.u, [[-1], [-1]])
@@ -303,6 +306,7 @@ class Test_truncate(unittest.TestCase):
      )
     truncated_series = ts_series.truncate(last_k=4)
     self.assertEqual(truncated_series.k[-1], 4)
+    self.assertEqual(truncated_series.i[-1], 5)
     # self.assertEqual(truncated_series.step_k, [2, 3, 4])
 
   def test_truncate_with_mid_steps(self):
@@ -326,13 +330,114 @@ class Test_truncate(unittest.TestCase):
                     x_mid=[[ 5], [15], [25]]
               )
     truncated_series = ts_series.truncate(last_k=2)
-    # self.assertEqual(truncated_series.n_time_steps(), 1)
+    # self.assertEqual(truncated_series.n_time_steps, 1)
     self.assertEqual(truncated_series.k, [k0,     k0,    k0,     k0])
     self.assertEqual(truncated_series.t, [t0,    0.5,   0.5,    1.1])
     self.assertEqual(truncated_series.x, [x0,    [ 5],  [ 5],  [10]])
     self.assertEqual(truncated_series.u, [[-1],  [-1],  [11],  [11]])
 
 
+class Test_from_list(unittest.TestCase):
+  def test_fail_on_empty_list(self):
+    # ---- Setup ---- 
+    k0 = 3
+    t_list = []
+    x_list = []
+    u_list = []
+    delay_list = []
+
+    # ---- Execution and Assertion ----
+    with self.assertRaises(AssertionError):
+      TimeStepSeries._from_lists(k0, t_list, x_list, u_list, delay_list)
+
+  def test_no_step(self):
+    # ---- Setup ---- 
+    k0 = 3
+    t_list = [1.1]
+    x_list = [4.5]
+    u_list = []
+    delay_list = []
+    
+    # ---- Execution and Assertion ----
+    with self.assertRaises(AssertionError):
+      TimeStepSeries._from_lists(k0, t_list, x_list, u_list, delay_list)
+  
+  def test_single_step(self):
+    # ---- Setup ---- 
+    k0 = 3
+    t_list = [1.1, 2.2]
+    x_list = [[4.5], [-1]]
+    u_list = [[-1.1]]
+    delay_list = [0.2]
+    
+    # ---- Execution ----
+    ts = TimeStepSeries._from_lists(k0, t_list, x_list, u_list, delay_list)
+  
+    # ---- Assertions ---- 
+    # Check initial state
+    self.assertEqual(ts.k0, k0)
+    self.assertEqual(ts.i0, k0)
+    self.assertEqual(ts.t0, t_list[0])
+    self.assertEqual(ts.x0, x_list[0])
+    # Check arrays.
+    self.assertEqual(ts.k, [k0, k0])
+    self.assertEqual(ts.i, [k0, k0 + 1])
+    self.assertEqual(ts.t, t_list)
+    self.assertEqual(ts.x, x_list)
+
+    expected_first_pc = ComputationData(t_list[0], delay_list[0], 0.0)
+    self.assertEqual(ts.pending_computation[0], expected_first_pc)
+  
+  def test_two_steps(self):
+    # ---- Setup ---- 
+    k0     = 9
+    t_list = [1.1, 2.2, 3.3]
+    x_list = [[10], [20], [30]]
+    u_list = [[-1.1], [-2.2]]
+    delay_list = [0.2, 0.3]
+    
+    # ---- Execution ----
+    ts = TimeStepSeries._from_lists(k0, t_list, x_list, u_list, delay_list)
+  
+    # ---- Assertions ---- 
+    # Check initial state
+    self.assertEqual(ts.k0, k0)
+    self.assertEqual(ts.i0, k0)
+    self.assertEqual(ts.t0, t_list[0])
+    self.assertEqual(ts.x0, x_list[0])
+    # Check arrays.
+    self.assertEqual(ts.k, [k0, k0,     k0 + 1, k0 + 1])
+    self.assertEqual(ts.i, [k0, k0 + 1, k0 + 1, k0 + 2])
+    self.assertEqual(ts.t, [t_list[0], t_list[1], t_list[1], t_list[2]])
+    self.assertEqual(ts.x, [x_list[0], x_list[1], x_list[1], x_list[2]])
+
+    expected_pending_computations = [
+      ComputationData(t_start=t_list[0], delay=delay_list[0], u=0.0),
+      ComputationData(t_start=t_list[0], delay=delay_list[0], u=0.0),
+      ComputationData(t_start=t_list[1], delay=delay_list[1], u=0.0),
+      ComputationData(t_start=t_list[1], delay=delay_list[1], u=0.0)
+    ]
+    self.assertEqual(ts.pending_computation, expected_pending_computations)
+
+class Test_n_time_steps_AND_n_indices(unittest.TestCase):
+  def test_empty_series(self):
+    # ---- Setup ---- 
+    ts = TimeStepSeries(1, 0.4, [3])
+
+    # ---- Assertions ---- 
+    self.assertEqual(ts.n_time_steps, 0)
+    self.assertEqual(ts.n_time_indices, 1)
+    self.assertTrue(ts.is_empty)
+
+  def test_one_step_series(self):
+    # ---- Setup ---- 
+    ts = TimeStepSeries(1, 0.4, [3])
+    ts.append(1.3, [3], [-1], ComputationData(0.4, 0.1, [0]))
+
+    # ---- Assertions ---- 
+    self.assertFalse(ts.is_empty)
+    self.assertEqual(ts.n_time_steps, 1)
+    self.assertEqual(ts.n_time_indices, 2)
 
 if __name__ == '__main__':
   unittest.main()

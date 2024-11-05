@@ -154,7 +154,7 @@ class PipeReader {
     }
 
   protected:
-    void read_line(std::string& label, std::string& entire_line) {
+    void read_line(std::string label, std::string& entire_line) {
       // Read an entire line, rereading until the line ends with a '\n' character.
       
       // Check debug level and print the appropriate message
@@ -294,6 +294,57 @@ nlohmann::json readJson(std::string file_path) {
   return json_data;
 }
 
+
+class StatusReader {
+  protected:
+    std::string filename;
+    std::ifstream file_stream;
+
+  public:
+    StatusReader(std::string _filename) {
+      filename = _filename;
+    }
+
+    void open() {
+      assertFileExists(filename);
+      PRINT_WITH_FILE_LOCATION("Opening status file: " << filename << ".");
+      file_stream.open(filename, std::ofstream::in);
+    }
+
+    void close() {
+      PRINT("Closing status file: " << filename << ".")
+      file_stream.close();
+    }
+
+    bool is_simulator_running() {
+      // Read an entire line, rereading until the line ends with a '\n' character.
+      
+      for (int i = 0; i < 100; i++){
+        // Check debug level and print the appropriate message
+        if (debug_interfile_communication_level >= 2) {
+            PRINT_WITH_FILE_LOCATION("Reading status line from Python...");
+        }
+        std::string line_from_py;
+        file_stream.clear(); 
+        file_stream.seekg(0);
+        std::getline(file_stream, line_from_py);
+        PRINT_WITH_FILE_LOCATION("Line received from Python:")
+        PRINT_WITH_FILE_LOCATION("\tstatus: " << line_from_py);
+        if (line_from_py == "RUNNING") {
+          return true;
+        } else if (line_from_py == "FINISHED") {
+          return false;
+        } else if (line_from_py == "ERROR") {
+          throw std::runtime_error("The Python script posted an error status to " + filename);
+        } else {
+          PRINT_WITH_FILE_LOCATION("Pausing status check becuase an unrecognized status was received: " << line_from_py)
+          std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+      }
+      throw std::runtime_error("StatusReader.is_simulator_running() timed out.");
+    }
+};
+
 int main()
 // int main(int argc, char *argv[])
 {
@@ -324,6 +375,7 @@ int main()
   PipeDoubleWriter    t_predict_writer(sim_dir + "t_predict_c++_to_py");
   PipeDoubleWriter   iterations_writer(sim_dir + "iterations_c++_to_py");
   // Readers
+  StatusReader     status_reader(sim_dir + "status_py_to_c++");
   PipeVectorReader      x_reader(sim_dir + "x_py_to_c++");
   PipeDoubleReader delays_reader(sim_dir + "t_delay_py_to_c++");
   std::string optimizer_info_out_filename = sim_dir + "optimizer_info.csv";
@@ -331,7 +383,7 @@ int main()
   // Open and read JSON 
   nlohmann::json json_data = readJson(sim_dir + "config.json");
 
-  int max_time_steps = json_data.at("max_time_steps");
+  int n_time_steps = json_data.at("n_time_steps");
 
   nlohmann::json debug_config = json_data.at("==== Debgugging Levels ====");
   debug_interfile_communication_level = debug_config.at("debug_interfile_communication_level");
@@ -364,6 +416,7 @@ int main()
   iterations_writer.open();
 
   // In files.
+  status_reader.open();
   x_reader.open();
   delays_reader.open();
   PRINT_WITH_FILE_LOCATION("All files open.");
@@ -392,12 +445,16 @@ int main()
     }
   #endif
 
-  for (int i = 0; i < max_time_steps; i++)
+  int i = 0;
+  while (true)
   {
-    PRINT(std::endl << "====== Starting loop #" << i+1 << " of " << max_time_steps << " ======");
+    PRINT(std::endl << "====== Starting loop #" << i << " of " << n_time_steps << " ======");
     
     // Read the value of 'x' for this iteration.
     x_reader.read("x", modelX);
+    if (!status_reader.is_simulator_running()){
+      break;
+    }
 
     // Begin a batch of Scarab statistics
     #if defined(USE_DYNAMORIO)
@@ -535,14 +592,15 @@ int main()
     //   PRINT_WITH_FILE_LOCATION("Converged to the origin after " << i << " steps.");
     //   break;
     // }
-    
+    i++;
   } 
-  PRINT_WITH_FILE_LOCATION("Finished looping through " << max_time_steps << " time steps. Closing files...")
+  PRINT_WITH_FILE_LOCATION("Finished looping through " << n_time_steps << " time steps. Closing files...")
 
   u_writer.close();
   x_prediction_writer.close();
   t_predict_writer.close();
   iterations_writer.close();
+  status_reader.close();
   x_reader.close();
   delays_reader.close();
 

@@ -21,6 +21,8 @@ from scarabintheloop.utils import *
 import scarabintheloop.debug_levels as debug_levels
 from scarabintheloop.data_types import *
 from abc import abstractmethod, ABC
+from dataclasses import dataclass
+
 
 # Type hinting.
 from typing import List, Set, Dict, Tuple, Union
@@ -46,7 +48,7 @@ def remove_suffix(string:str, suffix: str):
     return string
 
 class ExperimentList:
-  def __init__(self, example_dir, config_filename):
+  def __init__(self, example_dir, config_filename, fail_fast=False):
     example_dir = os.path.abspath(example_dir)
     self.example_dir = example_dir
 
@@ -71,10 +73,16 @@ class ExperimentList:
     self.base_config["experiment_list_label"] = self.label
 
     self.experiment_list_dir = os.path.join(self.experiments_dir, self.label + "--" + time.strftime("%Y-%m-%d--%H-%M-%S"))
+    self.incremental_data_file_path = os.path.join(self.experiment_list_dir, "experiment_list_data_incremental.json")
+    self.complete_data_file_path = os.path.join(self.experiment_list_dir, "experiment_list_data.json")
+
+    # Collections for Exeperiment Results
     self.experiment_result_dict = {}
     self.successful_experiment_labels = []
     self.skipped_experiment_labels = []
     self.failed_experiment_labels = []
+
+    self.is_fail_fast = fail_fast
 
     # Create the experiment_list_dir if it does not exist. An error is created if it already exists.
     os.makedirs(self.experiment_list_dir)
@@ -106,27 +114,16 @@ class ExperimentList:
 
       experiment = Experiment(experiment_config, chip_configs_path)
       self._experiment_list.append(experiment)
-
-    printHeader1('Experiment List')
-    print("         Example dir: " + self.example_dir)
-    print(f'        Base config: {self.base_config_file_path}')
-    print(f' Experiments config: {self.experiments_config_file_path}')
-    
-  def __iter__(self):
-    self.iterator_counter = 0
-    return self
-
-  def __next__(self): 
-    if self.iterator_counter >= len(self.experiment_config_patches_list):
-      raise StopIteration
         
-    experiment = self._experiment_list[self.iterator_counter]
-    self.iterator_counter += 1
-    return experiment
 
+    if debug_levels.debug_program_flow_level >= 1:
+      printHeader1('Experiment List')
+      print(f'         Example dir: {self.example_dir}')
+      print(f'        Base config: {self.base_config_file_path}')
+      print(f' Experiments config: {self.experiments_config_file_path}')
+    
   def run_all(self):
-    incremental_data_file_path = os.path.join(self.experiment_list_dir, "experiment_list_data_incremental.json")
-    complete_data_file_path = os.path.join(self.experiment_list_dir, "experiment_list_data.json")
+    
 
     for experiment in self._experiment_list:
       experiment.setup_files()
@@ -142,16 +139,20 @@ class ExperimentList:
         self.skipped_experiment_labels += [repr(experiment)]
       elif experiment.status == ExperimentStatus.FAILED:
         self.failed_experiment_labels += [repr(experiment)]
+        
+        if self.is_fail_fast:
+          raise Exception(f'Experiment Failed: {experiment}')
 
-      writeJson(incremental_data_file_path, self.experiment_result_dict, label="Incremental experiment list data")
+      writeJson(self.incremental_data_file_path, self.experiment_result_dict, label="Incremental experiment list data")
       
       self.print_status()
     
-    print('Finished running experiments from configuration in\n\t' + self.experiments_config_file_path)
-    writeJson(complete_data_file_path, self.experiment_result_dict, label="Complete experiment list data")
+    if debug_levels.debug_configuration_level >= 1:
+      print('Finished running experiments from configuration in\n\t' + self.experiments_config_file_path)
+    writeJson(self.complete_data_file_path, self.experiment_result_dict, label="Complete experiment list data")
     
     # Delete the incremental data file.
-    os.remove(incremental_data_file_path)
+    os.remove(self.incremental_data_file_path)
 
   def get_results(self):
     """
@@ -193,12 +194,13 @@ class ExperimentList:
 
     def list_to_line_by_line(my_list: list):
       return "\n\t".join([""] + my_list)
-
-    print(f"Ran {n_ran} experiment{plural_suffix(n_ran)} of {n_total} experiment{plural_suffix(n_total)}.")
-    print(f'Successful: {n_successful}. {list_to_line_by_line(self.successful_experiment_labels)}')
-    print(f'   Skipped: {n_skipped   }. {list_to_line_by_line(self.skipped_experiment_labels)}')
-    print(f'    Failed: {n_failed    }. {list_to_line_by_line(self.failed_experiment_labels)}')
-    print(f'   Pending: {n_pending   }.')
+    
+    if debug_levels.debug_program_flow_level >= 1:
+      print(f"Ran {n_ran} experiment{plural_suffix(n_ran)} of {n_total} experiment{plural_suffix(n_total)}.")
+      print(f'Successful: {n_successful}. {list_to_line_by_line(self.successful_experiment_labels)}')
+      print(f'   Skipped: {n_skipped   }. {list_to_line_by_line(self.skipped_experiment_labels)}')
+      print(f'    Failed: {n_failed    }. {list_to_line_by_line(self.failed_experiment_labels)}')
+      print(f'   Pending: {n_pending   }.')
 
 ExperimentStatus = Enum('ExperimentStatus', ['PENDING', 'RUNNING', 'FINISHED', 'SKIPPED', 'FAILED'])
 
@@ -227,7 +229,7 @@ class Experiment:
     if debug_levels.debug_configuration_level > 1:
       print(f'Creating chip parameter file.')
       print(f'\tSource: {PARAMS_src_filename}.')
-      print(f'\tOutput: {PARAMS_out_filename}.')
+      # print(f'\tOutput: {PARAMS_out_filename}.')
     
     self.params_base = scarabizor.ParamsData.from_file(PARAMS_src_filename)
 
@@ -241,12 +243,16 @@ class Experiment:
     start_time = time.time()
     
     if self.experiment_config.get("skip", False):
-      printHeader1(f'Skipping Experiment: {self.label}')
+
+      if debug_levels.debug_program_flow_level >= 1:
+        printHeader1(f'Skipping Experiment: {self.label}')
       self.status = ExperimentStatus.SKIPPED
       return
       
-    printHeader1(f"Starting Experiment: {self.label}")
+    if debug_levels.debug_program_flow_level >= 1:
+      printHeader1(f"Starting Experiment: {self.label}")
 
+    assert_consistent_simulation_config_dimensions(self.experiment_config)
     try:
       self.status = ExperimentStatus.RUNNING
       if self.experiment_config["Simulation Options"]["parallel_scarab_simulation"]:
@@ -285,8 +291,10 @@ class Experiment:
       "experiment wall time": end_time - start_time
     }
 
-    assert experiment_data["i"][-1] == self.experiment_config["max_time_steps"], \
-      f'experiment_data["i"][-1]={experiment_data["i"][-1]} must equal max_time_steps={self.experiment_config["max_time_steps"]}. ({self.label})'
+    # Check that we have the expected number of time steps. In particular, the last value of k must be one less
+    # than n_time_steps because k is zero-indexed.
+    assert experiment_data["k"][-1] == self.experiment_config["n_time_steps"] - 1, \
+      f'experiment_data["k"][-1]={experiment_data["k"][-1]} must equal n_time_steps-1={self.experiment_config["n_time_steps"] - 1}. ({self.label})'
 
     writeJson(os.path.join(self.experiment_dir, "experiment_result.json"), self.result)
 
@@ -300,22 +308,36 @@ class Experiment:
     return repr_str
 
 class Simulation:
+  label: str
+  x0: np.ndarray
+  u0: np.ndarray
+  simulation_dir: str
+  first_time_index: int
+  last_time_index: int
+  n_time_steps: int
+  n_time_indices: int
+  time_steps: list
+  time_indices: list
+  pending_computation: ComputationData
+  params: scarabizor.ParamsData
+  controller_log_path: str
+  plant_log_path: str
+  params_file_for_controller: str
+  config_file_for_controller: str
+  sim_config: dict
 
   @staticmethod
-  def from_experiment_config_unbatched(experiment_config: dict, params_base: scarabizor.ParamsData):
+  def from_experiment_config_unbatched(experiment_config: dict, params_base: scarabizor.ParamsData, n_time_steps: int):
     label               = experiment_config["label"]
     first_time_index    = 0
-    last_time_index     = experiment_config["max_time_steps"]
     x0                  = list_to_column_vec(experiment_config["x0"])
     u0                  = list_to_column_vec(experiment_config["u0"])
     pending_computation = None
     simulation_dir      = experiment_config["experiment_dir"]
     params = params_base.patch(experiment_config["PARAMS_patch_values"])
-    # label               = experiment_config["label"]
-    # time_steps_in_sim   = experiment_max_time_steps
     return Simulation(label=label, 
                       first_time_index=first_time_index,
-                      last_time_index=last_time_index,
+                      n_time_steps=n_time_steps,
                       x0=x0,
                       u0=u0,
                       pending_computation=pending_computation,
@@ -324,42 +346,46 @@ class Simulation:
                       params=params)
 
   @staticmethod
-  def from_experiment_config_batched(experiment_config: dict, params_base: scarabizor.ParamsData, batch_init):
+  def from_experiment_config_batched(experiment_config: dict,
+                                     params_base: scarabizor.ParamsData,
+                                     batch_init,# : BatchInit,
+                                     n_time_steps_in_batch: int):
     # !! We do not, in general, expect experiment_config['u0']==batch_init['u0'] because 
     # !! batch_init overrides the experiment config.
     assert isinstance(batch_init, BatchInit), f'type(batch_init)={type(batch_init)} must be BatchInit.'
-    experiment_max_time_steps       = experiment_config["max_time_steps"]
-    experiment_max_batch_time_steps = experiment_config["Simulation Options"]["max_batch_size"]
+    # experiment_max_time_steps       = experiment_config["n_time_steps"]
+    # experiment_max_batch_time_steps = experiment_config["Simulation Options"]["max_batch_size"]
     
     first_time_index    = batch_init.k0
     pending_computation = batch_init.pending_computation
     x0                  = list_to_column_vec(batch_init.x0)
     u0                  = list_to_column_vec(batch_init.u0)
 
-    time_steps_remaining_in_experiment = experiment_max_time_steps - first_time_index
-    assert time_steps_remaining_in_experiment > 0
+    # time_steps_remaining_in_experiment = experiment_max_time_steps - first_time_index
+    # assert time_steps_remaining_in_experiment > 0
 
     # Truncate the index to not extend past the last index
-    time_steps_in_sim = min(os.cpu_count(), \
-                            experiment_max_batch_time_steps, \
-                            time_steps_remaining_in_experiment)
+    # time_steps_in_sim = min(os.cpu_count(), \
+    #                         experiment_max_batch_time_steps, \
+    #                         time_steps_remaining_in_experiment)
 
     # Add "time_steps_in_sim" steps to the first index to get the last index
-    last_time_index = first_time_index + time_steps_in_sim
+    last_time_index = first_time_index + n_time_steps_in_batch
 
-    assert last_time_index <= experiment_max_time_steps, 'last_time_index_in_batch must not be past the end of experiment.'
-    assert first_time_index < last_time_index, f'first_time_index: {first_time_index}, last_time_index={last_time_index}'
-
-    batch_label    = f'batch{batch_init.i_batch}_steps{first_time_index}-{last_time_index}'
+    # assert last_time_index <= experiment_max_time_steps, 'last_time_index_in_batch must not be past the end of experiment.'
+    # assert first_time_index < last_time_index, f'first_time_index: {first_time_index}, last_time_index={last_time_index}'
+    first_time_step= first_time_index
+    last_time_step = last_time_index-1
+    batch_label    = f'batch{batch_init.i_batch}_steps{first_time_step}-{last_time_step}'
     simulation_dir = os.path.join(experiment_config["experiment_dir"], batch_label)
-    label          = experiment_config["label"]     + "/" + batch_label
+    label          = experiment_config["label"] + "/" + batch_label
     
     # Patch the base params object with the values from the experiment configuration.
     params = params_base.patch(experiment_config["PARAMS_patch_values"])
     
     return Simulation(label=label, 
                       first_time_index=first_time_index,
-                      last_time_index=last_time_index,
+                      n_time_steps=n_time_steps_in_batch,
                       x0=x0,
                       u0=u0,
                       pending_computation=pending_computation,
@@ -368,7 +394,8 @@ class Simulation:
                       params=params)
 
   def __init__(self, label: str, 
-                     first_time_index: int, last_time_index: int, 
+                     first_time_index: int, 
+                     n_time_steps: int, 
                      x0: np.ndarray, 
                      u0: np.ndarray, 
                      pending_computation: ComputationData, 
@@ -376,7 +403,7 @@ class Simulation:
                      experiment_config: dict, 
                      params: scarabizor.ParamsData):
     assert isinstance(first_time_index, int)
-    assert isinstance(last_time_index, int)
+    assert isinstance(n_time_steps, int)
     assert isinstance(x0, np.ndarray)
     assert isinstance(u0, np.ndarray)
     assert pending_computation is None or isinstance(pending_computation, ComputationData)
@@ -388,11 +415,7 @@ class Simulation:
     self.u0                  = u0
     self.simulation_dir      = simulation_dir
     self.first_time_index    = first_time_index
-    self.last_time_index     = last_time_index
-    self.n_time_steps        = last_time_index - first_time_index
-    self.n_time_indices      = last_time_index - first_time_index + 1
-    self.time_steps          = list(range(first_time_index, last_time_index))
-    self.time_indices        = self.time_steps + [last_time_index]
+    self.n_time_steps        = n_time_steps
     self.pending_computation = pending_computation
     self.params              = params
 
@@ -405,13 +428,29 @@ class Simulation:
     self.config_file_for_controller = os.path.join(self.simulation_dir, 'config.json')
     
     self.sim_config = copy.deepcopy(experiment_config)
-    self.sim_config["simulation_label"] = label
-    self.sim_config["first_time_index"] = first_time_index
-    self.sim_config["last_time_index"]  = last_time_index
-    self.sim_config["max_time_steps"]   = self.n_time_steps
-    self.sim_config["x0"]                  = column_vec_to_list(self.x0)
-    self.sim_config["u0"]                  = column_vec_to_list(self.u0)
+    self.sim_config["simulation_label"]    = label
+    self.sim_config["first_time_index"]    = first_time_index
+    self.sim_config["last_time_index"]     = self.last_time_index
+    self.sim_config["n_time_steps"]        = self.n_time_steps
+    self.sim_config["x0"]                  = self.x0
+    self.sim_config["u0"]                  = self.u0
     self.sim_config["pending_computation"] = pending_computation
+
+  @property
+  def last_time_index(self):
+    return self.first_time_index + self.n_time_steps 
+  
+  @property
+  def n_time_indices(self):
+    return self.n_time_steps + 1
+  
+  @property
+  def time_steps(self):
+    return list(range(self.first_time_index, self.last_time_index))
+    
+  @property 
+  def time_indices(self):
+    return self.time_steps + [self.last_time_index]
 
   def setup_files(self):
 
@@ -424,28 +463,17 @@ class Simulation:
     PARAMS_out_file = os.path.join(self.simulation_dir, 'PARAMS.generated')
     self.params.to_file(PARAMS_out_file)
 
-    # Create the pipe files in the current directory.
-    run_shell_cmd("make_scarabintheloop_pipes.sh", working_dir=self.simulation_dir)
-    assertFileExists(self.simulation_dir + "/u_c++_to_py")
-    assertFileExists(self.simulation_dir + "/x_py_to_c++")
+    # # Create the pipe files in the current directory.
+    # run_shell_cmd("make_scarabintheloop_pipes.sh", working_dir=self.simulation_dir)
+    # assertFileExists(self.simulation_dir + "/u_c++_to_py")
+    # assertFileExists(self.simulation_dir + "/x_py_to_c++")
 
-  @indented_print
-  def run(self):
-    printHeader2(f"Starting simulation: {self.label}")
-    print(f'↳ Simulation dir: {self.simulation_dir}')
-    print(f'↳ Controller log: {self.controller_log_path}')
-    print(f'↳      Plant log: {self.plant_log_path}')
-    
-    assertFileExists(self.params_file_for_controller)
-    assertFileExists(self.config_file_for_controller)  
-
+    sample_time = self.sim_config["system_parameters"]["sample_time"]
     use_fake_delays = self.sim_config["Simulation Options"]["use_fake_delays"]
     if use_fake_delays:
       # Create some fake delay data.
-      max_time_steps = self.sim_config["max_time_steps"]
-      sample_time    = self.sim_config['system_parameters']["sample_time"]
       # Create a list of delays that are shorter than the sample time
-      fake_delays = [0.1*sample_time]*max_time_steps
+      fake_delays = [0.1*sample_time]*self.n_time_steps
 
       # Update one of the queued delays to be longer than the sample time
       index_for_delay = 2
@@ -454,67 +482,170 @@ class Simulation:
     else:
       fake_delays = None
 
-    # Open up some loooooooooogs.
-    with openLog(self.plant_log_path,           f'Plant Log for "{self.label}"') as plant_log, \
-         openLog(self.controller_log_path, f'Controller Log for "{self.label}"') as controller_log:
+    in_the_loop_delay_provider =  self.sim_config["Simulation Options"]["in-the-loop_delay_provider"]
+    # delay_provider_config = sim_config["Simulation Options"]["in-the-loop_delay_provider"]
+    # assert in_the_loop_delay_provider == "execution-driven scarab", \
+    #   f'delay_provider_config={in_the_loop_delay_provider} must be "execution-driven scarab" when doing serial execution.'
+    computation_delay_provider = computation_delay_provider_factory(in_the_loop_delay_provider, self.simulation_dir, sample_time, fake_delays)
+    
+    controller_interface = PipesControllerInterface(computation_delay_provider, self.simulation_dir)
+    # controller_interface_factory("pipes", computation_delay_provider, )
 
-      controller_interface_selection="pipes"
-      in_the_loop_delay_provider =  self.sim_config["Simulation Options"]["in-the-loop_delay_provider"]
-      computation_delay_provider = computation_delay_provider_factory(in_the_loop_delay_provider, self.simulation_dir, sample_time, fake_delays)
-      
-      controller_interface = controller_interface_factory(controller_interface_selection, computation_delay_provider, self.simulation_dir)
+    self.simulation_executor = getSimulationExecutor(
+                                                self.simulation_dir, 
+                                                self.sim_config, 
+                                                controller_interface,
+                                                fake_delays = fake_delays)
 
-      simulation_executor = getSimulationExecutor(self.simulation_dir, 
-                                                  self.sim_config, 
-                                                  controller_interface,
-                                                  controller_log, 
-                                                  plant_log,
-                                                  fake_delays = fake_delays)
+  @indented_print
+  def run(self) -> TimeStepSeries:
 
-      # Execute the simulation.
-      simulation_data = simulation_executor.run_simulation()
-      
-
-      sim_data_path = os.path.join(self.simulation_dir, 'simulation_data.json')
-      printHeader2(f'Finished Simulation: "{self.label}"')
+    if debug_levels.debug_program_flow_level >= 1:
+      printHeader2( f'Starting simulation: {self.label} ({self.sim_config["n_time_steps"]} time steps)')
       print(f'↳ Simulation dir: {self.simulation_dir}')
       print(f'↳ Controller log: {self.controller_log_path}')
       print(f'↳      Plant log: {self.plant_log_path}')
-      print(f"↳  Data out file: {sim_data_path}")
+
+    assertFileExists(self.params_file_for_controller)
+    assertFileExists(self.config_file_for_controller)  
+
+    # Open up some loooooooooogs.
+    with openLog(self.plant_log_path,           f'Plant Log for "{self.label}"') as plant_log, \
+         openLog(self.controller_log_path, f'Controller Log for "{self.label}"') as controller_log:
+      self.simulation_executor.set_logs(controller_log, plant_log)
+
+      # Execute the simulation.
+      simulation_data = self.simulation_executor.run_simulation()
+      
+      sim_data_path = os.path.join(self.simulation_dir, 'simulation_data.json')
+      if debug_levels.debug_program_flow_level >= 1:
+        printHeader2(f'Finished Simulation: "{self.label}"')
+        print(f'↳ Simulation dir: {self.simulation_dir}')
+        print(f'↳ Controller log: {self.controller_log_path}')
+        print(f'↳      Plant log: {self.plant_log_path}')
+        print(f"↳  Data out file: {sim_data_path}")
       
       simulation_data.metadata["controller_log_path"] = self.controller_log_path
       simulation_data.metadata["plant_log_path"]      = self.plant_log_path
 
     return simulation_data
 
-def run(example_dir:str, config_filename:str):
+# class DelayMode(Enum):
+#   """
+#   The DelayMode enum is used to specify the type of computation delay that is used in the simulation.
+#   """
+#   # For GRID_ALIGNED, the controller delay is always a multiple of the sample time. 
+#   # If the computation finishes before the next sample time, the controller will wait until the next sample time to update the control signal. 
+#   GRID_ALIGNED = 1
+#   # For ASAP, the controller will update the control signal as soon as the computation is finished.
+#   ASAP = 2
+#   # For NONE, the controller will update the control signal at the time when the computation starts, ignoring the actual computational delay.
+#   NONE = 3
+# 
+# class DelaySource(Enum):
+#   SCARAB = 1
+#   FAKE   = 2
+# 
+# class ExecutionMode(Enum):
+#   PARALLEL = 1
+#   SERIAL = 2
+
+
+# def get_controller_interface(delay_mode: DelayMode, delay_source: DelaySource, execution_mode: ExecutionMode):
+#   """
+#   Factory method for creating a controller interface.
+#   """
+#   if delay_source == DelaySource.SCARAB:
+#     if execution_mode == ExecutionMode.PARALLEL:
+#       return ParallelControllerInterface(delay_mode)
+#     elif execution_mode == ExecutionMode.SERIAL:
+#       return SerialControllerInterface(delay_mode)
+#     else:
+#       raise ValueError(f'execution_mode={execution_mode} is not a valid ExecutionMode.')
+#   elif delay_source == DelaySource.FAKE:
+#     return FakeDelayControllerInterface(delay_mode)
+#   else:
+#     raise ValueError(f'delay_source={delay_source} is not a valid DelaySource.')
+# 
+# class DelaysProvider(ABC):
+#   pass
+# 
+# class FakeDelaysProvider(DelaysProvider):
+#   pass
+# 
+# class ExecutionDrivenScarabDelaysProvider(DelaysProvider):
+#   pass
+# 
+# class TraceBasedScarabDelaysProvider(DelaysProvider):
+#   pass
+# 
+# class ControllerInterface(ABC):
+# 
+#   def __init__(self, state_dimension: int, input_dimension: int):
+#     self.state_dimension = state_dimension
+#     self.input_dimension = input_dimension
+# 
+#   @abstractmethod
+#   def get_control_computation(self, x) -> np.ndarray:
+#     """
+#     Calculate the control signal u given the state x and return a ControlComputation object.
+#     The delay time of the ControlComputation object may be a preliminary value that is updated later by the 
+#     get_actual_delay() function.
+#     """
+#     pass
+# 
+#   @abstractmethod
+#   def get_actual_delay() -> float:
+#     """
+#     Calculate and return the actual delay.
+# 
+#     Returns:
+#       float: The actual delay in seconds. If 
+#     """
+#     pass
+# 
+# 
+# class MockControllerInterface(ControllerInterface):
+#   def __init__(self, delay: float):
+#     self.delay = delay
+# 
+#   def get_control_computation(self, x) -> np.ndarray:
+#     return ControlComputation(0, 0, self.delay, 0)
+# 
+#   def get_actual_delay(self) -> float:
+#     return self.delay
+# 
+def load_controller_delegator(example_dir: str):
+  global controller_executable_provider
+  controller_delegator_module = loadModuleInDir(example_dir, "controller_delegator")
+  controller_executable_provider = controller_delegator_module.ControllerExecutableProvider(example_dir)
+
+
+def run(example_dir:str, config_filename:str, fail_fast = False):
   """
-  This function is the entry point for running scarbintheloop 
+  This function is the entry point for running scarabintheloop 
   from other Python scripts (e.g., in unit testint). 
   When running from command line, the entry point is main(), instead,
   which then calls this function. 
+
+  Set fail_fast to True to abort after the first failed experiment.
   """
-  global controller_executable_provider
 
   ######## Load the controller and plant modules from the current directory #########
   assert example_dir is not None
   example_dir = os.path.abspath(example_dir)
-  assertFileExists(example_dir, f'The current working directory is {os.getcwd()}')
+  assertFileExists(example_dir)
   
-  controller_delegator_module = loadModuleInDir(example_dir, "controller_delegator")
-  controller_executable_provider = controller_delegator_module.ControllerExecutableProvider(example_dir)
-  
-  experiment_list = ExperimentList(example_dir, config_filename)
-
+  experiment_list = ExperimentList(example_dir, config_filename, fail_fast)
   #----- CONFIGURE DEBUGGING LEVELS -----#
   debug_levels.set_from_dictionary(experiment_list.base_config["==== Debgugging Levels ===="])
 
-  experiment_list.run_all()
+  load_controller_delegator(example_dir)
   
-  assert isinstance(experiment_list, ExperimentList)
+  experiment_list.run_all()
   return experiment_list
     
-def main(example_dir=None):
+def main():
 
   # Create the argument parser
   parser = argparse.ArgumentParser(description="Run a set of experiments.")
@@ -536,8 +667,7 @@ def main(example_dir=None):
 
 def run_experiment_sequential(experiment_config, params_base: scarabizor.ParamsData):
   print(f'Start of run_experiment_sequential(<{experiment_config["experiment_label"]}>)')
-  sim_dir = experiment_config["experiment_dir"]
-  simulation = Simulation.from_experiment_config_unbatched(experiment_config, params_base)
+  simulation = Simulation.from_experiment_config_unbatched(experiment_config, params_base, n_time_steps=experiment_config["n_time_steps"])
   simulation.setup_files()
   simulation_data = simulation.run()
   experiment_data = {"x": simulation_data.x,
@@ -556,48 +686,55 @@ def run_experiment_sequential(experiment_config, params_base: scarabizor.ParamsD
 #   SUCCESS = 3
 #   FAILURE = 4
 
+@dataclass(frozen=True)
 class BatchInit:
+  i_batch: int
+  k0: int
+  t0: float
+  x0: np.ndarray
+  u0: np.ndarray
+  pending_computation: ComputationData
 
   @staticmethod
-  def first(x0, u0):
+  def first(x0, u0): # -> BatchInit
+    x0 = list_to_column_vec(x0)
+    u0 = list_to_column_vec(u0)
     return BatchInit(i_batch=0, k0=0, t0=0.0, x0=x0, u0=u0, pending_computation=None)
 
   @staticmethod
-  def next(prev_batch_init, valid_data_from_batch: TimeStepSeries):
-        # Values that are needed to start the next batch.
-    if valid_data_from_batch.n_time_steps() == 0:
-      return BatchInit(batch_init=prev_batch_init.i_batch + 1, 
-          k0=prev_batch_init.k0 + 1, 
-          t0=prev_batch_init.t0, 
-          x0=prev_batch_init.x0, 
-          u0=prev_batch_init.u0, 
-          pending_computation=prev_batch_init.pending_computation)
-    else:
-      return BatchInit( i_batch=prev_batch_init.i_batch + 1, 
-                        k0=valid_data_from_batch.k[-1] + 1, 
-                        t0=valid_data_from_batch.t[-1], 
-                        x0=valid_data_from_batch.x[-1], 
-                        u0=valid_data_from_batch.u[-1], 
-                        pending_computation=valid_data_from_batch.pending_computation[-1])
+  def _from_lists(
+          i_batch: int,
+          k0: int,
+          t0: float,
+          x0: np.ndarray,
+          u0: np.ndarray,
+          pending_computation: ComputationData = None
+        ):
+    """
+    To make testing simpler, this function allows 
+    for creating a BatchInit object with x0 and u0 
+    provided as lists instead of vectors.
+    """
+    x0 = list_to_column_vec(x0)
+    u0 = list_to_column_vec(u0)
+    return BatchInit(i_batch, k0, t0, x0, u0, pending_computation)
 
-  def __init__(self, i_batch, k0, t0, x0, u0, pending_computation):
-    assert isinstance(i_batch, int)
-    assert isinstance(k0, int)
-    assert isinstance(t0, float)
-    if isinstance(x0, list):
-      x0 = list_to_column_vec(x0)
-    if isinstance(u0, list):
-      u0 = list_to_column_vec(u0)
-    assert isinstance(x0, np.ndarray)
-    assert isinstance(u0, np.ndarray)
-    if pending_computation:
-      assert isinstance(pending_computation, ComputationData)
-    self.i_batch = i_batch
-    self.k0 = k0
-    self.t0 = t0
-    self.x0 = x0
-    self.u0 = u0
-    self.pending_computation = pending_computation
+  def __post_init__(self):
+    assert isinstance(self.k0, int)
+    assert isinstance(self.t0, float)
+    assert isinstance(self.x0, np.ndarray), f'x0={type(self.x0)} must be np.ndarray'
+    assert isinstance(self.u0, np.ndarray), f'u0={type(self.u0)} must be np.ndarray'
+    if self.pending_computation:
+      assert isinstance(self.pending_computation, ComputationData)
+
+  def __eq__(self, other):
+    assert isinstance(other, BatchInit), f'Cannot compare equality between this BatchInit and a {type(other)}'
+    return self.i_batch == other.i_batch \
+       and self.t0 == other.t0 \
+       and self.k0 == other.k0 \
+       and np.array_equal(self.x0, other.x0) \
+       and np.array_equal(self.u0, other.u0) \
+       and self.pending_computation == other.pending_computation
 
   def __dict__(self): 
     return  {
@@ -611,135 +748,246 @@ class BatchInit:
 
 class Batch:
 
-  def __init__(self, batch_init: BatchInit, simulation_data: TimeStepSeries, sample_time: float):
+  def __init__(self, batch_init: BatchInit, full_simulation_data: TimeStepSeries, sample_time: float):
     assert isinstance(batch_init, BatchInit)
-    assert isinstance(simulation_data, TimeStepSeries)
+    assert isinstance(full_simulation_data, TimeStepSeries)
     assert isinstance(sample_time, float)
     self.batch_init      = batch_init
-    self.simulation_data = simulation_data.copy()
-    # self.previous_batch  = batch_init.previous_batch
+    self.full_simulation_data = full_simulation_data.copy()
 
-    first_late_timestep, has_missed_computation = simulation_data.find_first_late_timestep(sample_time)
+    first_late_timestep, has_missed_computation = full_simulation_data.find_first_late_timestep(sample_time)
 
     if has_missed_computation:
-      valid_data_from_batch = simulation_data.truncate(first_late_timestep)
+      valid_simulation_data = full_simulation_data.truncate(first_late_timestep)
     else: 
-      valid_data_from_batch = simulation_data.copy()
+      valid_simulation_data = full_simulation_data.copy()
 
-    next_batch_init = BatchInit.next(batch_init, valid_data_from_batch)
+    if debug_levels.debug_batching_level >= 2:
+      if has_missed_computation:
+        valid_simulation_data.printTimingData(f'valid_simulation_data (truncated to {first_late_timestep} time steps.)')
+      else:
+        valid_simulation_data.printTimingData(f'valid_simulation_data (no truncated time steps.)')
 
-    if has_missed_computation:
-      valid_data_from_batch.printTimingData(f'valid_data_from_batch (truncated to {first_late_timestep} time steps.)')
+    # # Check that the next_first_time_index doesn't skip over any timesteps.
+    # last_time_index_in_previous_batch = valid_simulation_data.last_time_index
+    # assert next_batch_init.k0 <= last_time_index_in_previous_batch + 1 , \
+    #       f'next first_time_index={next_batch_init.k0} must be larger than' + \
+    #       f'(last index in the batch) + 1={full_simulation_data.i[-1] + 1}'
+
+    if first_late_timestep:
+      self.first_late_timestep  = first_late_timestep 
+      self.last_valid_timestep  = first_late_timestep
     else:
-      valid_data_from_batch.printTimingData(f'valid_data_from_batch (no truncated time steps.)')
-
-    # Check that the next_first_time_index doesn't skip over any timesteps.
-    last_time_index_in_previous_batch = valid_data_from_batch.get_last_sample_time_index()
-    assert next_batch_init.k0 <= last_time_index_in_previous_batch + 1 , \
-          f'next first_time_index={next_batch_init.k0} must be larger than' + \
-          f'(last index in the batch) + 1={simulation_data.i[-1] + 1}'
-
-    self.next_batch_init        = next_batch_init
-    self.first_late_timestep    = first_late_timestep 
+      self.first_late_timestep  = None
+      self.last_valid_timestep  = full_simulation_data.k[-1]
     self.has_missed_computation = has_missed_computation
-    self.valid_data_from_batch  = valid_data_from_batch
-    
+    self.valid_simulation_data  = valid_simulation_data
+
+  def next_init(self) -> BatchInit:
+    assert self.valid_simulation_data is not None
+
+    valid_simulation_data = self.valid_simulation_data
+    # Values that are needed to start the next batch.
+    if valid_simulation_data.n_time_steps == 0:
+      return BatchInit(
+          batch_init=self.batch_init.i_batch + 1, 
+          k0=self.batch_init.k0 + 1, 
+          t0=self.batch_init.t0, 
+          x0=list_to_column_vec(self.batch_init.x0), 
+          u0=list_to_column_vec(self.batch_init.u0), 
+          pending_computation=self.batch_init.pending_computation)
+    else:
+      return BatchInit( 
+          i_batch=self.batch_init.i_batch + 1, 
+          k0=valid_simulation_data.k[-1] + 1, 
+          t0=valid_simulation_data.t[-1], 
+          x0=list_to_column_vec(valid_simulation_data.x[-1]), 
+          u0=list_to_column_vec(valid_simulation_data.u[-1]), 
+          pending_computation=valid_simulation_data.pending_computation[-1])
+
+  def __eq__(self, other):
+    assert isinstance(other, Batch), f'Cannot compare equality between a Batch object and {type(other)}.'
+    return self.batch_init == other.batch_init \
+       and self.full_simulation_data == other.full_simulation_data \
+       and self.valid_simulation_data == other.valid_simulation_data \
+       and self.first_late_timestep == other.first_late_timestep \
+       and self.has_missed_computation == other.has_missed_computation \
+       and self.last_valid_timestep == other.last_valid_timestep
+
+  def __repr__(self):
+    return f'Batch(init={self.batch_init}, last valid: {self.last_valid_timestep}, first late: {self.first_late_timestep})'
+
   def __dict__(self): 
     return {
       'batch_init': self.batch_init,
-      'simulation': self.simulation
+      'valid_simulation_data': self.valid_simulation_data
     }
+  
+class Batcher:
+
+  def __init__(self, 
+               x0, u0, 
+               run_batch_fnc, 
+               n_time_steps,
+               max_batch_size=99999,
+               max_batch_count=99999 # setting max # of batches not needed currently.
+              ):
+    assert callable(run_batch_fnc), f'run_batch_fnc={run_batch_fnc} must be callable (e.g., a function).'
+    assert isinstance(max_batch_size, int)
+    assert isinstance(max_batch_count, int)
+    assert isinstance(n_time_steps, int)
+    x0 = list_to_column_vec(x0)
+    u0 = list_to_column_vec(u0)
+    self._next_batch_init = BatchInit.first(x0, u0)
+    self._run_batch_fnc = run_batch_fnc
+    self._max_batch_size = max_batch_size
+    self._max_batch_count = max_batch_count
+    self._n_total_time_steps = n_time_steps
+    self._last_batch = None
+
+  def __iter__(self):
+    return self
+
+  def __next__(self) -> Batch:
+    if self._is_done():
+      raise StopIteration
+    batch = self._run_batch_fnc(self._next_batch_init, self._next_batch_size())
+    self._next_batch_init = batch.next_init()
+    self._last_batch = batch
+
+    assert self._next_batch_init is not None
+    return batch
+
+  def _next_batch_size(self):
+    return min(self._max_batch_size, self._n_time_steps_remaining())
+
+  def _n_time_steps_remaining(self):
+    # # "-1" because of zero indexing of the k-values.
+    # return self._n_total_time_steps - self._last_valid_k() - 1
+    return self._n_total_time_steps - self._next_k0()
+
+  def _last_valid_k(self):
+    if self._last_batch is None:
+      return None
+    else:
+      return self._last_batch.last_valid_timestep
+    
+  def _next_k0(self):
+    if self._last_valid_k() is None:
+      return 0
+    else:
+      return self._last_valid_k() + 1
+    
+  def _is_done(self): 
+    assert isinstance(self._next_batch_init, BatchInit), f'self._next_batch_init={self._next_batch_init}'
+    return self._next_batch_init.k0 >= self._n_total_time_steps \
+        or self._next_batch_init.i_batch >= self._max_batch_count
+    
+
+def assert_consistent_simulation_config_dimensions(simulation_config: dict):
+  x0 = simulation_config["x0"]
+  u0 = simulation_config["u0"]
+  state_dimension = simulation_config["system_parameters"]["state_dimension"]
+  input_dimension = simulation_config["system_parameters"]["input_dimension"]
+  assert len(x0) == state_dimension, f'x0={x0} did not have the expected number of entries: state_dimension={state_dimension}'
+  assert len(u0) == input_dimension, f'u0={u0} did not have the expected number of entries: input_dimension={input_dimension}'
+  
 
 
 def run_experiment_parallelized(experiment_config, params_base: list):
   print(f'Start of run_experiment_parallelized(<{experiment_config["experiment_label"]}>")')
   
   experiment_dir = experiment_config["experiment_dir"]
-  max_time_steps = experiment_config["max_time_steps"]
-  max_batch = experiment_config["Simulation Options"]["max_batches"]
+  n_time_steps = experiment_config["n_time_steps"]
+  max_batch      = experiment_config["Simulation Options"]["max_batches"]
+  max_batch_size = experiment_config["Simulation Options"]["max_batch_size"]
+  sample_time    = experiment_config["system_parameters"]["sample_time"]
 
-  # Create lists for recording the true values (discarding values that erroneously use  missed computations as though were not missed).
-  batch_data_list = []
+  def run_batch(batch_init: BatchInit, n_time_steps) -> Batch:
+    simulation = Simulation.from_experiment_config_batched(
+                              experiment_config=experiment_config,
+                              params_base=params_base,
+                              batch_init =batch_init,
+                              n_time_steps_in_batch=n_time_steps)
+    assert simulation.n_time_steps == n_time_steps
+    simulation.setup_files()
+    batch_sim_data = simulation.run()
 
-  # k0 = 0
-  # t0 = 0
-  x0 = experiment_config["x0"]
-  state_dimension = experiment_config["system_parameters"]["state_dimension"]
-  assert len(x0) == state_dimension, f'x0={x0} did not have the expected number of entries: state_dimension={state_dimension}'
-  
-  batch_init = BatchInit.first(x0=experiment_config["x0"], u0=experiment_config["u0"])
-
-  actual_time_series = plant_runner.TimeStepSeries(batch_init.k0, batch_init.t0, batch_init.x0, None)
+    printJson("simulation config", simulation.sim_config)
+    print('batch_init:', batch_init)
+    batch_sim_data.printTimingData(f'batch_sim_data from running simulation in "run_batch()" with n_time_steps={n_time_steps}')
+    print('batch_sim_data:', batch_sim_data)
+    assert batch_sim_data.n_time_steps == n_time_steps, \
+      f'batch_sim_data.n_time_steps={batch_sim_data.n_time_steps} must equal n_time_steps={n_time_steps}'
+    
+    batch = Batch(batch_init, batch_sim_data, sample_time)
+    assert batch.valid_simulation_data.n_time_steps <= n_time_steps, \
+      f'batch.valid_simulation_data.n_time_steps={batch.valid_simulation_data.n_time_steps} ' \
+      + f'must be less than n_time_steps={n_time_steps}.'
+    return batch
 
   ### Batches Loop ###
   # Loop through batches of time-steps until the start time-step is no longer less 
   # than the total number of time-steps desired or until the max number of batches is reached.
-  try:
-    while batch_init.k0 < max_time_steps and batch_init.i_batch < max_batch:
-      simulation = Simulation.from_experiment_config_batched(experiment_config, params_base, batch_init)
-      simulation.setup_files()
+  actual_time_series = plant_runner.TimeStepSeries(k0=0, t0=0.0, x0=experiment_config["x0"])
+  # Create lists for recording the true values (discarding values that erroneously use  missed computations as though were not missed).
+  batch_list = []
+  max_batch_size = min(os.cpu_count(), max_batch_size)
+  batcher = Batcher(             x0 = experiment_config["x0"], 
+                                 u0 = experiment_config["u0"],
+                      run_batch_fnc = run_batch, 
+                     max_batch_size = max_batch_size,
+                    max_batch_count = max_batch,
+                       n_time_steps = n_time_steps)
 
-      if debug_levels.debug_batching_level >= 1:
-        printHeader2( f'Starting batch: {simulation.label} ({simulation.sim_config["max_time_steps"]} time steps)')
-        print(f'↳ dir: {simulation.simulation_dir}')
-        # print(f'↳  Last batch status: {batch_init["Last batch status"]}')
-        print(f'↳                 x0: {simulation.x0}')
-        print(f'↳                 u0: {simulation.u0}')
-        print(f'↳      batch_init.u0: {batch_init.u0}')
-      
-      # Run simulation
-      batch_sim_data = simulation.run()
-      sample_time = simulation.sim_config["system_parameters"]["sample_time"]
-      batch = Batch(batch_init, batch_sim_data, sample_time)
+  # try:
+  for batch in batcher:
+    batch_list.append(batch)
+    # Append all of the valid data (up to the point of the missed computation) except for the first index, 
+    # which overlaps with the last index of the previous batch.
+    batch.valid_simulation_data.printTimingData(f'Actual time series before appending batch #{actual_time_series}')
+    batch.valid_simulation_data.printTimingData(f'Batch #{batch.batch_init.i_batch}')
+    actual_time_series += batch.valid_simulation_data
+    pending_computation = batch.batch_init.pending_computation
+    if pending_computation and pending_computation.t_end < batch.batch_init.t0:
+      assert batch.valid_simulation_data.u[0] == pending_computation.u, \
+        f'batch.valid_simulation_data.u[0] = {batch.valid_simulation_data.u[0]} must equal pending_computation.u={pending_computation.u}'
+    else:
+      assert batch.valid_simulation_data.u[0] == batch.batch_init.u0, \
+      f'batch.valid_simulation_data.u[0] = {batch.valid_simulation_data.u[0]} must equal batch_init.u0={batch.batch_init.u0}'
 
-      batch_data_list.append(batch)
 
-      if debug_levels.debug_batching_level >= 1:
-        batch.valid_data_from_batch.printTimingData('valid_data')
+    # assert batch_u[0] == expected_u0, \
+    #   f"""batch_u[0] = {batch_u[0]} must equal expected_u0 = {expected_u0}.
+    #   (     batch_init.u0: {batch_init.u0})
+    #   (  all_data_from_batch: {batch.simulation_data})
+    #   (all_data_from_batch.u: {batch.simulation_data.u})
+    #   """
 
-      # Append all of the valid data (up to the point of rhe missed computation) except for the first index, which overlaps with the last index of the previous batch.
-      actual_time_series += batch.valid_data_from_batch
-      
-      pending_computation = batch_init.pending_computation
-      if pending_computation and pending_computation.t_end < batch_init.t0:
-        expected_u0 = pending_computation.u
-      else:
-        expected_u0 = batch_init.u0
+    # if debug_levels.debug_batching_level >= 1:
+    #   printHeader2(f'Finished batch {batch_init.i_batch}: {batch_sim_config["simulation_label"]}')
+    #   print(f'↳             length of x: {len(batch_x)}')
+    #   print(f'↳             length of u: {len(batch_u)}')
+    #   print(f'↳                      u0: {batch_u[0]}')
+    #   print(f'↳           length of "t": {len(batch_t)}')
+    #   print(f'↳          n_time_steps: {batch_sim_config["n_time_steps"]}')
+    #   print(f'↳ Next "first_time_index": {batch.next_batch_init.k0}')
 
-      assert batch_sim_data.u[0] == expected_u0, \
-        f'batch_sim_data.u[0] = {batch_sim_data.u[0]} must equal batch_init.u0={batch_init.u0}'
+    experiment_data = {"batches": batch_list,
+                        "x": actual_time_series.x,
+                        "u": actual_time_series.u,
+                        "t": actual_time_series.t,
+                        "k": actual_time_series.k, # Time steps
+                        "i": actual_time_series.i, # Sample time indices
+                        "pending_computations": actual_time_series.pending_computation,
+                        "config": experiment_config}
 
-      # assert batch_u[0] == expected_u0, \
-      #   f"""batch_u[0] = {batch_u[0]} must equal expected_u0 = {expected_u0}.
-      #   (     batch_init.u0: {batch_init.u0})
-      #   (  all_data_from_batch: {batch.simulation_data})
-      #   (all_data_from_batch.u: {batch.simulation_data.u})
-      #   """
+    writeJson(experiment_dir + "/experiment_data_incremental.json", experiment_data, label="Incremental experiment data")
 
-      if debug_levels.debug_batching_level >= 1:
-        printHeader2(f'Finished batch {batch_init.i_batch}: {batch_sim_config["simulation_label"]}')
-        print(f'↳             length of x: {len(batch_x)}')
-        print(f'↳             length of u: {len(batch_u)}')
-        print(f'↳                      u0: {batch_u[0]}')
-        print(f'↳           length of "t": {len(batch_t)}')
-        print(f'↳          max_time_steps: {batch_sim_config["max_time_steps"]}')
-        print(f'↳ Next "first_time_index": {batch.next_batch_init.k0}')
-
-      experiment_data = {"batches": batch_data_list,
-                         "x": actual_time_series.x,
-                         "u": actual_time_series.u,
-                         "t": actual_time_series.t,
-                         "k": actual_time_series.k, # Time steps
-                         "i": actual_time_series.i, # Sample time indices
-                         "pending_computations": actual_time_series.pending_computation,
-                         "config": experiment_config}
-
-      writeJson(experiment_dir + "/experiment_data_incremental.json", experiment_data, label="Incremental experiment data")
-
-      # Update values for next iteration of the loop.
-      batch_init = batch.next_batch_init
-  except Exception as err:
-    raise Exception(f'There was an exception when running batch: {batch_init}')
+      # # Update values for next iteration of the loop.
+      # batch_init = batch.next_batch_init
+  # except Exception as err:
+  #   raise Exception(f'There was an exception when running batcher: {batcher}')
     
   if debug_levels.debug_batching_level >= 1:
     actual_time_series.print('--------------- Actualualized Time Series (Concatenated) ---------------')
@@ -752,23 +1000,23 @@ def run_experiment_parallelized(experiment_config, params_base: list):
 #   first_late_timestep, has_missed_computation = batch_simulation_data.find_first_late_timestep(sample_time)
 # 
 #   if has_missed_computation:
-#     valid_data_from_batch = batch_simulation_data.truncate(first_late_timestep)
+#     valid_simulation_data = batch_simulation_data.truncate(first_late_timestep)
 #   else: 
-#     valid_data_from_batch = batch_simulation_data.copy()
+#     valid_simulation_data = batch_simulation_data.copy()
 # 
 #   if has_missed_computation:
-#     valid_data_from_batch.printTimingData(f'valid_data_from_batch (truncated to {first_late_timestep} time steps.)')
+#     valid_simulation_data.printTimingData(f'valid_simulation_data (truncated to {first_late_timestep} time steps.)')
 #   else:
-#     valid_data_from_batch.printTimingData(f'valid_data_from_batch (no truncated time steps.)')
+#     valid_simulation_data.printTimingData(f'valid_simulation_data (no truncated time steps.)')
 # 
 #   # Values that are needed to start the next batch.
-#   if len(valid_data_from_batch.k) > 0:
+#   if len(valid_simulation_data.k) > 0:
 #     next_batch_init = {
 #       "i_batch":              batch_init["i_batch"] + 1,
-#       "first_time_index":     valid_data_from_batch.k[-1] + 1,
-#       "x0":                   valid_data_from_batch.x[-1],
-#       "u0":                   valid_data_from_batch.u[-1],
-#       "pending_computation":  valid_data_from_batch.pending_computation[-1]
+#       "first_time_index":     valid_simulation_data.k[-1] + 1,
+#       "x0":                   valid_simulation_data.x[-1],
+#       "u0":                   valid_simulation_data.u[-1],
+#       "pending_computation":  valid_simulation_data.pending_computation[-1]
 #     }
 #     if has_missed_computation:
 #       next_batch_init["Last batch status"] = f"Missed computation at timestep[{first_late_timestep}]"
@@ -780,15 +1028,18 @@ def run_experiment_parallelized(experiment_config, params_base: list):
 #     next_batch_init["Last batch status"]: f'No valid data. Carried over from previous init, which had Last batch status={batch_init["Last batch status"]}'
 # 
 #   # Check that the next_first_time_index doesn't skip over any timesteps.
-#   last_time_index_in_previous_batch = batch_simulation_data.get_last_sample_time_index()
+#   last_time_index_in_previous_batch = batch_simulation_data.last_time_index
 #   assert next_batch_init['first_time_index'] <= last_time_index_in_previous_batch + 1 , \
 #         f'next first_time_index={next_batch_init["first_time_index"]} must be larger than' + \
 #         f'(last index in the batch) + 1={batch_simulation_data.i[-1] + 1}'
 # 
-#   return valid_data_from_batch, next_batch_init
+#   return valid_simulation_data, next_batch_init
 
 
-def getSimulationExecutor(sim_dir, sim_config, controller_interface, controller_log, plant_log, fake_delays=None):
+def getSimulationExecutor(sim_dir, 
+                          sim_config, 
+                          controller_interface,# : ControllerInterface, 
+                          fake_delays=None):
   """ 
   This function implements the "Factory" design pattern, where it returns objects of various classes depending on the imputs.
   """
@@ -804,49 +1055,36 @@ def getSimulationExecutor(sim_dir, sim_config, controller_interface, controller_
       # The "real" trace processor
       trace_processor = scarabizor.ScarabTracesToComputationTimesProcessor(sim_dir)
 
-    return ParallelSimulationExecutor(sim_dir, sim_config, controller_interface, controller_log, plant_log, trace_processor)
+    return ParallelSimulationExecutor(sim_dir, sim_config, controller_interface, trace_processor)
   else:
     print("Using SerialSimulationExecutor.")
-    executor = SerialSimulationExecutor(sim_dir, sim_config, controller_interface, controller_log, plant_log)
-    delay_provider_config = sim_config["Simulation Options"]["in-the-loop_delay_provider"]
-    assert delay_provider_config == "execution-driven scarab", \
-      f'delay_provider_config={delay_provider_config} must be "execution-driven scarab" when doing serial execution.'
-    
+        
     if fake_delays:
       # Create the mock Scarab runner.
-      executor.scarab_runner = scarabizor.MockExecutionDrivenScarabRunner(sim_dir=sim_dir,
-                                                                          queued_delays=fake_delays,
-                                                                          controller_log=controller_log)
+      scarab_runner = scarabizor.MockExecutionDrivenScarabRunner(
+                                                       sim_dir=sim_dir,
+                                                 queued_delays=fake_delays)
     else:
-      executor.scarab_runner = scarabizor.ExecutionDrivenScarabRunner(sim_dir=sim_dir,
-                                                                      controller_log=controller_log)
+      scarab_runner = scarabizor.ExecutionDrivenScarabRunner(sim_dir=sim_dir)
+    executor = SerialSimulationExecutor(sim_dir, sim_config, controller_interface, scarab_runner)
+
+
     return executor
 
 # TODO: Maybe rename this as "delegator" or "coordinator".
 class SimulationExecutor:
   
-  def __init__(self, sim_dir, sim_config, controller_interface, controller_log, plant_log):
+  def __init__(self, sim_dir, sim_config, controller_interface):
     global controller_executable_provider
     self.sim_dir = sim_dir
     self.sim_config = sim_config
-    self.controller_log = controller_log
-    self.plant_log = plant_log
     assert controller_interface is not None
     self.controller_interface = controller_interface
+    self.sim_config = sim_config
 
-    # Create the executable.
-    with redirect_stdout(controller_log):
-      self.controller_executable = controller_executable_provider.get_controller_executable(sim_config)
-    assertFileExists(self.controller_executable)
-    
-    # Get a function that defines the plant dynamics.
-    with redirect_stdout(plant_log):
-        # Add dynamics directory to the path
-        sys.path.append(os.environ['DYNAMICS_DIR'])
-        dynamics_class = getattr(importlib.import_module(sim_config["dynamics_module_name"]),  sim_config["dynamics_class_name"])
-        dynamics_instance = dynamics_class(sim_config)
-        self.evolveState_fnc = dynamics_instance.getDynamicsFunction()
-
+  def set_logs(self, controller_log, plant_log):
+    self.controller_log = controller_log
+    self.plant_log = plant_log
 
   def run_controller(self):
     raise RuntimeError("This function must be implemented by a subclass")
@@ -855,6 +1093,11 @@ class SimulationExecutor:
     """
     Run the controller via the run_controller() function defined in subclasses, but include some setup and tear-down beforehand.
     """
+    # Create the executable.
+    with redirect_stdout(self.controller_log):
+      self.controller_executable = controller_executable_provider.get_controller_executable(self.sim_config)
+    assertFileExists(self.controller_executable)
+
     print(f'---- Starting controller for {self.sim_config["simulation_label"]} ----\n'\
           f'      Executable: {self.controller_executable} \n'\
           f'  Simulation dir: {self.sim_dir} \n'\
@@ -871,6 +1114,15 @@ class SimulationExecutor:
     """ 
     Handle setup and exception handling for running the run_plant() functions implemented in subclasses
     """
+
+    # Get a function that defines the plant dynamics.
+    with redirect_stdout(self.plant_log):
+        # Add dynamics directory to the path
+        sys.path.append(os.environ['DYNAMICS_DIR'])
+        dynamics_class = getattr(importlib.import_module(self.sim_config["dynamics_module_name"]),  self.sim_config["dynamics_class_name"])
+        dynamics_instance = dynamics_class(self.sim_config)
+        self.evolveState_fnc = dynamics_instance.getDynamicsFunction()
+
     sim_label = self.sim_config["simulation_label"]
     print(f'---- Starting plant dynamics for {sim_label} ----\n' \
           f'\t↳ Simulation dir: {self.sim_dir} \n' \
@@ -898,7 +1150,7 @@ class SimulationExecutor:
             f'\t↳ Simulation directory: {self.sim_dir}')
     return plant_result
 
-  def run_simulation(self):
+  def run_simulation(self) -> TimeStepSeries:
     """ Run everything needed to simulate the plant and dynamics, in parallel."""
     # Run the controller in parallel, on a separate thread.
     N_TASKS = 1
@@ -906,7 +1158,7 @@ class SimulationExecutor:
       # Start a separate thread to run the controller.
       print("Starting the controller...")
       controller_task = executor.submit(self._run_controller)
-      controller_task.add_done_callback(lambda future: print("Controller task finished."))
+      controller_task.add_done_callback(lambda _: print("Controller task finished."))
 
       # Start running the plant in the current thread.
       print("Starting the plant...")
@@ -945,10 +1197,10 @@ class SimulationExecutor:
       raise ValueError(f"simulation_data is None after postprocessing in class {type(self)}")
     
     # Check to make sure the simulation generated data that is well-formed.
-    # checkSimulationData(simulation_data, self.sim_config["max_time_steps"])
+    # checkSimulationData(simulation_data, self.sim_config["n_time_steps"])
     return simulation_data
 
-  def postprocess_simulation_data(self, simulation_data):
+  def postprocess_simulation_data(self, simulation_data: TimeStepSeries) -> TimeStepSeries:
     """ 
     This function can be overridden in subclasses to allow modifications to the simulation data.
     """
@@ -962,6 +1214,11 @@ class ModeledDelaysSimulationExecutor(SimulationExecutor):
     run_shell_cmd(self.controller_executable, working_dir=self.sim_dir, log=self.controller_log)
 
 class SerialSimulationExecutor(SimulationExecutor):
+  scarab_runner: scarabizor.ExecutionDrivenScarabRunner
+
+  def __init__(self, sim_dir, sim_config, controller_interface, scarab_runner):
+    super().__init__(sim_dir, sim_config, controller_interface)
+    self.scarab_runner = scarab_runner
 
   def run_controller(self):
     cmd = " ".join([self.controller_executable])
@@ -971,35 +1228,38 @@ class SerialSimulationExecutor(SimulationExecutor):
     except Exception as err:
       print(f'Failed to run command with {type(self.scarab_runner)}: "{cmd}".\n{type(err)}: {err}\n{traceback.format_exc()}')
       raise err
-    
-class ParallelSimulationExecutor(SimulationExecutor):
+  
+  def set_logs(self, controller_log, plant_log):
+    super().set_logs(controller_log, plant_log)
+    self.scarab_runner.set_log(controller_log)
 
-  def __init__(self, sim_dir, sim_config, controller_interface, controller_log, plant_log, trace_processor):
-    super().__init__(sim_dir, sim_config, controller_interface, controller_log, plant_log)
+class ParallelSimulationExecutor(SimulationExecutor):
+  trace_processor: scarabizor.TracesToComputationTimesProcessor
+
+  def __init__(self, sim_dir, sim_config, controller_interface, trace_processor: scarabizor.TracesToComputationTimesProcessor):
+    super().__init__(sim_dir, sim_config, controller_interface)
     self.trace_processor = trace_processor
 
   def run_controller(self):
     run_shell_cmd(self.controller_executable, working_dir=self.sim_dir, log=self.controller_log)
 
-  def postprocess_simulation_data(self, simulation_data):
+  def postprocess_simulation_data(self, simulation_data: TimeStepSeries) -> TimeStepSeries:
     """ 
     Runnining the controller exectuable produces DynamoRIO traces but does not give 
     use simulated computation times. In this function, we simulate the traces 
     using Scarab to get the computation times.
     """
     computation_times = self.trace_processor.get_all_computation_times()
-    expected_n_of_computation_times = simulation_data.n_time_indices() 
-    while len(computation_times) < expected_n_of_computation_times:
+    while len(computation_times) < simulation_data.n_time_steps :
       computation_times += [None]
-    assert len(computation_times) == expected_n_of_computation_times, \
+    assert len(computation_times) == simulation_data.n_time_steps , \
           f"""computation_times={computation_times} must have 
-          simulation_data.n_time_indices()={expected_n_of_computation_times} many values, 
-          because there is a new computation started at each index. 
+          simulation_data.n_time_steps={simulation_data.n_time_steps } many values, 
+          because there is a computation during each time step. 
           None values represent times when computations are not running.
           """
     simulation_data.overwrite_computation_times(computation_times)
     return simulation_data
-
 
 
 class DelayProvider(ABC):
@@ -1105,6 +1365,15 @@ class LinearBasedOnIteraionsDelayProvider(DelayProvider):
 
 
 
+class SimulatorStatus(Enum):
+  """
+  Indicators to alert the C++ code the status of the (Python) simulation.
+  """
+  PENDING  = 0
+  RUNNING  = 1
+  FINISHED = 2
+  ERRORED  = 3
+
 class ControllerInterface(ABC):
   """ 
   Create an Abstract Base Class (ABC) for a controller interface. 
@@ -1126,12 +1395,28 @@ class ControllerInterface(ABC):
     """
     pass
 
+  # def post_simulator_pending(self):
+  #   self._write_simulator_status(SimulatorStatus.PENDING)
+
+  def post_simulator_running(self):
+    self._write_simulator_status(SimulatorStatus.RUNNING)
+
+  def post_simulator_finished(self):
+    self._write_simulator_status(SimulatorStatus.FINISHED)
+
+  def post_simulator_errored(self):
+    self._write_simulator_status(SimulatorStatus.ERRORED)
+
   @abstractmethod
   def _write_x(self, x: np.ndarray):
     pass
 
   @abstractmethod
   def _write_t_delay(self, t: float):
+    pass
+    
+  @abstractmethod
+  def _write_simulator_status(self, status: SimulatorStatus):
     pass
     
   @abstractmethod
@@ -1209,7 +1494,6 @@ class ControllerInterface(ABC):
     else:
       raise ValueError(f'Unexpected case.')
       
-
     # If there is no pending_computation_before or the given pending_computation_before finishes before the current time t, then we run the computation of the next control value.
     if debug_levels.debug_dynamics_level >= 2:
       print("About to get the next control value for x = ", repr(x))
@@ -1228,7 +1512,6 @@ class ControllerInterface(ABC):
     assert u_delay > 0, 'Expected a positive value for u_delay.'
       # print(f'Updated pending_computation: {pending_computation_after}')
     return u_after, pending_computation_after, did_start_computation
-
 
   def get_next_control_from_controller(self, x: np.ndarray):
     """
@@ -1250,6 +1533,7 @@ class ControllerInterface(ABC):
       printIndented(f"metadata: {metadata}", 1)
 
     return u, u_delay, metadata
+  
     
 class PipesControllerInterface(ControllerInterface):
 
@@ -1258,24 +1542,25 @@ class PipesControllerInterface(ControllerInterface):
     self.sim_dir = sim_dir
     assertFileExists(self.sim_dir)
 
-    self.u_reader          = None
-    self.x_predict_reader  = None
-    self.t_predict_reader  = None
-    self.iterations_reader = None
-    self.x_outfile         = None
-    self.t_delay_outfile   = None
+    self.u_reader          = PipeVectorReader(os.path.join(self.sim_dir, 'u_c++_to_py'))
+    self.x_predict_reader  = PipeVectorReader(os.path.join(self.sim_dir, 'x_predict_c++_to_py'))
+    self.t_predict_reader  = PipeFloatReader( os.path.join(self.sim_dir, 't_predict_c++_to_py'))
+    self.iterations_reader = PipeFloatReader( os.path.join(self.sim_dir, 'iterations_c++_to_py'))
+    self.x_writer         = PipeVectorWriter( os.path.join(self.sim_dir, 'x_py_to_c++'))
+    self.t_delay_writer   = PipeFloatWriter(  os.path.join(self.sim_dir, 't_delay_py_to_c++'))
+    self.post_simulator_running()
 
   def open(self):
     """
     Open resources that need to be closed when finished.
     """
     assertFileExists(os.path.join(self.sim_dir, 'u_c++_to_py'))
-    self.u_reader          = PipeVectorReader(os.path.join(self.sim_dir, 'u_c++_to_py'))
-    self.x_predict_reader  = PipeVectorReader(os.path.join(self.sim_dir, 'x_predict_c++_to_py'))
-    self.t_predict_reader  = PipeFloatReader(os.path.join(self.sim_dir, 't_predict_c++_to_py'))
-    self.iterations_reader = PipeFloatReader(os.path.join(self.sim_dir, 'iterations_c++_to_py'))
-    self.x_outfile         = open(os.path.join(self.sim_dir, 'x_py_to_c++'),       'w', buffering=1)
-    self.t_delay_outfile   = open(os.path.join(self.sim_dir, 't_delay_py_to_c++'), 'w', buffering=1)
+    self.u_reader.open()
+    self.x_predict_reader.open()
+    self.t_predict_reader.open()
+    self.iterations_reader.open()
+    self.x_writer.open()
+    self.t_delay_writer.open()
     
     if debug_levels.debug_interfile_communication_level >= 1:
       print('Pipes are open') 
@@ -1286,33 +1571,32 @@ class PipesControllerInterface(ControllerInterface):
     """ 
     Close all of the files we opened.
     """
-    if self.u_reader:
+    if self.u_reader.is_open:
       self.u_reader.close()
-    if self.x_predict_reader:
+    if self.x_predict_reader.is_open:
       self.x_predict_reader.close()
-    if self.t_predict_reader:
+    if self.t_predict_reader.is_open:
       self.t_predict_reader.close()
-    if self.iterations_reader:
+    if self.iterations_reader.is_open:
       self.iterations_reader.close()
-    if self.x_outfile:
-      self.x_outfile.close()
-    if self.t_delay_outfile:
-      self.t_delay_outfile.close()
+    if self.x_writer.is_open:
+      self.x_writer.close()
+    if self.t_delay_writer.is_open:
+      self.t_delay_writer.close()
 
   def _write_x(self, x: np.ndarray):
     # Pass the string back to C++.
-    x_out_string = nump_vec_to_csv_string(x)
-    if debug_levels.debug_interfile_communication_level >= 2:
-      print(f"Writing x output line: {x_out_string} to {self.x_outfile.name}")
-    self.x_outfile.write(x_out_string + "\n")# Write to pipe to C++
+    # x_out_string = nump_vec_to_csv_string(x)
+    self.x_writer.write(x)# Write to pipe to C++
+
+  def _write_simulator_status(self, status: SimulatorStatus):
+    status_out_path = os.path.join(self.sim_dir, 'status_py_to_c++')
+    with open(status_out_path, "w") as status_file:
+      status_file.write(status.name)
+    print(f'Wrote status "{status.name}" to {status_out_path}')
 
   def _write_t_delay(self, t_delay: float):
-    t_delay_str = f"{t_delay:.8g}"
-    assert t_delay_str, f't_delay_str={t_delay_str} must not be empty.'
-    
-    if debug_levels.debug_interfile_communication_level >= 2:
-      print(f"Writing {t_delay_str} to t_delay file: {self.t_delay_outfile.name}")
-    self.t_delay_outfile.write(t_delay_str + "\n")
+    self.t_delay_writer.write(t_delay)
 
   def _read_u(self):
     if debug_levels.debug_interfile_communication_level >= 2:
@@ -1334,16 +1618,9 @@ class PipesControllerInterface(ControllerInterface):
       print(f"Reading iterations file: {self.iterations_reader.filename}")
     return self.iterations_reader.read()
       
-def controller_interface_factory(controller_interface_selection, computation_delay_provider, sim_dir):
+def controller_interface_factory(controller_interface_selection, computation_delay_provider, sim_dir) -> ControllerInterface:
   """ 
   Generate the desired ControllerInterface object based on the value of "controller_interface_selection". Typically the value will be the string "pipes", but a ControllerInterface interface object can also be passed in directly to allow for testing.
-  
-  Example usage:
-
-    with controller_interface_factory("pipes", computation_delay_provider, sim_dir) as controller_interface: 
-        <do stuff with controller_interface>
-    
-  When the "with" block is left, controller_interface.close() is called to clean up resources.
   """
 
   if isinstance(controller_interface_selection, str):
@@ -1354,10 +1631,10 @@ def controller_interface_factory(controller_interface_selection, computation_del
   elif isinstance(controller_interface_selection, ControllerInterface):
     return controller_interface_selection
   else:
-    raise ValueError(f'Unexpected controller_interface: {controller_interface}')
+    raise ValueError(f'Unexpected controller_interface: {controller_interface_selection}')
 
 
-def computation_delay_provider_factory(computation_delay_name: str, sim_dir, sample_time, use_fake_scarab):
+def computation_delay_provider_factory(computation_delay_name: str, sim_dir, sample_time, use_fake_scarab) -> DelayProvider:
   if isinstance(computation_delay_name, str):
     computation_delay_name = computation_delay_name.lower()
 

@@ -43,7 +43,7 @@
         "maximum_iteration": 4
       }
     },
-    "max_time_steps": 1
+    "n_time_steps": 1
   },
   {
     "label": "Parallel Scarab",
@@ -60,6 +60,6 @@
         "maximum_iteration": 12
       }
     },
-    "max_time_steps": 8
+    "n_time_steps": 8
   }
 ]
