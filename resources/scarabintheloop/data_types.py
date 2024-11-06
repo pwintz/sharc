@@ -83,6 +83,13 @@ class ComputationData:
       # return f'ComputationData(t_start={self.t_start}, delay={self.delay}, t_end={self.t_end}, u<{type(self.u)}>={self.u})'
     return f'ComputationData([{self.t_start:.3f}, {self.t_end:.3f}])'
   
+  def to_dict(self):
+    return {
+      "t_start": self.t_start,
+      "delay": self.delay,
+      "u": self.u,
+      "metadata": self.metadata
+    }
 
   def copy(self):
     return ComputationData(self.t_start, self.delay, copy.deepcopy(self.u), copy.deepcopy(self.metadata))
@@ -373,6 +380,16 @@ class TimeStepSeries:
 
       self.append(t_end[i], x_end[i], u[i], pending_computation=pending_computation[i], t_mid=i_t_mid, x_mid=i_x_mid)
 
+  def to_dict(self):
+    return {
+      "x":self.x,
+      "u":self.u,
+      "t":self.t,
+      "k":self.k,
+      "i":self.i,
+      "pending_computation":self.pending_computation
+    }
+
   def overwrite_computation_times(self, computation_times):
     """
     This function overwrites the computation times recorded in the time series.
@@ -402,7 +419,7 @@ class TimeStepSeries:
       i_pending_computation += 2
       i_computation_time    += 1
 
-  # Override the + operator
+  # Override the + operator to define concatenation of TimeStepSeries.
   def __add__(self, other):
     if not isinstance(other, TimeStepSeries):
       raise ValueError(f'Cannot concatenate this TimeStepSeries with a {type(other)} object.')

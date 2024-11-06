@@ -736,7 +736,10 @@ class BatchInit:
        and np.array_equal(self.u0, other.u0) \
        and self.pending_computation == other.pending_computation
 
-  def __dict__(self): 
+  def __str__(self):
+    return f'BatchInit(i_batch={self.i_batch}, t0={self.t0}, k0={self.k0}, {"with pending computation" if self.pending_computation else "no pending computation"})'
+
+  def to_dict(self): 
     return  {
                 "i_batch": self.i_batch,
                      "t0": self.t0,
@@ -807,20 +810,21 @@ class Batch:
 
   def __eq__(self, other):
     assert isinstance(other, Batch), f'Cannot compare equality between a Batch object and {type(other)}.'
-    return self.batch_init == other.batch_init \
-       and self.full_simulation_data == other.full_simulation_data \
-       and self.valid_simulation_data == other.valid_simulation_data \
-       and self.first_late_timestep == other.first_late_timestep \
+    return self.batch_init             == other.batch_init \
+       and self.full_simulation_data   == other.full_simulation_data \
+       and self.valid_simulation_data  == other.valid_simulation_data \
+       and self.first_late_timestep    == other.first_late_timestep \
        and self.has_missed_computation == other.has_missed_computation \
-       and self.last_valid_timestep == other.last_valid_timestep
+       and self.last_valid_timestep    == other.last_valid_timestep
 
   def __repr__(self):
     return f'Batch(init={self.batch_init}, last valid: {self.last_valid_timestep}, first late: {self.first_late_timestep})'
 
-  def __dict__(self): 
+  def to_dict(self): 
     return {
       'batch_init': self.batch_init,
-      'valid_simulation_data': self.valid_simulation_data
+      'valid_simulation_data': self.valid_simulation_data,
+      'full_simulation_data': self.full_simulation_data
     }
   
 class Batcher:
@@ -942,6 +946,7 @@ def run_experiment_parallelized(experiment_config, params_base: list):
 
   # try:
   for batch in batcher:
+    assert batch, f'batch={batch} should not be empty.'
     batch_list.append(batch)
     # Append all of the valid data (up to the point of the missed computation) except for the first index, 
     # which overlaps with the last index of the previous batch.
@@ -955,23 +960,6 @@ def run_experiment_parallelized(experiment_config, params_base: list):
     else:
       assert batch.valid_simulation_data.u[0] == batch.batch_init.u0, \
       f'batch.valid_simulation_data.u[0] = {batch.valid_simulation_data.u[0]} must equal batch_init.u0={batch.batch_init.u0}'
-
-
-    # assert batch_u[0] == expected_u0, \
-    #   f"""batch_u[0] = {batch_u[0]} must equal expected_u0 = {expected_u0}.
-    #   (     batch_init.u0: {batch_init.u0})
-    #   (  all_data_from_batch: {batch.simulation_data})
-    #   (all_data_from_batch.u: {batch.simulation_data.u})
-    #   """
-
-    # if debug_levels.debug_batching_level >= 1:
-    #   printHeader2(f'Finished batch {batch_init.i_batch}: {batch_sim_config["simulation_label"]}')
-    #   print(f'↳             length of x: {len(batch_x)}')
-    #   print(f'↳             length of u: {len(batch_u)}')
-    #   print(f'↳                      u0: {batch_u[0]}')
-    #   print(f'↳           length of "t": {len(batch_t)}')
-    #   print(f'↳          n_time_steps: {batch_sim_config["n_time_steps"]}')
-    #   print(f'↳ Next "first_time_index": {batch.next_batch_init.k0}')
 
     experiment_data = {"batches": batch_list,
                         "x": actual_time_series.x,

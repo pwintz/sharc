@@ -3,7 +3,6 @@
 import unittest
 
 from scarabintheloop import Batcher, BatchInit, Batch
-import scarabintheloop.data_types as data_types
 from scarabintheloop.data_types import TimeStepSeries
 import dataclasses 
 from scarabintheloop.utils import list_to_column_vec
@@ -76,7 +75,13 @@ class Test_BatchInit(unittest.TestCase):
     np.testing.assert_array_equal(batch.u0,  u0)
     self.assertEqual(batch.pending_computation,  None)
 
-
+  def test__dict__(self):
+    batch = create_batch(i_batch=3, k0=6, n_time_steps=2)
+    batch_dictionary = batch.to_dict()
+    self.assertEqual(batch_dictionary['batch_init'].i_batch, 3)
+    self.assertEqual(batch_dictionary['batch_init'].k0, 6)
+    self.assertEqual(batch_dictionary['full_simulation_data'].n_time_steps, 2)
+  
 class Test_create_batch(unittest.TestCase):
   """
   Check that our fake batch funciton works OK.

@@ -80,8 +80,9 @@ def _create_json_string(json_data):
   # Use "default=vars" to automatically convert many objects to JSON data.
   try:
     def encode_objs(obj):
+      if hasattr(obj, "to_dict"):
+        return obj.to_dict()
       if hasattr(obj, "__dict__"):
-        # print(obj.__dict__())
         return vars(obj)
       elif isinstance(obj, np.ndarray):
         return column_vec_to_list(obj)
@@ -120,7 +121,7 @@ def printJson(label: str, json_data: Union[Dict,List]):
     json_string = re.sub(double_regex, truncated_double_subst, json_string, max_replacements, re.MULTILINE)
     print(f"{label}:\n{json_string}")
   except Exception as err:
-    print(f"ERROR: Could not print as json: label={label}, json_data={json_data}.")
+    raise ValueError(f'ERROR: Could not print as json: label="{label}", json_data={json_data}.') from err
 
 def _remove_linebreaks_in_json_dump_between_number_list_items(json_string:str):
   max_replacements = 0 # As many as found.
