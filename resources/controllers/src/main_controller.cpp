@@ -38,9 +38,11 @@ using cvec = Eigen::Matrix<double, N, 1>;
 #define PRINT(x) std::cout << x << std::endl;
 #define PRINT_WITH_FILE_LOCATION(x) std::cout << __FILE__  << ":" << __LINE__ << ": " << x << std::endl;
 
+int debug_program_flow_level;
 int debug_interfile_communication_level;
 int debug_optimizer_stats_level;
 int debug_dynamics_level;
+int debug_scarab_level;
 
 // fstream provides I/O to file pipes.
 #include <fstream>
@@ -328,8 +330,10 @@ class StatusReader {
         file_stream.clear(); 
         file_stream.seekg(0);
         std::getline(file_stream, line_from_py);
-        PRINT_WITH_FILE_LOCATION("Line received from Python:")
-        PRINT_WITH_FILE_LOCATION("\tstatus: " << line_from_py);
+        if (debug_interfile_communication_level >= 2) {
+          PRINT_WITH_FILE_LOCATION("Line received from Python:")
+          PRINT_WITH_FILE_LOCATION("\tstatus: " << line_from_py);
+        }
         if (line_from_py == "RUNNING") {
           return true;
         } else if (line_from_py == "FINISHED") {
@@ -386,9 +390,11 @@ int main()
   int n_time_steps = json_data.at("n_time_steps");
 
   nlohmann::json debug_config = json_data.at("==== Debgugging Levels ====");
+  debug_program_flow_level            = debug_config.at("debug_program_flow_level");
   debug_interfile_communication_level = debug_config.at("debug_interfile_communication_level");
   debug_optimizer_stats_level         = debug_config.at("debug_optimizer_stats_level");
   debug_dynamics_level                = debug_config.at("debug_dynamics_level");
+  debug_scarab_level                  = debug_config.at("debug_scarab_level");
 
   // Vector sizes.
   const int Tnx  =  TNX; // State dimension
@@ -407,7 +413,10 @@ int main()
   // Open the pipes to Python. Each time we open one of these streams, 
   // this process pauses until it is connected to the Python process (or another process). 
   // The order needs to match the order in the reader process.
-  PRINT_WITH_FILE_LOCATION("Starting Pipe Readers/Writers setup.");
+  if (debug_interfile_communication_level >= 1)
+  {
+    PRINT_WITH_FILE_LOCATION("Starting Pipe Readers/Writers setup.");
+  }
 
   // Open out files.
   u_writer.open();
@@ -419,7 +428,9 @@ int main()
   status_reader.open();
   x_reader.open();
   delays_reader.open();
-  PRINT_WITH_FILE_LOCATION("All files open.");
+  if (debug_interfile_communication_level >= 1) {
+    PRINT_WITH_FILE_LOCATION("All files open.");
+  }
 
   // State vector state.
   cvec<Tnx> modelX, modeldX;
@@ -448,7 +459,9 @@ int main()
   int i = 0;
   while (true)
   {
-    PRINT(std::endl << "====== Starting loop #" << i << " of " << n_time_steps << " ======");
+    if (debug_program_flow_level >= 1) {
+      PRINT(std::endl << "====== Starting loop #" << i << " of " << n_time_steps << " ======");
+    }
     
     // Read the value of 'x' for this iteration.
     x_reader.read("x", modelX);
@@ -458,13 +471,19 @@ int main()
 
     // Begin a batch of Scarab statistics
     #if defined(USE_DYNAMORIO)
+      if (debug_scarab_level >= 1) {
         PRINT_WITH_FILE_LOCATION("Starting DynamoRIO region of interest.")
-        dr_app_setup_and_start();
+      }
+      dr_app_setup_and_start();
     #elif defined(USE_EXECUTION_DRIVEN_SCARAB)
-        PRINT_WITH_FILE_LOCATION("Starting Scarab region of interest.")
+        if (debug_scarab_level >= 1) {
+          PRINT_WITH_FILE_LOCATION("Starting Scarab region of interest.")
+        }
         scarab_roi_dump_begin(); 
     #else
+      if (debug_scarab_level >= 1) {
         PRINT_WITH_FILE_LOCATION("Starting region of interest without statistics recording.")
+      }
     #endif
 
     // if (use_state_after_delay_prediction)
@@ -505,7 +524,10 @@ int main()
     // iterations = controller->getLastLmpcIterations()
 
     #if defined(USE_DYNAMORIO)
-      PRINT_WITH_FILE_LOCATION("End of DynamoRIO region of interest.")
+    
+      if (debug_scarab_level >= 1) {
+        PRINT_WITH_FILE_LOCATION("End of DynamoRIO region of interest.")
+      }
       dr_app_stop_and_cleanup();
 
       std::filesystem::path folder(sim_dir);
@@ -514,7 +536,10 @@ int main()
           throw std::runtime_error(folder.string() + " is not a folder");
       }
       std::vector<std::string> file_list;
-      PRINT("DynamoRIO Trace Files in " << folder.string())
+      
+      if (debug_scarab_level >= 2) {
+        PRINT("DynamoRIO Trace Files in " << folder.string())
+      }
 
       // Regex to match stings like "<path to sim dir>/drmemtrace.acc_controller_5_2_dynamorio.268046.6519.dir"
       std::regex dynamorio_trace_filename_regex("(.*)drmemtrace\\.main_controller\\w*_dynamorio\\.\\d+\\.\\d+\\.dir");
@@ -527,9 +552,12 @@ int main()
             PRINT("- " << folder_entry.path().string())
             std::string new_dir_name("dynamorio_trace_" +  std::to_string(i));
             std::string new_path = std::regex_replace(full_path, dynamorio_trace_filename_regex, new_dir_name);
-            PRINT("Renaming")
-            PRINT("\t     " << folder_entry.path().string())
-            PRINT("\t to: " << new_path)
+            
+            if (debug_scarab_level >= 2) {
+              PRINT("Renaming")
+              PRINT("\t     " << folder_entry.path().string())
+              PRINT("\t to: " << new_path)
+            }
             std::filesystem::rename(folder_entry.path().string(), new_dir_name);
             // Check thfat we don't have multiple DynamoRIO trace files, which would indicate that we failed to rename them incrementally. 
             if (!is_first_dir_found) {
@@ -547,10 +575,14 @@ int main()
       PRINT_WITH_FILE_LOCATION("Finished saving trace with DyanmoRIO")
     #elif defined(USE_EXECUTION_DRIVEN_SCARAB)
         // Save a batch of Scarab statistics
-        PRINT_WITH_FILE_LOCATION("End of Scarab region of interest.")
+          if (debug_scarab_level >= 1) {
+            PRINT_WITH_FILE_LOCATION("End of Scarab region of interest.")
+          }
         scarab_roi_dump_end();  
     #else
+      if (debug_scarab_level >= 1) {
         PRINT_WITH_FILE_LOCATION("End of region of interest. Statistics recording is disabled.")
+      }
     #endif
 
     // optimizer_info_out_file << res.num_iterations << "," << res.cost << "," << res.primal_residual << "," << res.dual_residual << std::endl;  
@@ -594,7 +626,10 @@ int main()
     // }
     i++;
   } 
-  PRINT_WITH_FILE_LOCATION("Finished looping through " << n_time_steps << " time steps. Closing files...")
+  
+  if (debug_scarab_level >= 1) {
+    PRINT_WITH_FILE_LOCATION("Finished looping through " << i << " time steps. Closing files...")
+  }
 
   u_writer.close();
   x_prediction_writer.close();
@@ -606,7 +641,10 @@ int main()
 
   // PRINT_WITH_FILE_LOCATION("Closing optimizer_info_out_file...")
   // optimizer_info_out_file.close();
-  PRINT("Finished closing files. All done!.")
+  
+  if (debug_scarab_level >= 1) {
+    PRINT("Finished closing files. All done!.")
+  }
 
   return 0;
 }

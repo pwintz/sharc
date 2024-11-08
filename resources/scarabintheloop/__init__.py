@@ -147,7 +147,7 @@ class ExperimentList:
       
       self.print_status()
     
-    if debug_levels.debug_configuration_level >= 1:
+    if debug_levels.debug_program_flow_level >= 1:
       print('Finished running experiments from configuration in\n\t' + self.experiments_config_file_path)
     writeJson(self.complete_data_file_path, self.experiment_result_dict, label="Complete experiment list data")
     
