@@ -62,6 +62,55 @@ class ACCDynamics(LTIDynamics):
         self.m = self.config["system_parameters"]["input_dimension"]
         self.p = self.config["system_parameters"]["output_dimension"]
 
+class ACC2Dynamics(Dynamics):
+    def setup_system(self):
+      self.n = self.config["system_parameters"]["state_dimension"]
+      self.m = self.config["system_parameters"]["input_dimension"]
+      self.p = self.config["system_parameters"]["output_dimension"]
+
+      # System parameters
+      self.beta  = self.config["system_parameters"]["beta"]
+      self.gamma = self.config["system_parameters"]["gamma"]
+      self.M     = self.config["system_parameters"]["M"]
+      self.tau   = self.config["system_parameters"]["tau"]
+
+
+    def system_derivative(self, t, x, u, w):
+        # Constants
+        
+        # Separate state components
+        p       = x[0] # Position
+        h       = x[1] # Headway
+        v       = x[2] # Velocity
+        F_accel = x[3] # Acceleration Force
+
+        # Separate input components
+        F_accel_ref = u[0]
+        F_brake     = u[1]
+
+        # Exogenous Inputs
+        v_front = w[0]
+
+        # Compute friction force.
+        F_friction = self.beta + self.gamma * v**2
+        assert F_friction >= 0
+
+        # Compute derivative terms
+        pdot        = v
+        hdot        = v_front - v
+        vdot        = (1/self.M) * (F_accel - F_brake - F_friction)
+        F_accel_dot = (1/self.tau) * (F_accel_ref - F_accel)
+        
+        # Calculate derivatives
+        dxdt = np.zeros(4)
+        dxdt[0] = pdot        # Position
+        dxdt[1] = hdot        # Headway
+        dxdt[2] = vdot        # Velocity
+        dxdt[3] = F_accel_dot # Acceleration Force
+        
+        assert dxdt.shape == x.shape, (dxdt.shape, x.shape)
+        return dxdt
+
 class CartPoleDynamics(Dynamics):
     def setup_system(self):
         # System parameters
