@@ -511,7 +511,7 @@ class ScarabTracesToComputationTimesProcessor(TracesToComputationTimesProcessor)
                     "--fetch_off_path_ops", "0", 
                     "--cbp_trace_r0=trace", 
                     "--memtrace_modules_log=bin"] 
-    with openLog(log_path, headerText=f"Scarab log for {trace_dir}") as scarab_log:
+    with openLog(log_path, header_text=f"Scarab log for {trace_dir}") as scarab_log:
       run_shell_cmd(scarab_cmd, working_dir=trace_dir, log=scarab_log)
 
     # Read the generated statistics files.
