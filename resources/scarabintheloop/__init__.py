@@ -65,22 +65,23 @@ class ExperimentList:
     self.experiment_config_patches_list = readJson(self.experiments_config_file_path)
 
     # The experiment config file can either contain a single configuration or a list.
-    # In the case where there is only a single configuration, we convert it to a singleton list. 
+    # In the case where there is only a single configuration, we convert it to a singleton list 
+    # so that it can be handled identically.
     if not isinstance(self.experiment_config_patches_list, list):
       self.experiment_config_patches_list = [self.experiment_config_patches_list]
 
     self.label = slugify(remove_suffix(config_filename, ".json"))
     self.base_config["experiment_list_label"] = self.label
 
-    self.experiment_list_dir = os.path.join(self.experiments_dir, self.label + "--" + time.strftime("%Y-%m-%d--%H-%M-%S"))
+    self.experiment_list_dir        = os.path.join(self.experiments_dir, self.label + "--" + time.strftime("%Y-%m-%d--%H-%M-%S"))
     self.incremental_data_file_path = os.path.join(self.experiment_list_dir, "experiment_list_data_incremental.json")
-    self.complete_data_file_path = os.path.join(self.experiment_list_dir, "experiment_list_data.json")
+    self.complete_data_file_path    = os.path.join(self.experiment_list_dir, "experiment_list_data.json")
 
     # Collections for Exeperiment Results
-    self.experiment_result_dict = {}
+    self.experiment_result_dict       = {}
     self.successful_experiment_labels = []
-    self.skipped_experiment_labels = []
-    self.failed_experiment_labels = []
+    self.skipped_experiment_labels    = []
+    self.failed_experiment_labels     = []
 
     self.is_fail_fast = fail_fast
 
@@ -123,7 +124,11 @@ class ExperimentList:
       print(f' Experiments config: {self.experiments_config_file_path}')
     
   def run_all(self):
-    
+    """
+    Run all of the experiments in the ExperimentList.
+
+    Does not return a valud. The results can be accessed after this method by calling get_results().
+    """
 
     for experiment in self._experiment_list:
       experiment.setup_files()
