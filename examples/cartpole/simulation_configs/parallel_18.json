@@ -1,0 +1,16 @@
+[
+  {
+    "label": "Parallel",
+    "Simulation Options": {
+        "simulator_mode": "parallel",
+        "in-the-loop_delay_provider": "onestep",
+        "parallel_scarab_simulation": true,
+        "use_fake_delays": false
+    },
+    "==== Hardware Configuration ===": "",
+    "PARAMS_base_file":  "PARAMS.cortex_a76",
+    "PARAMS_patch_values": {
+      "chip_cycle_time": 555555
+    }
+}
+]

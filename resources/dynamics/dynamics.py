@@ -102,7 +102,7 @@ class CartPoleDynamics(Dynamics):
                    self.c * vx - (self.gamma / J_t) * self.m * self.l * c_t * omega + u[0]) / (M_t - self.m * (self.m * l_2 / J_t) * c_t * c_t)
         dxdt[3] = (-self.m * l_2 * s_t * c_t * o_2 + M_t * self.g * self.l * s_t - self.c * self.l * c_t * vx -
                    self.gamma * (M_t / self.m) * omega + self.l * c_t * u[0]) / (J_t * (M_t / self.m) - self.m * (self.l * c_t)**2)
-        
+        dxdt = dxdt.reshape(4,1)
         assert dxdt.shape == x.shape, (dxdt.shape, x.shape)
         return dxdt
     

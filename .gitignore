@@ -301,3 +301,5 @@ pyrightconfig.json
 # Don't share private key!
 id_rsa
 
+# all the experiments folders
+**/experiments/

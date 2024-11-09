@@ -476,7 +476,7 @@ class Simulation:
       fake_delays = [0.1*sample_time]*self.n_time_steps
 
       # Update one of the queued delays to be longer than the sample time
-      index_for_delay = 2
+      index_for_delay = 1e9
       if len(fake_delays) >= index_for_delay+1:
         fake_delays[index_for_delay] = 1.1*sample_time
     else:
