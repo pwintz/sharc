@@ -103,7 +103,7 @@ include_directories($ENV{SCARAB_ROOT}/utils)
 # Preprocessor definitions
 add_definitions(
     -Wno-deprecated-enum-enum-conversion
-    -DEIGEN_STACK_ALLOCATION_LIMIT=0
+    -DEIGEN_STACK_ALLOCATION_LIMIT=0 -O3
     -DPREDICTION_HORIZON=${PREDICTION_HORIZON}
     -DCONTROL_HORIZON=${CONTROL_HORIZON}
     -DTNX=${TNX}

@@ -10,7 +10,8 @@ set(TNX 100 CACHE STRING "State Dimension")
 set(TNU 100 CACHE STRING "Input Dimension")
 set(TNDU 100 CACHE STRING "Disturbance Input Dimension")
 set(TNY 100 CACHE STRING "Output Dimension")
-set(USE_DYNAMORIO 4 CACHE BOOL OFF)
+set(USE_DYNAMORIO 1 CACHE BOOL OFF)
+# set(USE_EXECUTION_DRIVEN_SCARAB 0 CACHE BOOL OFF)
 
 # Set the C++ standard to C++ 20
 set(CMAKE_CXX_STANDARD 20)
@@ -21,9 +22,11 @@ set(CMAKE_CXX_COMPILER g++-11)
 set(CMAKE_C_COMPILER gcc-11)
 
 # Define the executable name based on horizons
-set(EXECUTABLE_NAME cartpole_controller_${PREDICTION_HORIZON}_${CONTROL_HORIZON})
+set(EXECUTABLE_NAME main_controller_${PREDICTION_HORIZON}_${CONTROL_HORIZON})
 if(USE_DYNAMORIO)
   set(EXECUTABLE_NAME ${EXECUTABLE_NAME}_dynamorio)
+# elseif(USE_EXECUTION_DRIVEN_SCARAB)
+#   set(EXECUTABLE_NAME ${EXECUTABLE_NAME}_scarab)
 endif()
 
 message("Build parameter values:")
@@ -35,6 +38,7 @@ message("\tTNU=${TNU}")
 message("\tTNDU=${TNDU}")
 message("\tTNY=${TNY}")
 message("\tUSE_DYNAMORIO=${USE_DYNAMORIO}")
+# message("\tUSE_EXECUTION_DRIVEN_SCARAB=${USE_EXECUTION_DRIVEN_SCARAB}")
 
 # Define a function for asserting that an environmental variable is defined.
 function(assert_env_var var_name)
@@ -45,6 +49,7 @@ endfunction()
 
 # Check that expected environmental variables are defined.
 assert_env_var(RESOURCES_DIR)
+assert_env_var(SCARAB_ROOT)
 
 # Define the base directories (set this to where the controllers folder is)
 set(RESOURCES_DIR $ENV{RESOURCES_DIR})
@@ -58,11 +63,9 @@ message("    CONTROLLERS_INC=${CONTROLLERS_INC}")
 message("    CONTROLLERS_SRC=${CONTROLLERS_SRC}")
 message("CONTROLLERS_SOURCES=${CONTROLLERS_SOURCES}")
 
-set(SOURCES
-    src/cartpole_controller.cpp
-    ${CONTROLLERS_SOURCES}
-)
-# Add executable
+set(SOURCES ${CONTROLLERS_SOURCES})
+
+# Add executable.
 add_executable(${EXECUTABLE_NAME} ${SOURCES})
 
 # Include directories
@@ -75,6 +78,7 @@ target_include_directories(
   /usr/local/include/osqp
   ../libmpc/include/
   ${CONTROLLERS_INC}
+  ${RESOURCES_DIR}/include
 )
 
 target_link_directories(
@@ -99,14 +103,21 @@ include_directories($ENV{SCARAB_ROOT}/utils)
 # Preprocessor definitions
 add_definitions(
     -Wno-deprecated-enum-enum-conversion
-    -DEIGEN_STACK_ALLOCATION_LIMIT=0
+    -DEIGEN_STACK_ALLOCATION_LIMIT=0 -O3
     -DPREDICTION_HORIZON=${PREDICTION_HORIZON}
     -DCONTROL_HORIZON=${CONTROL_HORIZON}
+    -DTNX=${TNX}
+    -DTNU=${TNU}
+    -DTNDU=${TNDU}
+    -DTNY=${TNY}
 )
 
 if(USE_DYNAMORIO)
   add_definitions(-DUSE_DYNAMORIO)
 endif()
+# if(USE_EXECUTION_DRIVEN_SCARAB)
+#   add_definitions(-DUSE_EXECUTION_DRIVEN_SCARAB)
+# endif()
 
 # Link libraries
 target_link_libraries(
@@ -136,7 +147,7 @@ find_library(libsnappy snappy)
 if (libsnappy)
   message(STATUS "Found Snappy: ${libsnappy}")
 else()
-  message(FATAL_ERROR "Snappy library not found")
+  message(FATAL_ERROR "Snappy ibrary not found")
 endif ()
 
 find_library(liblz4 lz4)
