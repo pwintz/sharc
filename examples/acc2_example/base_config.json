@@ -1,0 +1,78 @@
+{
+  "==== Settings ====": "",
+  "label": "base",
+  "skip": false,
+  "Simulation Options": {
+    "in-the-loop_delay_provider": "execution-driven scarab",
+    "parallel_scarab_simulation": false, 
+    "use_fake_delays": false,
+    "max_batches": 9999999,
+    "max_batch_size": 9999999
+  },
+  "dynamics_module_name": "dynamics.dynamics",
+  "dynamics_class_name": "ACC2Dynamics",
+  "n_time_steps": 13,
+  "==== Initial Condition ====": "",
+  "x0": [20, -2, 10, 0],
+  "u0": [0, 0],
+  "only_update_control_at_sample_times": true,
+  "computation_delay_model": {
+    "fake_computation_delay_times": 0.01,
+    "computation_delay_slope": 0.001801,
+    "computation_delay_y-intercept": 0.147
+  },
+  "==== Debgugging Levels ====": {
+    "debug_program_flow_level": 1,
+    "debug_interfile_communication_level": 0,
+    "debug_optimizer_stats_level": 0,
+    "debug_dynamics_level": 0,
+    "debug_configuration_level": 0,
+    "debug_build_level": 0, 
+    "debug_shell_calls_level": 0, 
+    "debug_batching_level": 0, 
+    "debug_scarab_level": 0
+  },
+  "system_parameters": {
+    "state_dimension": 4, 
+    "input_dimension": 2,
+    "disturbance_input_dimension": 2,
+    "output_dimension": 4,
+    "sample_time": 0.5,
+    "x names": ["p", "h", "v", "T^a"],
+    "u names": ["T^a_{ref}", "T_b"], 
+    "y names": ["d", "delta v"], 
+    "v_max": 0,
+    "Ta_max": 0,
+    "Tb_max": 0,
+    "d_min": 0,
+    "max_brake_acceleration": 0,
+    "max_break_acceleration_front": 0,
+    "controller_type": "ACC2_Controller",
+    "mpc_options":{
+      "enable_mpc_warm_start": false,
+      "use_state_after_delay_prediction": false,
+      "prediction_horizon": 5,
+      "control_horizon": 2,
+      "output_cost_weight": 1,
+      "input_cost_weight": [[0.1, 0.1], [0.1, 0.1]],
+      "delta_input_cost_weight": 0.0 
+    }, 
+    "osqp_options": {
+      "abs_tolerance": 1e-3,
+      "rel_tolerance": 1e-3,
+      "dual_infeasibility_tolerance": 1e-3,
+      "primal_infeasibility_tolerance": 1e-3,
+      "maximum_iteration": 800,
+      "time_limit": 0,
+      "verbose": false
+    }
+  },  
+  "PARAMS_base_file": "PARAMS.base",
+  "PARAMS_patch_values": {
+    "chip_cycle_time": null,
+    "l1_size": null,
+    "icache_size": null,
+    "dcache_size": null
+  }
+}
+
