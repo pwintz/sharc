@@ -153,5 +153,14 @@
     "**/pref.stat.*": true,
     "**/stream.stat.*": true,
     "**/__pycache__": true
-  }
+  },
+  "python.testing.unittestArgs": [
+    "-v",
+    "-s",
+    "./tests",
+    "-p",
+    "test*.py"
+  ],
+  "python.testing.pytestEnabled": false,
+  "python.testing.unittestEnabled": true
 }

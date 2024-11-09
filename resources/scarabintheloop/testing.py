@@ -1,65 +1,14 @@
-#! /bin/env python3
-
-from typing import List
 import unittest
-import scarabintheloop
-import scarabintheloop.testing
-import os
+import numpy as np
 
 from scarabintheloop.data_types import ComputationData
+from scarabintheloop.utils import *
+from typing import List
 
-class TestConsistency(scarabintheloop.testing.TestCase):
 
-  def test_working_dir_unchanged_by_scarabintheloop(self):
-    # ---- Setup ---- 
-    example_dir = os.path.abspath('../examples/acc_example')
-    config_file = 'fake_delays.json'
-    working_dir_before = os.getcwd()
-
-    # ---- Execution ----
-    experiment_list = scarabintheloop.run(example_dir, config_file, fail_fast=True)
-
-    # ---- Assertions ---- 
-    self.assertEqual(os.getcwd(), working_dir_before)
-
-  def test_fake_delays(self):
-    # ---- Setup ---- 
-    example_dir = os.path.abspath('../examples/acc_example')
-    config_file = 'test_serial_consistency_with_fake_delays.json'
-
-    # ---- Execution ----
-    experiment_list = scarabintheloop.run(example_dir, config_file, fail_fast=True)
-
-    # ---- Assertions ---- 
-    self.assert_all_results_equal(experiment_list)
-
-  def test_serial_vs_parallel_with_fake_delays(self):
-    # ---- Setup ---- 
-    example_dir = os.path.abspath('../examples/acc_example')
-    config_file = 'test_serial_vs_parallel_with_fake_delays.json'
-    
-    # ---- Execution ----
-    experiment_list = scarabintheloop.run(example_dir, config_file, fail_fast=True)
-
-    # ---- Assertions ---- 
-    self.maxDiff = 1000
-    self.assertEqual(experiment_list.n_failed(), 0)
-    self.assert_all_results_almost_equal(experiment_list)
-
-  # @unittest.skip # SLOW test.
-  def test_serial_vs_parallel(self):
-    # ---- Setup ---- 
-    example_dir = os.path.abspath('../examples/acc_example')
-    config_file = 'test_consistency_serial_vs_parallel.json'
-    
-    # ---- Execution ----
-    experiment_list = scarabintheloop.run(example_dir, config_file, fail_fast=True)
-
-    # ---- Assertions ---- 
-    self.assertEqual(experiment_list.n_failed(), 0)
-    self.assert_all_results_almost_equal(experiment_list)
-
-  def assert_all_results_equal(self, experiment_list):
+class TestCase(unittest.TestCase):
+  
+  def assert_all_experiment_list_results_equal(self, experiment_list):
     self.assertEqual(experiment_list.n_failed(), 0)
     results = experiment_list.get_results()
     baseline_result = results[0]
@@ -73,7 +22,7 @@ class TestConsistency(scarabintheloop.testing.TestCase):
       self.assertEqual(this_data['i'], baseline_data['i'])
       self.assertEqual(this_data['pending_computations'], baseline_data['pending_computations'])
 
-  def assert_all_results_almost_equal(self, experiment_list):
+  def assert_all_experiment_list_results_almost_equal(self, experiment_list):
     results = experiment_list.get_results()
     baseline_result = results[0]
     baseline_data = baseline_result["experiment data"]
@@ -104,6 +53,7 @@ class TestConsistency(scarabintheloop.testing.TestCase):
         # self.assertAlmostEqual(this_pending_computations[k]._t_end, baseline_pending_computations[k]._t_end)
 
   def asssert_vector_list_almost_equal(self, list1, list2, places=6):
+    
     self.assertEqual(len(list1), len(list2))
     for k_time_step, _ in enumerate(list1):
         x1_k = list1[k_time_step]
@@ -111,7 +61,3 @@ class TestConsistency(scarabintheloop.testing.TestCase):
         self.assertEqual(len(x1_k), len(x2_k))
         for i, _ in enumerate(x1_k):
           self.assertAlmostEqual(x1_k[i], x1_k[i], places=places, msg=f'k={k_time_step}, i={i}')
-
-if __name__ == '__main__':
-  # Because some of the tests are very slow, we use failfast=True so that fail when the first test fails. In general, the fast tests are run first.
-  unittest.main(failfast=True)

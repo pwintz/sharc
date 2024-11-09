@@ -4,12 +4,7 @@
             "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/**",
-                "~/scarab/utils",
-                "/usr/local/include",
-                "/usr/include/eigen3",
-                "/usr/local/include/osqp",
-                "/home/dcuser/libmpc-0.4.0/include/",
-                "/home/dcuser/scarab/utils"
+                "${workspaceFolder}/resources/include"
             ],
             "defines": [],
             "cStandard": "c17",
