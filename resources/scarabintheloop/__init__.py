@@ -1337,24 +1337,24 @@ class GaussianDelayProvider(DelayProvider):
     metadata = {}
     return t_delay, metadata
 
-class LinearBasedOnIteraionsDelayProvider(DelayProvider):
-  
-  def __init__(self):
-    pass
-
-  def get_delay(self, metadata):
-    iterations = metadata["iterations"]
-    delay_model_slope       = config_data["computation_delay_model"]["computation_delay_slope"]
-    delay_model_y_intercept = config_data["computation_delay_model"]["computation_delay_y-intercept"]
-    if delay_model_slope:
-      if not delay_model_y_intercept:
-        raise ValueError(f"delay_model_slope was set but delay_model_y_intercept was not.")
-      t_delay = delay_model_slope * iterations + delay_model_y_intercept
-      print(f"t_delay = {t_delay:.8g} = {delay_model_slope:.8g} * {iterations:.8g} + {delay_model_y_intercept:.8g}")
-    else:
-      print('Using constant delay times.')
-      t_delay = config_data["computation_delay_model"]["fake_computation_delay_times"]
-    return t_delay, metadata
+# class LinearBasedOnIteraionsDelayProvider(DelayProvider):
+#   
+#   def __init__(self):
+#     pass
+# 
+#   def get_delay(self, metadata):
+#     iterations = metadata["iterations"]
+#     delay_model_slope       = config_data["computation_delay_model"]["computation_delay_slope"]
+#     delay_model_y_intercept = config_data["computation_delay_model"]["computation_delay_y-intercept"]
+#     if delay_model_slope:
+#       if not delay_model_y_intercept:
+#         raise ValueError(f"delay_model_slope was set but delay_model_y_intercept was not.")
+#       t_delay = delay_model_slope * iterations + delay_model_y_intercept
+#       print(f"t_delay = {t_delay:.8g} = {delay_model_slope:.8g} * {iterations:.8g} + {delay_model_y_intercept:.8g}")
+#     else:
+#       print('Using constant delay times.')
+#       t_delay = config_data["computation_delay_model"]["fake_computation_delay_times"]
+#     return t_delay, metadata
 
 
 

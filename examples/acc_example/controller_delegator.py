@@ -85,4 +85,4 @@ class ControllerExecutableProvider(BaseControllerExecutableProvider):
 
     run_shell_cmd(cmake_cmd)
     if not os.path.exists(executable_path):
-      raise IOError(f'The expected executable file "{executable_path}" was not build.')
+      raise IOError(f'The expected executable file "{executable_path}" was not built.')

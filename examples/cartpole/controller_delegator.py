@@ -62,7 +62,7 @@ def get_controller_executable(build_config:dict) -> str:
 
     shell(cmake_cmd)
     if not os.path.exists(executable_path):
-      raise IOError(f'The expected executable file "{executable_path}" was not build.')
+      raise IOError(f'The expected executable file "{executable_path}" was not built.')
 
   cmake_arguments_from_config = [f"-DPREDICTION_HORIZON={prediction_horizon}", 
                                  f"-DCONTROL_HORIZON={control_horizon}",

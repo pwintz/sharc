@@ -9,8 +9,7 @@ void LMPCController::setup(const nlohmann::json &json_data){
     lead_car_input              = json_data.at("system_parameters").at("lead_car_input");
     tau                         = json_data.at("system_parameters").at("tau");
     
-    bool use_state_after_delay_prediction = json_data.at("system_parameters").at("mpc_options").at("use_state_after_delay_prediction");
-
+    // bool use_state_after_delay_prediction = json_data.at("system_parameters").at("mpc_options").at("use_state_after_delay_prediction");
 
     // PRINT_WITH_FILE_LOCATION("Creating Matrices");
     createStateSpaceMatrices(json_data);

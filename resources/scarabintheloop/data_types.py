@@ -315,7 +315,7 @@ class TimeStepSeries:
     # If there is a pending computation, then it must have started before the time "t_start".
     if pending_computation and pending_computation.t_start > t_start:
       # warnings.warn(f'pending_computation.t_start = {pending_computation.t_start} != t_start = {t_start}')
-      raise ValueError(f'TimeStepSeries.append(): pending_computation.t_start = {pending_computation.t_start} != t_start = {t_start}')
+      raise ValueError(f'TimeStepSeries.append(): pending_computation.t_start = {pending_computation.t_start} must be before t_start = {t_start}')
   
     # If there is a pending computation, and the computation start time is before the start time for this interval, 
     # then the new pending computation must equal the previous pending computation.
@@ -405,7 +405,7 @@ class TimeStepSeries:
       
     # print(f'Overwriting computation times. computation_times={computation_times}, self.pending_computation={self.pending_computation}.')
     i_pending_computation = 0
-    i_computation_time = 0
+    i_computation_time    = 0
     while i_pending_computation < len(self.pending_computation):
       pc = self.pending_computation[i_pending_computation]
       delay = computation_times[i_computation_time]

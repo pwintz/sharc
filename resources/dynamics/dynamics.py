@@ -69,16 +69,13 @@ class ACC2Dynamics(Dynamics):
       self.p = self.config["system_parameters"]["output_dimension"]
 
       # System parameters
-      self.beta  = self.config["system_parameters"]["beta"]
-      self.gamma = self.config["system_parameters"]["gamma"]
-      self.M     = self.config["system_parameters"]["M"]
-      self.tau   = self.config["system_parameters"]["tau"]
-
+      self.beta  = self.config["system_parameters"]["beta"]              
+      self.gamma = self.config["system_parameters"]["gamma"]             
+      self.M     = self.config["system_parameters"]["mass"]                  # "M"
+      self.tau   = self.config["system_parameters"]["F_accel_time_constant"] # "tau"
 
     def system_derivative(self, t, x, u, w):
-        # Constants
-        
-        # Separate state components
+          # Separate state components
         p       = x[0] # Position
         h       = x[1] # Headway
         v       = x[2] # Velocity
@@ -102,7 +99,7 @@ class ACC2Dynamics(Dynamics):
         F_accel_dot = (1/self.tau) * (F_accel_ref - F_accel)
         
         # Calculate derivatives
-        dxdt = np.zeros(4)
+        dxdt = np.zeros((4,1), float)
         dxdt[0] = pdot        # Position
         dxdt[1] = hdot        # Headway
         dxdt[2] = vdot        # Velocity
