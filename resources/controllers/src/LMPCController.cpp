@@ -1,36 +1,6 @@
 // controller/LMPCController.cpp
+#include "scarabintheloop_utils.hpp"
 #include "LMPCController.h"
-
-template<typename ... Args>
-std::string string_format( const std::string& format, Args ... args )
-{
-    // From https://stackoverflow.com/a/26221725/6651650
-    int size_s = std::snprintf( nullptr, 0, format.c_str(), args ... ) + 1; // Extra space for '\0'
-    if( size_s <= 0 ){ 
-      throw std::runtime_error( "string_format(): Error during formatting." ); 
-    }
-    auto size = static_cast<size_t>( size_s );
-    std::unique_ptr<char[]> buf( new char[ size ] );
-    std::snprintf( buf.get(), size, format.c_str(), args ... );
-    return std::string( buf.get(), buf.get() + size - 1 ); // We don't want the '\0' inside
-}
-
-template<int rows, int cols>
-void loadMatrixValuesFromJson(mat<rows, cols>& mat_out, const nlohmann::json& json_data, const std::string& key) {
-    // assertHasKeys(json_data, key);
-    if (json_data.at(key).size() != rows*cols)
-    {
-      throw std::invalid_argument(string_format(
-            "loadMatrixValuesFromJson(): The number of entries (%d) in json_data[\"%s\"] does not match the expected number of entries in mat_out (%dx%d).", 
-            json_data.at(key).size(),  key.c_str(), rows, cols));
-    }
-
-    int i = 0;
-    for (auto& element : json_data.at(key)) {
-      mat_out[i] = element;
-      i++;
-    }
-}
 
 void LMPCController::setup(const nlohmann::json &json_data){
     // Load system parameters
@@ -135,8 +105,8 @@ void LMPCController::setWeights(const nlohmann::json &json_data) {
         throw std::invalid_argument("The output weight was negative.");
     }
 
-    cvec<Tny> OutputW = cvec<Tny>::Ones() * outputWeight;
-    cvec<Tnu> InputW = cvec<Tnu>::Ones() * inputWeight;
+    cvec<Tny> OutputW     = cvec<Tny>::Ones() * outputWeight;
+    cvec<Tnu> InputW      = cvec<Tnu>::Ones() * inputWeight;
     cvec<Tnu> DeltaInputW = cvec<Tnu>::Zero();
 
     lmpc.setObjectiveWeights(OutputW, InputW, DeltaInputW, {0, prediction_horizon});
@@ -145,23 +115,23 @@ void LMPCController::setWeights(const nlohmann::json &json_data) {
 void LMPCController::setConstraints(const nlohmann::json &json_data) {
     auto constraint_data = json_data.at("system_parameters").at("constraints");
     cvec<Tnx> xmin, xmax;
-    loadMatrixValuesFromJson(xmin, constraint_data, "xmin");
-    loadMatrixValuesFromJson(xmax, constraint_data, "xmax");
+    loadColumnValuesFromJson(xmin, constraint_data, "xmin");
+    loadColumnValuesFromJson(xmax, constraint_data, "xmax");
 
     cvec<Tny> ymin, ymax;
-    loadMatrixValuesFromJson(ymin, constraint_data, "ymin");
-    loadMatrixValuesFromJson(ymax, constraint_data, "ymax");
+    loadColumnValuesFromJson(ymin, constraint_data, "ymin");
+    loadColumnValuesFromJson(ymax, constraint_data, "ymax");
 
     cvec<Tnu> umin, umax;
-    loadMatrixValuesFromJson(umin, constraint_data, "umin");
-    loadMatrixValuesFromJson(umax, constraint_data, "umax");
+    loadColumnValuesFromJson(umin, constraint_data, "umin");
+    loadColumnValuesFromJson(umax, constraint_data, "umax");
 
     lmpc.setConstraints(xmin, umin, ymin, xmax, umax, ymax, {0, prediction_horizon});
 }
 
 void LMPCController::setReferences(const nlohmann::json &json_data) {
     cvec<Tny> yRef;
-    loadMatrixValuesFromJson(yRef, json_data.at("system_parameters"), "yref");
+    loadColumnValuesFromJson(yRef, json_data.at("system_parameters"), "yref");
     lmpc.setReferences(yRef, cvec<Tnu>::Zero(), cvec<Tnu>::Zero(), {0, prediction_horizon});
 }
 

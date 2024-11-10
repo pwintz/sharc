@@ -8,16 +8,10 @@
 #include <chrono>
 #include <thread>
 
+#include "debug_levels.hpp"
+#include "scarabintheloop_utils.hpp"
 #include "nlohmann/json.hpp"
 using json = nlohmann::json;
-
-template <int M = Eigen::Dynamic,
-          int N = Eigen::Dynamic>
-using mat = Eigen::Matrix<double, M, N>;
-
-// Define a column vector type.
-template <int N = Eigen::Dynamic>
-using cvec = Eigen::Matrix<double, N, 1>;
 
 #ifdef USE_DYNAMORIO
   #include "dr_api.h"
@@ -34,25 +28,13 @@ using cvec = Eigen::Matrix<double, N, 1>;
   #include "scarab_markers.h"
 #endif
 
-// Define a macro to print a value 
-#define PRINT(x) std::cout << x << std::endl;
-#define PRINT_WITH_FILE_LOCATION(x) std::cout << __FILE__  << ":" << __LINE__ << ": " << x << std::endl;
-
-int debug_program_flow_level;
-int debug_interfile_communication_level;
-int debug_optimizer_stats_level;
-int debug_dynamics_level;
-int debug_scarab_level;
+// Define the global object, which is declared in debug_levels.cpp.
+DebugLevels global_debug_levels;
 
 // fstream provides I/O to file pipes.
 #include <fstream>
- 
-Eigen::IOFormat fmt(3,    // precision
-                    0,    // flags
-                    ", ", // coefficient separator
-                    "\n", // row prefix
-                    "[",  // matrix prefix
-                    "]"); // matrix suffix.
+
+// Vector/Matrix Interfile Data Communication Format
 Eigen::IOFormat fmt_high_precision(20, // precision
                     0,    // flags
                     ", ", // coefficient separator
@@ -60,66 +42,6 @@ Eigen::IOFormat fmt_high_precision(20, // precision
                     "[",  // matrix prefix
                     "]"); // matrix suffix.
 
-inline void assertFileExists(const std::string& name) {
-  // Check that a file exists.
-  if (std::filesystem::exists(name)){
-    return;
-  } else {
-    throw std::runtime_error("The file \"" + name + "\" does not exist. The current working directory is \"" + std::filesystem::current_path().string() + "\"."); 
-  }
-}
-
-template<typename ... Args>
-std::string string_format( const std::string& format, Args ... args )
-{
-    // From https://stackoverflow.com/a/26221725/6651650
-    int size_s = std::snprintf( nullptr, 0, format.c_str(), args ... ) + 1; // Extra space for '\0'
-    if( size_s <= 0 ){ 
-      throw std::runtime_error( "string_format(): Error during formatting." ); 
-    }
-    auto size = static_cast<size_t>( size_s );
-    std::unique_ptr<char[]> buf( new char[ size ] );
-    std::snprintf( buf.get(), size, format.c_str(), args ... );
-    return std::string( buf.get(), buf.get() + size - 1 ); // We don't want the '\0' inside
-}
-
-template<int rows, int cols>
-void loadMatrixValuesFromJson(mat<rows, cols>& mat_out, nlohmann::json json_data, std::string key) {
-    
-      // Check debug level and print the appropriate message
-      if (debug_interfile_communication_level >= 2) {
-          PRINT_WITH_FILE_LOCATION("Building a matrix from key='" << key << "'...");
-          PRINT("Value: " << json_data.at(key))
-      }
-
-      if (json_data.at(key).size() != rows*cols)
-      {
-        throw std::invalid_argument(string_format(
-              "loadMatrixValuesFromJson(): The number of entries (%d) in json_data[\"%s\"] does not match the expected number of entries in mat_out (%dx%d).", 
-              json_data.at(key).size(),  key.c_str(), rows, cols));
-      }
-
-      int i = 0;
-      for (auto& element : json_data.at(key)) {
-        mat_out[i] = element;
-        i++;
-      }
-      
-      // Check debug level and print the appropriate message
-      if (debug_interfile_communication_level >= 2) {
-          PRINT_WITH_FILE_LOCATION("Built a matrix from key='" << key << "': " << mat_out);
-      }
-}
-
-template<int n>
-void printVector(std::string description, cvec<n>& vec_to_print){
-  std::cout << description << ":" << std::endl << vec_to_print.transpose().format(fmt) << std::endl;
-}
-
-template<int rows, int cols>
-void printMat(std::string description, mat<rows, cols>& mat_to_print){
-  std::cout << description << ": " << std::endl << mat_to_print.format(fmt) << std::endl;
-}
 
 template<int rows, int cols>
 std::vector<double> matToStdVector(mat<rows,cols>& matrix){
@@ -160,7 +82,7 @@ class PipeReader {
       // Read an entire line, rereading until the line ends with a '\n' character.
       
       // Check debug level and print the appropriate message
-      if (debug_interfile_communication_level >= 2) {
+      if (global_debug_levels.debug_interfile_communication_level >= 2) {
           PRINT_WITH_FILE_LOCATION("Reading '" << label << "' line from Python...");
       }
       for (int i = 0; i < 300; i++) {
@@ -168,7 +90,7 @@ class PipeReader {
         std::getline(pipe_file_stream, line_from_py);
         entire_line += line_from_py;
         if (line_from_py.length() > 0 && line_from_py.back() != '\n') {
-          if (debug_interfile_communication_level >= 2)
+          if (global_debug_levels.debug_interfile_communication_level >= 2)
           {
             PRINT_WITH_FILE_LOCATION("Line received from Python:")
             PRINT_WITH_FILE_LOCATION("\t" << label << ": " << line_from_py);
@@ -222,7 +144,7 @@ class PipeVectorReader : public PipeReader {
             x_ss >> x(j_entry) >> comma;
         }
 
-        if (debug_interfile_communication_level >= 2) {
+        if (global_debug_levels.debug_interfile_communication_level >= 2) {
           PRINT("Received " << label << "=" << x.transpose().format(fmt) << " from " << filename);
         }
     }
@@ -259,7 +181,7 @@ class PipeDoubleWriter : public PipeWriter {
 
     void write(std::string label, int i_loop, double x) 
     {
-      if (debug_interfile_communication_level >= 1) 
+      if (global_debug_levels.debug_interfile_communication_level >= 1) 
       {
         PRINT_WITH_FILE_LOCATION(label << " (send to Python): " << x);
       } 
@@ -276,12 +198,12 @@ class PipeVectorWriter : public PipeWriter {
     void write(std::string label, int i_loop, cvec<rows> x) 
     {
       auto out_str = x.transpose().format(fmt_high_precision);
-      if (debug_interfile_communication_level >= 1) 
+      if (global_debug_levels.debug_interfile_communication_level >= 1) 
       {
         PRINT_WITH_FILE_LOCATION("Send \"" << label << "\" to Python: " << out_str);
       } 
       pipe_file_stream << "Loop " << i_loop << ": " << out_str << std::endl;
-      if (debug_interfile_communication_level >= 2) 
+      if (global_debug_levels.debug_interfile_communication_level >= 2) 
       {
         PRINT_WITH_FILE_LOCATION("SENT \"" << label << "\" to Python: " << out_str);
       } 
@@ -295,7 +217,6 @@ nlohmann::json readJson(std::string file_path) {
   json_file.close();
   return json_data;
 }
-
 
 class StatusReader {
   protected:
@@ -323,14 +244,14 @@ class StatusReader {
       
       for (int i = 0; i < 100; i++){
         // Check debug level and print the appropriate message
-        if (debug_interfile_communication_level >= 2) {
+        if (global_debug_levels.debug_interfile_communication_level >= 2) {
             PRINT_WITH_FILE_LOCATION("Reading status line from Python...");
         }
         std::string line_from_py;
         file_stream.clear(); 
         file_stream.seekg(0);
         std::getline(file_stream, line_from_py);
-        if (debug_interfile_communication_level >= 2) {
+        if (global_debug_levels.debug_interfile_communication_level >= 2) {
           PRINT_WITH_FILE_LOCATION("Line received from Python:")
           PRINT_WITH_FILE_LOCATION("\tstatus: " << line_from_py);
         }
@@ -389,12 +310,7 @@ int main()
 
   int n_time_steps = json_data.at("n_time_steps");
 
-  nlohmann::json debug_config = json_data.at("==== Debgugging Levels ====");
-  debug_program_flow_level            = debug_config.at("debug_program_flow_level");
-  debug_interfile_communication_level = debug_config.at("debug_interfile_communication_level");
-  debug_optimizer_stats_level         = debug_config.at("debug_optimizer_stats_level");
-  debug_dynamics_level                = debug_config.at("debug_dynamics_level");
-  debug_scarab_level                  = debug_config.at("debug_scarab_level");
+  global_debug_levels.from_json(json_data.at("==== Debgugging Levels ===="));
 
   // Vector sizes.
   const int Tnx  =  TNX; // State dimension
@@ -413,7 +329,7 @@ int main()
   // Open the pipes to Python. Each time we open one of these streams, 
   // this process pauses until it is connected to the Python process (or another process). 
   // The order needs to match the order in the reader process.
-  if (debug_interfile_communication_level >= 1)
+  if (global_debug_levels.debug_interfile_communication_level >= 1)
   {
     PRINT_WITH_FILE_LOCATION("Starting Pipe Readers/Writers setup.");
   }
@@ -428,7 +344,7 @@ int main()
   status_reader.open();
   x_reader.open();
   delays_reader.open();
-  if (debug_interfile_communication_level >= 1) {
+  if (global_debug_levels.debug_interfile_communication_level >= 1) {
     PRINT_WITH_FILE_LOCATION("All files open.");
   }
 
@@ -445,7 +361,7 @@ int main()
   // Create a vector for storing the control input from the previous time step.
   cvec<Tnu> u;
   
-  loadMatrixValuesFromJson(u, json_data, "u0");
+  loadColumnValuesFromJson(u, json_data, "u0");
 
   // Store the delay time required to compute the previous controller value.
   double t_delay_prev = 0;
@@ -459,7 +375,7 @@ int main()
   int i = 0;
   while (true)
   {
-    if (debug_program_flow_level >= 1) {
+    if (global_debug_levels.debug_program_flow_level >= 1) {
       PRINT(std::endl << "====== Starting loop #" << i << " of " << n_time_steps << " ======");
     }
     
@@ -471,17 +387,17 @@ int main()
 
     // Begin a batch of Scarab statistics
     #if defined(USE_DYNAMORIO)
-      if (debug_scarab_level >= 1) {
+      if (global_debug_levels.debug_scarab_level >= 1) {
         PRINT_WITH_FILE_LOCATION("Starting DynamoRIO region of interest.")
       }
       dr_app_setup_and_start();
     #elif defined(USE_EXECUTION_DRIVEN_SCARAB)
-        if (debug_scarab_level >= 1) {
+        if (global_debug_levels.debug_scarab_level >= 1) {
           PRINT_WITH_FILE_LOCATION("Starting Scarab region of interest.")
         }
         scarab_roi_dump_begin(); 
     #else
-      if (debug_scarab_level >= 1) {
+      if (global_debug_levels.debug_scarab_level >= 1) {
         PRINT_WITH_FILE_LOCATION("Starting region of interest without statistics recording.")
       }
     #endif
@@ -493,7 +409,7 @@ int main()
       
       // x_predict = Ad_predictive * modelX + Bd_predictive * u + Bd_disturbance_predictive*lead_car_input;
       
-      // if (debug_dynamics_level >= 1)
+      // if (global_debug_levels.debug_dynamics_level >= 1)
       // {
       //   PRINT("====== Ad_predictive: ")
       //   PRINT(Ad_predictive)
@@ -507,7 +423,7 @@ int main()
       t_predict = 0;
     // }
     
-    if (debug_dynamics_level >= 1) 
+    if (global_debug_levels.debug_dynamics_level >= 1) 
     {
       PRINT("t_delay_prev: " << t_delay_prev);
       PRINT("t_predict: " << t_predict);
@@ -525,7 +441,7 @@ int main()
 
     #if defined(USE_DYNAMORIO)
     
-      if (debug_scarab_level >= 1) {
+      if (global_debug_levels.debug_scarab_level >= 1) {
         PRINT_WITH_FILE_LOCATION("End of DynamoRIO region of interest.")
       }
       dr_app_stop_and_cleanup();
@@ -537,7 +453,7 @@ int main()
       }
       std::vector<std::string> file_list;
       
-      if (debug_scarab_level >= 2) {
+      if (global_debug_levels.debug_scarab_level >= 2) {
         PRINT("DynamoRIO Trace Files in " << folder.string())
       }
 
@@ -553,7 +469,7 @@ int main()
             std::string new_dir_name("dynamorio_trace_" +  std::to_string(i));
             std::string new_path = std::regex_replace(full_path, dynamorio_trace_filename_regex, new_dir_name);
             
-            if (debug_scarab_level >= 2) {
+            if (global_debug_levels.debug_scarab_level >= 2) {
               PRINT("Renaming")
               PRINT("\t     " << folder_entry.path().string())
               PRINT("\t to: " << new_path)
@@ -575,12 +491,12 @@ int main()
       PRINT_WITH_FILE_LOCATION("Finished saving trace with DyanmoRIO")
     #elif defined(USE_EXECUTION_DRIVEN_SCARAB)
         // Save a batch of Scarab statistics
-          if (debug_scarab_level >= 1) {
+          if (global_debug_levels.debug_scarab_level >= 1) {
             PRINT_WITH_FILE_LOCATION("End of Scarab region of interest.")
           }
         scarab_roi_dump_end();  
     #else
-      if (debug_scarab_level >= 1) {
+      if (global_debug_levels.debug_scarab_level >= 1) {
         PRINT_WITH_FILE_LOCATION("End of region of interest. Statistics recording is disabled.")
       }
     #endif
@@ -611,7 +527,7 @@ int main()
 
     PRINT("controller mapped x = " << modelX << " to " << u)
     
-    if (debug_interfile_communication_level >= 1) 
+    if (global_debug_levels.debug_interfile_communication_level >= 1) 
     {
       PRINT_WITH_FILE_LOCATION("x (from Python): " << modelX.transpose().format(fmt));
       PRINT_WITH_FILE_LOCATION("t_delay_prev (from Python): " << t_delay_prev);
@@ -627,7 +543,7 @@ int main()
     i++;
   } 
   
-  if (debug_scarab_level >= 1) {
+  if (global_debug_levels.debug_scarab_level >= 1) {
     PRINT_WITH_FILE_LOCATION("Finished looping through " << i << " time steps. Closing files...")
   }
 
@@ -642,7 +558,7 @@ int main()
   // PRINT_WITH_FILE_LOCATION("Closing optimizer_info_out_file...")
   // optimizer_info_out_file.close();
   
-  if (debug_scarab_level >= 1) {
+  if (global_debug_levels.debug_scarab_level >= 1) {
     PRINT("Finished closing files. All done!.")
   }
 
