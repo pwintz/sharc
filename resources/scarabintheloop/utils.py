@@ -363,7 +363,7 @@ class PipeVectorWriter(PipeWriter):
 
 class PipeFloatWriter(PipeWriter):
   def write(self, x: float):
-    assert isinstance(x, float)
+    assert isinstance(x, (float, int)), f'Exepected value to be float or int. Instead it was {type(x)}.'
     x_string = f"{x:.8g}"
     assert x_string, f't_delay_str={x_string} must not be empty.'
     super().write(x_string)

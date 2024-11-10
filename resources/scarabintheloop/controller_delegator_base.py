@@ -91,4 +91,4 @@ class CmakeControllerExecutableProvider(BaseControllerExecutableProvider):
       cmake_cmd += ["--", "--quiet"]
 
     run_shell_cmd(cmake_cmd)
-    assertFileExists(executable_path, executable_path, f'The expected executable file "{executable_path}" was not build.')
+    assertFileExists(executable_path, f'The expected executable file "{executable_path}" was not built.')

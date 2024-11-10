@@ -90,7 +90,7 @@ def run(sim_dir: str, config_data: dict, evolveState, controller_interface) -> d
       u_after, pending_computation_after, _ = controller_interface.get_u(t_start, x_start, u_before, pending_computation_before)
       
       if pending_computation_before is None:
-        assert u_before == u_after, f'When there is no pending computation, u cannot change from u_before={u_before} to u_after={u_after}.'
+        assert np.array_equal(u_before, u_after), f'When there is no pending computation, u cannot change from u_before={u_before} to u_after={u_after}.'
         
       assert pending_computation_after is not None, f'pending_computation_after is None'
 
