@@ -938,7 +938,7 @@ def run_experiment_parallelized(experiment_config, params_base: list):
   ### Batches Loop ###
   # Loop through batches of time-steps until the start time-step is no longer less 
   # than the total number of time-steps desired or until the max number of batches is reached.
-  actual_time_series = plant_runner.TimeStepSeries(k0=0, t0=0.0, x0=experiment_config["x0"])
+  actual_time_series = TimeStepSeries(k0=0, t0=0.0, x0=experiment_config["x0"])
   # Create lists for recording the true values (discarding values that erroneously use  missed computations as though were not missed).
   batch_list = []
   max_batch_size = min(os.cpu_count(), max_batch_size)
