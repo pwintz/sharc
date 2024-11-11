@@ -58,13 +58,14 @@ set(CONTROLLERS_DIR ${RESOURCES_DIR}/controllers)
 set(CONTROLLERS_INC ${CONTROLLERS_DIR}/include)
 set(CONTROLLERS_SRC ${CONTROLLERS_DIR}/src)
 # Add source files dynamically
-file(GLOB CONTROLLERS_SOURCES "${CONTROLLERS_SRC}/*.cpp")
 message("    CONTROLLERS_DIR=${CONTROLLERS_DIR}")
 message("    CONTROLLERS_INC=${CONTROLLERS_INC}")
 message("    CONTROLLERS_SRC=${CONTROLLERS_SRC}")
 message("CONTROLLERS_SOURCES=${CONTROLLERS_SOURCES}")
 
-set(SOURCES ${CONTROLLERS_SOURCES})
+set(SOURCES ${CONTROLLERS_SRC}/ACC2_Controller.cpp
+            ${CONTROLLERS_SRC}/controller.cpp
+            ${CONTROLLERS_SRC}/main_controller.cpp)
 
 # Add executable.
 add_executable(${EXECUTABLE_NAME} ${SOURCES})
