@@ -40,7 +40,7 @@
     "sample_time": 0.1,
     "x names": ["p", "h", "v", "T^a"],
     "u names": ["T^a_{ref}", "T_b"], 
-    "y names": ["d", "delta v"], 
+    "y names": ["v"], 
     "mass":  2044,
     "d_min": 6.0,
     "v_des": 15.0,
