@@ -27,7 +27,7 @@ class ControllerExecutableProvider(BaseControllerExecutableProvider):
     control_horizon         = build_config["system_parameters"]["mpc_options"]["control_horizon"]
     state_dimension         = build_config["system_parameters"]["state_dimension"]
     input_dimension         = build_config["system_parameters"]["input_dimension"]
-    disturbance_input_dimension = build_config["system_parameters"]["disturbance_input_dimension"]
+    exogenous_input_dimension = build_config["system_parameters"]["exogenous_input_dimension"]
     output_dimension        = build_config["system_parameters"]["output_dimension"]
 
     # Construct the base executable name, given the system and simulation options.
@@ -44,7 +44,7 @@ class ControllerExecutableProvider(BaseControllerExecutableProvider):
                                   f"-DCONTROL_HORIZON={control_horizon}",
                                   f"-DTNX={state_dimension}",
                                   f"-DTNU={input_dimension}",
-                                  f"-DTNDU={disturbance_input_dimension}",
+                                  f"-DTNDU={exogenous_input_dimension}",
                                   f"-DTNY={output_dimension}",
                                   ]
 
