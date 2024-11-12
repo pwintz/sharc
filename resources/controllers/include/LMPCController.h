@@ -24,7 +24,13 @@ private:
     double lead_car_input;
     double tau;
     bool use_state_after_delay_prediction;
-    
+
+    double max_brake_acceleration;       // Braking acceleration magnitude lower bound.
+    double max_brake_acceleration_front; // Braking acceleration magnitude lower bound for front vehicle.
+
+    // Create an array to store a series of predictions for w.
+    Eigen::Matrix<double, TNDU, PREDICTION_HORIZON> w_series;
+
     // MPC Computation Result
     Result<Tnu> lmpc_step_result;
 
@@ -43,11 +49,11 @@ public:
     }
 
     void setup(const nlohmann::json &json_data) override;
-    void calculateControl(const xVec &x, const wVec &w) override;
+    void calculateControl(int k, double t, const xVec &x, const wVec &w) override;
     // Result<Tnu> getLastLmpcStepResult() {
     //   return lmpc_step_result;
     // }
-    // Eigen::VectorXd getLastControl() {
+    // Eigen::VectorXd getLastestControl() {
     //   return lmpc_step_result.cmd;
     // }
     // Result<Tnu> getLastLmpcIterations() {

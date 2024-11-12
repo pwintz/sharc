@@ -68,7 +68,7 @@ void NLMPCController::setup(const nlohmann::json &json_data){
                                     return (x * state_cost_weights.asDiagonal()).array().square().sum() + u.array().square().sum() * input_cost_weight; });
 }
 
-void NLMPCController::calculateControl(const xVec &x, const wVec &w){
+void NLMPCController::calculateControl(int k, double t, const xVec &x, const wVec &w){
     state = x;
     // Call NLMPC control calculation here
     control = nlmpc.step(state, control).cmd;

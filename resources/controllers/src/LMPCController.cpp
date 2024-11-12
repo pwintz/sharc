@@ -1,5 +1,6 @@
 // controller/LMPCController.cpp
 #include "scarabintheloop_utils.hpp"
+#include "debug_levels.hpp"
 #include "LMPCController.h"
 
 void LMPCController::setup(const nlohmann::json &json_data){
@@ -21,22 +22,40 @@ void LMPCController::setup(const nlohmann::json &json_data){
     setReferences(json_data);
 }
 
-void LMPCController::calculateControl(const xVec &x, const wVec &w){
+void LMPCController::calculateControl(int k, double t, const xVec &x, const wVec &w){
     state = x;
 
     // Call LMPC control calculation here
     lmpc_step_result = lmpc.step(state, control);
     control = lmpc_step_result.cmd;
-    // if (debug_optimizer_stats_level >= 1) 
-    // {
-    //   PRINT_WITH_FILE_LOCATION("Optimizer Info")
-    //   PRINT_WITH_FILE_LOCATION("         Return code: " << lmpc_step_result.retcode)
-    //   PRINT_WITH_FILE_LOCATION("       Result status: " << lmpc_step_result.status)
-    //   PRINT_WITH_FILE_LOCATION("Number of iterations: " << lmpc_step_result.num_iterations)
-    //   PRINT_WITH_FILE_LOCATION("                Cost: " << lmpc_step_result.cost)
-    //   PRINT_WITH_FILE_LOCATION("    Constraint error: " << lmpc_step_result.primal_residual)
-    //   PRINT_WITH_FILE_LOCATION("          Dual error: " << lmpc_step_result.dual_residual)
-    // }
+
+    latest_metadata.clear();
+    latest_metadata["iterations"]      = lmpc_step_result.num_iterations;
+    latest_metadata["retcode"]         = lmpc_step_result.retcode;
+    latest_metadata["cost"]            = lmpc_step_result.cost;
+    latest_metadata["constraint_error"] = lmpc_step_result.primal_residual;
+    latest_metadata["dual_residual"]   = lmpc_step_result.dual_residual;
+    latest_metadata["status"]          = mpc::SolutionStats::resultStatusToString(lmpc_step_result.status);
+
+    mpc::OptSequence optimal_sequence = lmpc.getOptimalSequence();
+    auto opt_state_seq  = optimal_sequence.state;
+    auto opt_output_seq = optimal_sequence.output ;
+    auto opt_input_seq  = optimal_sequence.input;
+
+    if (global_debug_levels.debug_optimizer_stats_level >= 1) 
+    {
+      PRINT_WITH_FILE_LOCATION("Optimizer Info")
+      PRINT("         Return code: " << lmpc_step_result.retcode)
+      PRINT("       Result status: " << lmpc_step_result.status)
+      PRINT("Number of iterations: " << lmpc_step_result.num_iterations)
+      PRINT("                Cost: " << lmpc_step_result.cost)
+      PRINT("    Constraint error: " << lmpc_step_result.primal_residual)
+      PRINT("          Dual error: " << lmpc_step_result.dual_residual)
+      PRINT("  Optimal x Sequence:\n" << opt_state_seq)
+      PRINT("  Optimal u Sequence:\n" << opt_input_seq)
+      PRINT("  Optimal y Sequence:\n" << opt_output_seq)
+      
+    }
 }
 
 void LMPCController::createStateSpaceMatrices(const nlohmann::json &json_data) {

@@ -91,7 +91,20 @@
     "*.ipp": "cpp",
     "*.tlh": "cpp",
     "*.in": "c",
-    "kroneckerproduct": "cpp"
+    "kroneckerproduct": "cpp",
+    "iterativelinearsolvers": "cpp",
+    "orderingmethods": "cpp",
+    "cassert": "cpp",
+    "ccomplex": "cpp",
+    "cfloat": "cpp",
+    "ciso646": "cpp",
+    "climits": "cpp",
+    "filesystem": "cpp",
+    "ios": "cpp",
+    "locale": "cpp",
+    "queue": "cpp",
+    "stack": "cpp",
+    "version": "cpp"
   },
   "files.autoSave": "onFocusChange",
   "terminal.integrated.profiles.windows": {

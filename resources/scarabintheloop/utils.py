@@ -3,6 +3,7 @@ This package provides several utility functions that are used by Scarab-in-the-l
 """
 
 import io
+import math
 import os
 import sys
 import re
@@ -228,7 +229,7 @@ class PipeReader:
     assert self.is_open, 'File must be open.'
     self._wait_for_pipe_to_be_nonempty()
     input_line = self._waitForLineFromFile()
-    input_line = PipeReader.checkAndStripInputLoopNumber(input_line)
+    # input_line = PipeReader.checkAndStripInputLoopNumber(input_line)
     return input_line
 
   def __repr__(self):
@@ -311,6 +312,16 @@ class PipeVectorReader(PipeReader):
 
     return v
 
+class PipeJsonReader(PipeReader):
+  
+  def __init__(self, filename: str):
+    super().__init__(filename)
+
+  def read(self) -> dict:
+    line = super().read()
+    json_dict = json.loads(line)
+    return json_dict
+
 ##########################
 #####  PIPE WRITER  ######
 ##########################
@@ -338,9 +349,13 @@ class PipeWriter:
     self.file = open(self.filename, 'w', buffering=1)
 
   def close(self):
+    if self.file is None:
+      if debug_levels.debug_interfile_communication_level >= 1:
+        print(f'The file "{self.filename}" is already closed.')
+      return
     if debug_levels.debug_interfile_communication_level >= 1:
       print(f'Closing {self}')
-    assert self.file is not None, "File must be open to close it."
+    # assert self.file is not None, "File must be open to close it."
     try:
       self.file.write("END OF PIPE\n")
       self.file.close()
@@ -562,7 +577,8 @@ def run_shell_cmd(cmd: Union[str, List[str]], log=None, working_dir=None):
       log.write(err_msg)
       log.flush()
       log.seek(0)
-      print(f"({log.name}) ".join([''] + log.readlines()))
+      print(f"({os.path.basename(log.name)}) ".join([''] + log.readlines()))
+      print(f"End of {log.name})")
     print(err_msg)
     raise Exception(err_msg) from e
     
@@ -635,6 +651,23 @@ def indented_print(func):
         return result
     return wrapper
 
+def seconds_to_duration_string(seconds: float) -> str:
+  # Calculate hours, minutes, and seconds
+  hours = int(seconds // 3600)
+  mins = int((seconds % 3600) // 60)
+  sec = seconds % 60  # Keep the remainder as float for fractional seconds
+
+  # Build the formatted time string
+  time_str = ""
+  if hours > 0:
+      time_str += f'{hours}h '
+  if hours > 0 or mins > 0:
+      time_str += f'{mins}m '
+  
+  # Format seconds to two decimal places if it's a float, or as integer if it's whole
+  time_str += f'{sec:.2f}s' if sec % 1 else f'{int(sec)}s'
+
+  return time_str.strip()
 def assertLength(array, length, label=None):
   if len(array) != length:
     if None:

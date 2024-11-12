@@ -194,8 +194,13 @@ class PipeWriter {
     }
 
     void close() {
-      PRINT_WITH_FILE_LOCATION("Closing " << filename << "...")
+      if (global_debug_levels.debug_interfile_communication_level >= 1) {
+        PRINT("Closing " << filename << "...")
+      }
       pipe_file_stream.close();
+      if (global_debug_levels.debug_interfile_communication_level >= 1) {
+        PRINT(" Closed " << filename)
+      }
     }
 };
 
@@ -210,7 +215,8 @@ class PipeDoubleWriter : public PipeWriter {
       {
         PRINT_WITH_FILE_LOCATION(label << " (send to Python): " << x);
       } 
-      pipe_file_stream << "Loop " << i_loop << ": " << x << std::endl;
+      // pipe_file_stream << "Loop " << i_loop << ": " << x << std::endl;
+      pipe_file_stream << x << std::endl;
     }
 };
 
@@ -227,13 +233,35 @@ class PipeVectorWriter : public PipeWriter {
       {
         PRINT("Send \"" << label << "\" to Python: " << out_str);
       } 
-      pipe_file_stream << "Loop " << i_loop << ": " << out_str << std::endl;
+      // pipe_file_stream << "Loop " << i_loop << ": " << out_str << std::endl;
+      pipe_file_stream << out_str << std::endl;
       if (global_debug_levels.debug_interfile_communication_level >= 2) 
       {
-        PRINT("SENT \"" << label << "\" to Python: " << out_str);
+        PRINT("Sent \"" << label << "\" to Python: " << out_str);
       } 
     }
 };
+
+class PipeJsonWriter : public PipeWriter {
+  public:
+    // Constructor (call parent constructor).
+    PipeJsonWriter (std::string filename) : PipeWriter (filename) {}
+
+    void write(const nlohmann::json &json) 
+    {
+      if (global_debug_levels.debug_interfile_communication_level >= 1) 
+      {
+        PRINT("Send JSON to Python:\n" << json);
+      } 
+      pipe_file_stream << json << std::endl;
+      if (global_debug_levels.debug_interfile_communication_level >= 2) 
+      {
+        PRINT("Sent JSON to Python:\n" << json);
+      } 
+    }
+};
+
+
 
 nlohmann::json readJson(std::string file_path) {
   assertFileExists(file_path);
@@ -296,7 +324,6 @@ class StatusReader {
 };
 
 int main()
-// int main(int argc, char *argv[])
 {
   PRINT("==== Start of " << __FILE__ << ".main() ====")
   #ifdef USE_DYNAMORIO
@@ -321,9 +348,8 @@ int main()
 
   // Writers
   PipeVectorWriter            u_writer(sim_dir + "u_c++_to_py");
-  PipeVectorWriter x_prediction_writer(sim_dir + "x_predict_c++_to_py");
-  PipeDoubleWriter    t_predict_writer(sim_dir + "t_predict_c++_to_py");
-  PipeDoubleWriter   iterations_writer(sim_dir + "iterations_c++_to_py");
+  PipeJsonWriter       metadata_writer(sim_dir + "metadata_c++_to_py");
+
   // Readers
   StatusReader     status_reader(sim_dir + "status_py_to_c++");
   PipeIntReader         k_reader(sim_dir + "k_py_to_c++");
@@ -331,7 +357,6 @@ int main()
   PipeVectorReader      x_reader(sim_dir + "x_py_to_c++");
   PipeVectorReader      w_reader(sim_dir + "w_py_to_c++");
   PipeDoubleReader delays_reader(sim_dir + "t_delay_py_to_c++");
-  std::string optimizer_info_out_filename = sim_dir + "optimizer_info.csv";
 
   // Open and read JSON 
   nlohmann::json json_data = readJson(sim_dir + "config.json");
@@ -349,9 +374,6 @@ int main()
   std::string controller_type = json_data.at("system_parameters").at("controller_type");
   Controller* controller = Controller::createController(controller_type, json_data);
 
-  std::ofstream optimizer_info_out_file(optimizer_info_out_filename);
-  optimizer_info_out_file << "num_iterations,cost,primal_residual,dual_residual" << std::endl;
-
   // I/O Setup
 
   // Open the pipes to Python. Each time we open one of these streams, 
@@ -364,9 +386,7 @@ int main()
 
   // Open out files.
   u_writer.open();
-  x_prediction_writer.open();
-  t_predict_writer.open();
-  iterations_writer.open();
+  metadata_writer.open();
 
   // In files.
   status_reader.open();
@@ -397,6 +417,7 @@ int main()
   cvec<Tnu> u;
 
   cvec<Tndu> w;
+  nlohmann::json metadata_json;
   
   loadColumnValuesFromJson(u, json_data, "u0");
 
@@ -475,9 +496,11 @@ int main()
 
     // Update internal state and calculate control
     // controller->update_internal_state(x_predict);
-    controller->calculateControl(x_predict, w);
-    u = controller->getLastControl();
-    // metadata = controller->getLastMetadata()
+    
+    controller->calculateControl(k, t, x_predict, w);
+    u = controller->getLastestControl();
+    metadata_json = controller->getLastestMetadata();
+    PRINT_WITH_FILE_LOCATION("Metadata: " << metadata_json)
 
     #if defined(USE_DYNAMORIO)
     
@@ -541,27 +564,13 @@ int main()
       }
     #endif
 
-    // optimizer_info_out_file << res.num_iterations << "," << res.cost << "," << res.primal_residual << "," << res.dual_residual << std::endl;  
-
-    // if ( res.num_iterations == 0 )
-    // {
-    //   throw std::range_error( "Number of iterations was zero." );
-    // }
-    // if ( res.cost < 0)
-    // {
-    //   PRINT_WITH_FILE_LOCATION("The cost was " << res.cost)
-    //   throw std::range_error( "The cost was negative." );
-    // }
-
     // OptSequence has three properties: state, input, and output. 
     // Each predicted time step is stored in one row.
     // There are <prediction_horizon> many rows. 
     // OptSequence optseq = lmpc.getOptimalSequence();
 
     u_writer.write(                      "u", i, u);
-    x_prediction_writer.write("x prediction", i, x_predict);
-    t_predict_writer.write(   "t prediction", i, t_predict);
-    iterations_writer.write(   "iterations ", i, -1); // TODO: Fix iterations. Currently sending "-1" because we aren't reading the iterations.
+    metadata_writer.write(metadata_json);
 
     delays_reader.read("t_delay", t_delay_prev);
 
@@ -589,9 +598,7 @@ int main()
 
   // Close writers.
   u_writer.close();
-  x_prediction_writer.close();
-  t_predict_writer.close();
-  iterations_writer.close();
+  metadata_writer.close();
 
   // Close readers.
   status_reader.close();
@@ -601,9 +608,6 @@ int main()
   w_reader.close();
   delays_reader.close();
 
-  // PRINT_WITH_FILE_LOCATION("Closing optimizer_info_out_file...")
-  // optimizer_info_out_file.close();
-  
   if (global_debug_levels.debug_scarab_level >= 1) {
     PRINT("Finished closing files. All done!.")
   }
