@@ -206,8 +206,13 @@ class PipeReader:
     assertFileExists(self.filename)
     assert self.is_closed, 'File must not already be open.'
     if debug_levels.debug_interfile_communication_level >= 1:
-      print(f"About to open reader for {self.filename}. Waiting for it to available...")
+      print(f"About to open a Python reader for {os.path.basename(self.filename)}...")
+
+    # Open file as read-only.
     self.file = open(self.filename, 'r', buffering=1)
+
+    if debug_levels.debug_interfile_communication_level >= 1:
+      print(f"                ...the reader for {os.path.basename(self.filename)} is now open.")
 
   def close(self):
     if self.is_closed:
@@ -221,7 +226,7 @@ class PipeReader:
 
   def read(self):
     assert self.is_open, 'File must be open.'
-    self._wait_for_pipe_content()
+    self._wait_for_pipe_to_be_nonempty()
     input_line = self._waitForLineFromFile()
     input_line = PipeReader.checkAndStripInputLoopNumber(input_line)
     return input_line
@@ -243,7 +248,7 @@ class PipeReader:
       print(f'Received input_line from {os.path.basename(self.filename)}: {repr(input_line)}.')
     return input_line
 
-  def _wait_for_pipe_content(self):
+  def _wait_for_pipe_to_be_nonempty(self):
 
     # Wait for the pipe.
     stat_info = os.stat(self.filename)
@@ -356,17 +361,24 @@ class PipeWriter:
 
 class PipeVectorWriter(PipeWriter):
 
-  def write(self, x: np.ndarray):
-    assert isinstance(x, np.ndarray)
-    x_string = nump_vec_to_csv_string(x)
-    super().write(x_string)
+  def write(self, vec: np.ndarray):
+    assert isinstance(vec, np.ndarray), f'Expected vec to have type np.ndarray. Instead it was {type(vec)}.'
+    vec_string = nump_vec_to_csv_string(vec)
+    super().write(vec_string)
 
 class PipeFloatWriter(PipeWriter):
-  def write(self, x: float):
-    assert isinstance(x, (float, int)), f'Exepected value to be float or int. Instead it was {type(x)}.'
-    x_string = f"{x:.8g}"
-    assert x_string, f't_delay_str={x_string} must not be empty.'
-    super().write(x_string)
+  def write(self, val: float):
+    assert isinstance(val, (float, int)), f'Expected value to be a float or int. Instead it was {type(val)}.'
+    val_string = f"{val:.8g}"
+    assert val_string, f'val_string={val_string} must not be empty.'
+    super().write(val_string)
+
+class PipeIntWriter(PipeWriter):
+  def write(self, val: int):
+    assert isinstance(val, int), f'Expected value to be an int. Instead it was {type(val)}.'
+    val_string = f"{val:d}"
+    assert val_string, f'val_string={val_string} must not be empty.'
+    super().write(val_string)
 
 #############################
 #####  NUMPY FUNCTIONS ######

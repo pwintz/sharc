@@ -16,10 +16,6 @@ using namespace mpc;
 
 class LMPCController : public Controller {
 private:
-    constexpr static int Tnx  = TNX;
-    constexpr static int Tnu  = TNU;
-    constexpr static int Tndu = TNDU;
-    constexpr static int Tny  = TNY;
     constexpr static int prediction_horizon = PREDICTION_HORIZON;
     constexpr static int control_horizon    = CONTROL_HORIZON;
 
@@ -47,8 +43,7 @@ public:
     }
 
     void setup(const nlohmann::json &json_data) override;
-    void update_internal_state(const Eigen::VectorXd &x) override;
-    void calculateControl() override;
+    void calculateControl(const xVec &x, const wVec &w) override;
     // Result<Tnu> getLastLmpcStepResult() {
     //   return lmpc_step_result;
     // }

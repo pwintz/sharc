@@ -1,7 +1,12 @@
+import math
 import numpy as np
-from dynamics_base import Dynamics
+from scarabintheloop.dynamics_base import OdeDynamics
 
-class LTIDynamics(Dynamics):
+class LTIDynamics(OdeDynamics):
+    
+    def __init__(self, config):
+       super().__init__(config)
+
     def setup_system(self):
         self.A      = self.config["system_parameters"]["A"]
         self.B      = self.config["system_parameters"]["B"]
@@ -17,9 +22,12 @@ class LTIDynamics(Dynamics):
 
 
     def system_derivative(self, t, x, u, w):
+        """
+        Implement the abstract system_derivative method from OdeDynamics.
+        """
         try:
           dxdt = self.A @ x + self.B @ u
-          if w: # If a disturbance is given, then add its effect.
+          if w is not None: # If a disturbance is given, then add its effect.
             dxdt += self.B_dist @ w
         except Exception as err:
           raise ValueError(f'Failed to calculate dx/dt with the following data: \nA: {self.A}\nx: {x}\nB: {self.B}\nu: {u}\nB_dist: {self.B_dist}\nw: {w}') from err
@@ -28,6 +36,10 @@ class LTIDynamics(Dynamics):
         return dxdt
     
 class ACCDynamics(LTIDynamics):
+    
+    def __init__(self, config):
+       super().__init__(config)
+
     # Similar to LTI system but matrices are dependent on tau
     def setup_system(self):
         tau = self.config["system_parameters"]["tau"]
@@ -62,7 +74,10 @@ class ACCDynamics(LTIDynamics):
         self.m = self.config["system_parameters"]["input_dimension"]
         self.p = self.config["system_parameters"]["output_dimension"]
 
-class ACC2Dynamics(Dynamics):
+class ACC2Dynamics(OdeDynamics):
+    def __init__(self, config):
+       super().__init__(config)
+
     def setup_system(self):
       self.n = self.config["system_parameters"]["state_dimension"]
       self.m = self.config["system_parameters"]["input_dimension"]
@@ -75,7 +90,14 @@ class ACC2Dynamics(Dynamics):
       self.tau   = self.config["system_parameters"]["F_accel_time_constant"] # "tau"
 
     def system_derivative(self, t, x, u, w):
-          # Separate state components
+        """
+        Implement the abstract system_derivative method from OdeDynamics.
+        """
+        assert isinstance(x, np.ndarray), f'x must be an Numpy array. Instead, it was {type(x)}.'
+        assert isinstance(u, np.ndarray), f'u must be an Numpy array. Instead, it was {type(u)}.'
+        assert isinstance(w, np.ndarray), f'w must be an Numpy array. Instead, it was {type(w)}.'
+
+        # Separate state components
         p       = x[0] # Position
         h       = x[1] # Headway
         v       = x[2] # Velocity
@@ -107,8 +129,16 @@ class ACC2Dynamics(Dynamics):
         
         assert dxdt.shape == x.shape, (dxdt.shape, x.shape)
         return dxdt
+    
+    def get_exogenous_input(self, t):
+        front_velocity = 16 + 2*math.sin(t) + 1*math.sin(3.23*t) + 0.4*math.sin(12.1*t)
+        return np.array([[front_velocity], [1.0]])
 
-class CartPoleDynamics(Dynamics):
+class CartPoleDynamics(OdeDynamics):
+    
+    def __init__(self, config):
+       super().__init__(config)
+
     def setup_system(self):
         # System parameters
         self.M = self.config["system_parameters"]["M"]
@@ -124,6 +154,9 @@ class CartPoleDynamics(Dynamics):
         self.p = self.config["system_parameters"]["output_dimension"]
 
     def system_derivative(self, t, x, u, w):
+        """
+        Implement the abstract system_derivative method from OdeDynamics.
+        """
         # Constants
         M_t = self.M + self.m
         J_t = self.J + self.m * self.l**2
@@ -152,17 +185,20 @@ class CartPoleDynamics(Dynamics):
         assert dxdt.shape == x.shape, (dxdt.shape, x.shape)
         return dxdt
     
-class CustomDynamics(Dynamics):
-    def setup_system(self):
-        # System parameters, feel free to use self.config to get the parameters you need
-        # from the config files as below
-        # self.M = self.config["system_parameters"]["M"]
-        return
-    
-    def system_derivative(self, t, x, u, w):
-        # Calculate and return the derivative of the state as a function of x,t,u,w
-        # make sure it has the same shape as x before returning
-        
-        # assert dxdt.shape == x.shape, (dxdt.shape, x.shape)
-        # return dxdt
-        return
+# class CustomDynamics(OdeDynamics):
+#     def setup_system(self):
+#         # System parameters, feel free to use self.config to get the parameters you need
+#         # from the config files as below
+#         # self.M = self.config["system_parameters"]["M"]
+#         return
+#     
+#     def system_derivative(self, t, x, u, w):
+#         """
+#         Implement the abstract system_derivative method from OdeDynamics.
+#         """
+#         # Calculate and return the derivative of the state as a function of x,t,u,w
+#         # make sure it has the same shape as x before returning
+#         
+#         # assert dxdt.shape == x.shape, (dxdt.shape, x.shape)
+#         # return dxdt
+#         return
