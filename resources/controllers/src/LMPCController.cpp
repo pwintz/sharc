@@ -21,11 +21,9 @@ void LMPCController::setup(const nlohmann::json &json_data){
     setReferences(json_data);
 }
 
-void LMPCController::update_internal_state(const Eigen::VectorXd &x){
+void LMPCController::calculateControl(const xVec &x, const wVec &w){
     state = x;
-}
 
-void LMPCController::calculateControl(){
     // Call LMPC control calculation here
     lmpc_step_result = lmpc.step(state, control);
     control = lmpc_step_result.cmd;
@@ -104,24 +102,24 @@ void LMPCController::setWeights(const nlohmann::json &json_data) {
         throw std::invalid_argument("The output weight was negative.");
     }
 
-    cvec<Tny> OutputW     = cvec<Tny>::Ones() * outputWeight;
-    cvec<Tnu> InputW      = cvec<Tnu>::Ones() * inputWeight;
-    cvec<Tnu> DeltaInputW = cvec<Tnu>::Zero();
+    yVec OutputW     = yVec::Ones() * outputWeight;
+    uVec InputW      = uVec::Ones() * inputWeight;
+    uVec DeltaInputW = uVec::Zero();
 
     lmpc.setObjectiveWeights(OutputW, InputW, DeltaInputW, {0, prediction_horizon});
 }
 
 void LMPCController::setConstraints(const nlohmann::json &json_data) {
     auto constraint_data = json_data.at("system_parameters").at("constraints");
-    cvec<Tnx> xmin, xmax;
+    xVec xmin, xmax;
     loadColumnValuesFromJson(xmin, constraint_data, "xmin");
     loadColumnValuesFromJson(xmax, constraint_data, "xmax");
 
-    cvec<Tny> ymin, ymax;
+    yVec ymin, ymax;
     loadColumnValuesFromJson(ymin, constraint_data, "ymin");
     loadColumnValuesFromJson(ymax, constraint_data, "ymax");
 
-    cvec<Tnu> umin, umax;
+    uVec umin, umax;
     loadColumnValuesFromJson(umin, constraint_data, "umin");
     loadColumnValuesFromJson(umax, constraint_data, "umax");
 
@@ -129,9 +127,9 @@ void LMPCController::setConstraints(const nlohmann::json &json_data) {
 }
 
 void LMPCController::setReferences(const nlohmann::json &json_data) {
-    cvec<Tny> yRef;
+    yVec yRef;
     loadColumnValuesFromJson(yRef, json_data.at("system_parameters"), "yref");
-    lmpc.setReferences(yRef, cvec<Tnu>::Zero(), cvec<Tnu>::Zero(), {0, prediction_horizon});
+    lmpc.setReferences(yRef, uVec::Zero(), uVec::Zero(), {0, prediction_horizon});
 }
 
 // Register the controller

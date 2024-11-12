@@ -20,6 +20,7 @@ from contextlib import redirect_stdout
 from scarabintheloop.utils import *
 import scarabintheloop.debug_levels as debug_levels
 from scarabintheloop.data_types import *
+from scarabintheloop.controller_interface import DelayProvider, ControllerInterface, PipesControllerInterface
 from abc import abstractmethod, ABC
 from dataclasses import dataclass
 
@@ -960,10 +961,10 @@ def run_experiment_parallelized(experiment_config, params_base: list):
     actual_time_series += batch.valid_simulation_data
     pending_computation = batch.batch_init.pending_computation
     if pending_computation and pending_computation.t_end < batch.batch_init.t0:
-      assert batch.valid_simulation_data.u[0] == pending_computation.u, \
+      assert np.array_equal(list_to_column_vec(batch.valid_simulation_data.u[0]), pending_computation.u), \
         f'batch.valid_simulation_data.u[0] = {batch.valid_simulation_data.u[0]} must equal pending_computation.u={pending_computation.u}'
     else:
-      assert batch.valid_simulation_data.u[0] == batch.batch_init.u0, \
+      assert np.array_equal(list_to_column_vec(batch.valid_simulation_data.u[0]), batch.batch_init.u0), \
       f'batch.valid_simulation_data.u[0] = {batch.valid_simulation_data.u[0]} must equal batch_init.u0={batch.batch_init.u0}'
 
     experiment_data = {"batches": batch_list,
@@ -1031,12 +1032,12 @@ def run_experiment_parallelized(experiment_config, params_base: list):
 
 def getSimulationExecutor(sim_dir, 
                           sim_config, 
-                          controller_interface,# : ControllerInterface, 
+                          controller_interface: ControllerInterface, 
                           fake_delays=None):
   """ 
   This function implements the "Factory" design pattern, where it returns objects of various classes depending on the imputs.
   """
-  assert controller_interface is not None
+  assert isinstance(controller_interface, ControllerInterface)
   use_parallel_scarab_simulation = sim_config["Simulation Options"]["parallel_scarab_simulation"]    
   if use_parallel_scarab_simulation:
     print("Using ParallelSimulationExecutor.")
@@ -1061,13 +1062,12 @@ def getSimulationExecutor(sim_dir,
       scarab_runner = scarabizor.ExecutionDrivenScarabRunner(sim_dir=sim_dir)
     executor = SerialSimulationExecutor(sim_dir, sim_config, controller_interface, scarab_runner)
 
-
     return executor
 
 # TODO: Maybe rename this as "delegator" or "coordinator".
-class SimulationExecutor:
+class SimulationExecutor(ABC):
   
-  def __init__(self, sim_dir, sim_config, controller_interface):
+  def __init__(self, sim_dir, sim_config, controller_interface: ControllerInterface):
     global controller_executable_provider
     self.sim_dir = sim_dir
     self.sim_config = sim_config
@@ -1079,17 +1079,23 @@ class SimulationExecutor:
     self.controller_log = controller_log
     self.plant_log = plant_log
 
+  @abstractmethod
   def run_controller(self):
-    raise RuntimeError("This function must be implemented by a subclass")
+    pass
 
   def _run_controller(self):
     """
     Run the controller via the run_controller() function defined in subclasses, but include some setup and tear-down beforehand.
     """
     # Create the executable.
-    with redirect_stdout(self.controller_log):
-      self.controller_executable = controller_executable_provider.get_controller_executable(self.sim_config)
-    assertFileExists(self.controller_executable)
+    try:
+      with redirect_stdout(self.controller_log):
+        self.controller_executable = controller_executable_provider.get_controller_executable(self.sim_config)
+      assertFileExists(self.controller_executable)
+      print("The controller_executable is ", self.controller_executable)
+    except Exception as err:
+      print(f'Failed to run command with {type(self.scarab_runner)}: "{self.controller_executable}".\n{type(err)}: {err}\n{traceback.format_exc()}')
+      raise err
 
     print(f'---- Starting controller for {self.sim_config["simulation_label"]} ----\n'\
           f'      Executable: {self.controller_executable} \n'\
@@ -1105,31 +1111,32 @@ class SimulationExecutor:
 
   def _run_plant(self):
     """ 
-    Handle setup and exception handling for running the run_plant() functions implemented in subclasses
+    Handle setup and exception handling for running the run_plant() functions implemented in subclasses.
     """
+    if debug_levels.debug_program_flow_level >= 2:
+      print('Start of SimulationExecutor._run_plant() (Plant Dynamics task).')
 
     # Get a function that defines the plant dynamics.
     with redirect_stdout(self.plant_log):
-        # Add dynamics directory to the path
-        sys.path.append(os.environ['DYNAMICS_DIR'])
-        dynamics_class = getattr(importlib.import_module(self.sim_config["dynamics_module_name"]),  self.sim_config["dynamics_class_name"])
-        dynamics_instance = dynamics_class(self.sim_config)
-        self.evolveState_fnc = dynamics_instance.getDynamicsFunction()
+      # Add dynamics directory to the path
+      sys.path.append(os.environ['DYNAMICS_DIR'])
+      dynamics_class = getattr(importlib.import_module(self.sim_config["dynamics_module_name"]),  self.sim_config["dynamics_class_name"])
+      self.dynamics = dynamics_class(self.sim_config)
 
     sim_label = self.sim_config["simulation_label"]
-    print(f'---- Starting plant dynamics for {sim_label} ----\n' \
-          f'\t↳ Simulation dir: {self.sim_dir} \n' \
-          f'\t↳      Plant log: {self.plant_log.name}\n')
+    if debug_levels.debug_program_flow_level >= 1:
+      print(f'---- Starting plant dynamics for {sim_label} ----\n' \
+            f'\t↳ Simulation dir: {self.sim_dir} \n' \
+            f'\t↳      Plant log: {self.plant_log.name}\n')
     if debug_levels.debug_configuration_level >= 2:
       printJson(f"Simulation configuration", self.sim_config)
 
     try:
       self.controller_interface.open()
+      if debug_levels.debug_program_flow_level >= 2:
+        print('Calling plant_runner.run(...)...')
       with redirect_stdout(self.plant_log):
-        print('Start of SimulationExecutor._run_plant() (Plant Dynamics task).')
-        plant_result = plant_runner.run(self.sim_dir, self.sim_config, self.evolveState_fnc, self.controller_interface)
-        print('Successfully SimulationExecutor._run_plant() (Plant Dynamics task).')
-
+        plant_result = plant_runner.run(self.sim_dir, self.sim_config, self.dynamics, self.controller_interface)
     except Exception as e:
       self.plant_log.write(f'Plant dynamics had an error: {e}')
       raise Exception(f'Plant dynamics for "{sim_label}" had an error. See logs: {self.plant_log.name}') from e
@@ -1139,7 +1146,7 @@ class SimulationExecutor:
 
     # Print the output in a single call to "print" so that it isn't interleaved with print statements in other threads.
     if debug_levels.debug_dynamics_level >= 1:
-      print('-- Plant dynamics finshed -- \n' \
+      print('-- Finished: SimulationExecutor._run_plant() (Plant Dynamics task) -- \n' \
             f'\t↳ Simulation directory: {self.sim_dir}')
     return plant_result
 
@@ -1149,13 +1156,21 @@ class SimulationExecutor:
     N_TASKS = 1
     with ThreadPoolExecutor(max_workers=N_TASKS) as executor:
       # Start a separate thread to run the controller.
-      print("Starting the controller...")
+      
+      if debug_levels.debug_program_flow_level >= 2:
+        print(f"Start of SimulationExecutor.run_simulation()...")
       controller_task = executor.submit(self._run_controller)
-      controller_task.add_done_callback(lambda _: print("Controller task finished."))
+      
+      if debug_levels.debug_program_flow_level >= 1:
+        controller_task.add_done_callback(lambda _: print("controller_task finished."))
 
       # Start running the plant in the current thread.
       print("Starting the plant...")
-      simulation_data = self._run_plant()
+      try:
+        simulation_data = self._run_plant()
+      except Exception as err:
+        print(f'Failed to run plant: {err}\n{traceback.format_exc()}')
+        raise err
       print('Plant finished')
 
       # Wait for the controller thread to complete its task.
@@ -1209,7 +1224,7 @@ class ModeledDelaysSimulationExecutor(SimulationExecutor):
 class SerialSimulationExecutor(SimulationExecutor):
   scarab_runner: scarabizor.ExecutionDrivenScarabRunner
 
-  def __init__(self, sim_dir, sim_config, controller_interface, scarab_runner):
+  def __init__(self, sim_dir: str, sim_config: dict, controller_interface: ControllerInterface, scarab_runner: scarabizor.ExecutionDrivenScarabRunner):
     super().__init__(sim_dir, sim_config, controller_interface)
     self.scarab_runner = scarab_runner
 
@@ -1229,7 +1244,7 @@ class SerialSimulationExecutor(SimulationExecutor):
 class ParallelSimulationExecutor(SimulationExecutor):
   trace_processor: scarabizor.TracesToComputationTimesProcessor
 
-  def __init__(self, sim_dir, sim_config, controller_interface, trace_processor: scarabizor.TracesToComputationTimesProcessor):
+  def __init__(self, sim_dir, sim_config, controller_interface: ControllerInterface, trace_processor: scarabizor.TracesToComputationTimesProcessor):
     super().__init__(sim_dir, sim_config, controller_interface)
     self.trace_processor = trace_processor
 
@@ -1254,15 +1269,6 @@ class ParallelSimulationExecutor(SimulationExecutor):
     simulation_data.overwrite_computation_times(computation_times)
     return simulation_data
 
-
-class DelayProvider(ABC):
-
-  @abstractmethod
-  def get_delay(self, metadata):
-    """ 
-    return t_delay, metadata 
-    """
-    pass # Abstract method must be overridden.
 
 class ScarabDelayProvider(DelayProvider):
   """
@@ -1357,259 +1363,6 @@ class GaussianDelayProvider(DelayProvider):
 #     return t_delay, metadata
 
 
-
-class SimulatorStatus(Enum):
-  """
-  Indicators to alert the C++ code the status of the (Python) simulation.
-  """
-  PENDING  = 0
-  RUNNING  = 1
-  FINISHED = 2
-  ERRORED  = 3
-
-class ControllerInterface(ABC):
-  """ 
-  Create an Abstract Base Class (ABC) for a controller interface. 
-  This handles communication to and from the controller, whether that is an executable or (for testing) a mock controller.
-  """
-
-  def __init__(self, computational_delay_provider: DelayProvider):
-    self.computational_delay_provider = computational_delay_provider
-
-  def open(self):
-    """
-    Open any resources that need to be closed.
-    """
-    pass
-
-  def close(self):
-    """
-    Do cleanup of opened resources.
-    """
-    pass
-
-  # def post_simulator_pending(self):
-  #   self._write_simulator_status(SimulatorStatus.PENDING)
-
-  def post_simulator_running(self):
-    self._write_simulator_status(SimulatorStatus.RUNNING)
-
-  def post_simulator_finished(self):
-    self._write_simulator_status(SimulatorStatus.FINISHED)
-
-  def post_simulator_errored(self):
-    self._write_simulator_status(SimulatorStatus.ERRORED)
-
-  @abstractmethod
-  def _write_x(self, x: np.ndarray):
-    pass
-
-  @abstractmethod
-  def _write_t_delay(self, t: float):
-    pass
-    
-  @abstractmethod
-  def _write_simulator_status(self, status: SimulatorStatus):
-    pass
-    
-  @abstractmethod
-  def _read_u(self) -> np.ndarray:
-    return u
-    
-  @abstractmethod
-  def _read_x_prediction(self) -> np.ndarray:
-    return x_prediction
-    
-  @abstractmethod
-  def _read_t_prediction(self) -> float:
-    return t_prediction
-
-  @abstractmethod
-  def _read_iterations(self) -> int:
-    return iterations
-    
-  def _read_metadata(self) -> int:
-    x_prediction = self._read_x_prediction()
-    t_prediction = self._read_t_prediction()
-    iterations = self._read_iterations()
-    if isinstance(x_prediction, np.ndarray):
-      x_prediction = column_vec_to_list(x_prediction)
-    metadata = {
-      "x_prediction": x_prediction,
-      "t_prediction": t_prediction,
-      "iterations": iterations
-    }
-
-    return metadata
-    
-
-  def get_u(self, t, x, u_before, pending_computation_before: ComputationData):
-    """ 
-    Get an (possibly) updated value of u. 
-    Returns: u, u_delay, u_pending, u_pending_time, metadata,
-    where u is the value of u that should start being applied immediately (at t). 
-    
-    If the updated value requires calling the controller, then u_delay does so.
-
-    This function is tested in <root>/tests/test_scarabintheloop_plant_runner.py/Test_get_u
-    """
-    
-    if debug_levels.debug_dynamics_level >= 1:
-      printHeader2('----- get_u (BEFORE) ----- ')
-      print(f'u_before[0]: {u_before[0]}')
-      printJson("pending_computation_before", pending_computation_before)
-
-    if pending_computation_before is not None and pending_computation_before.t_end > t:
-      # If last_computation is provided and the end of the computation is after the current time then we do not update anything. 
-      # print(f'Keeping the same pending_computation: {pending_computation_before}')
-      if debug_levels.debug_dynamics_level >= 2:
-        print(f'Set u_after = u_before = {u_before}. (Computation pending)')
-      u_after = u_before
-      pending_computation_after = pending_computation_before
-      
-      if debug_levels.debug_dynamics_level >= 1:
-        printHeader2('----- get_u (AFTER - no update) ----- ')
-        print(f'u_after[0]: {u_after[0]}')
-        printJson("pending_computation_after", pending_computation_after)
-      did_start_computation = False
-      return u_after, pending_computation_after, did_start_computation
-
-    if pending_computation_before is not None and pending_computation_before.t_end <= t:
-      # If the last computation data is "done", then we set u_after to the pending value of u.
-      
-      if debug_levels.debug_dynamics_level >= 2:
-        print(f'Set u_after = pending_computation_before.u = {pending_computation_before.u}. (computation finished)')
-      u_after = pending_computation_before.u
-    elif pending_computation_before is None:
-      if debug_levels.debug_dynamics_level >= 2:
-        print(f'Set u_after = u_before = {u_before} (no pending computation).')
-      u_after = u_before
-    else:
-      raise ValueError(f'Unexpected case.')
-      
-    # If there is no pending_computation_before or the given pending_computation_before finishes before the current time t, then we run the computation of the next control value.
-    if debug_levels.debug_dynamics_level >= 2:
-      print("About to get the next control value for x = ", repr(x))
-
-    u_pending, u_delay, metadata = self.get_next_control_from_controller(x)
-    did_start_computation = True
-    pending_computation_after = ComputationData(t, u_delay, u_pending, metadata)
-
-    if debug_levels.debug_dynamics_level >= 1:
-      printHeader2('----- get_u (AFTER - With update) ----- ')
-      print(f'u_after: {u_after}')
-      printJson("pending_computation_after", pending_computation_after)
-    # if u_delay == 0:
-    #   # If there is no delay, then we update immediately.
-    #   return u_pending, None
-    assert u_delay > 0, 'Expected a positive value for u_delay.'
-      # print(f'Updated pending_computation: {pending_computation_after}')
-    return u_after, pending_computation_after, did_start_computation
-
-  def get_next_control_from_controller(self, x: np.ndarray):
-    """
-    Send the current state to the controller and wait for the responses. 
-    Return values: u, x_prediction, t_prediction, iterations.
-    """
-
-    # The order of writing and reading to the pipe files must match the order in the controller.
-    self._write_x(x)
-    u = self._read_u()
-    metadata = self._read_metadata()
-    u_delay, delay_metadata = self.computational_delay_provider.get_delay(metadata)
-    self._write_t_delay(u_delay)
-    metadata.update(delay_metadata)
-
-    if debug_levels.debug_interfile_communication_level >= 1:
-      print('Input strings from C++:')
-      printIndented(f"       u: {u}", 1)
-      printIndented(f"metadata: {metadata}", 1)
-
-    return u, u_delay, metadata
-  
-    
-class PipesControllerInterface(ControllerInterface):
-
-  def __init__(self, computational_delay_provider: DelayProvider, sim_dir):
-    self.computational_delay_provider = computational_delay_provider
-    self.sim_dir = sim_dir
-    assertFileExists(self.sim_dir)
-
-    self.u_reader          = PipeVectorReader(os.path.join(self.sim_dir, 'u_c++_to_py'))
-    self.x_predict_reader  = PipeVectorReader(os.path.join(self.sim_dir, 'x_predict_c++_to_py'))
-    self.t_predict_reader  = PipeFloatReader( os.path.join(self.sim_dir, 't_predict_c++_to_py'))
-    self.iterations_reader = PipeFloatReader( os.path.join(self.sim_dir, 'iterations_c++_to_py'))
-    self.x_writer         = PipeVectorWriter( os.path.join(self.sim_dir, 'x_py_to_c++'))
-    self.t_delay_writer   = PipeFloatWriter(  os.path.join(self.sim_dir, 't_delay_py_to_c++'))
-    self.post_simulator_running()
-
-  def open(self):
-    """
-    Open resources that need to be closed when finished.
-    """
-    assertFileExists(os.path.join(self.sim_dir, 'u_c++_to_py'))
-    self.u_reader.open()
-    self.x_predict_reader.open()
-    self.t_predict_reader.open()
-    self.iterations_reader.open()
-    self.x_writer.open()
-    self.t_delay_writer.open()
-    
-    if debug_levels.debug_interfile_communication_level >= 1:
-      print('Pipes are open') 
-
-    return self  # Return the instance so that it's accessible as 'as' target
-
-  def close(self):
-    """ 
-    Close all of the files we opened.
-    """
-    if self.u_reader.is_open:
-      self.u_reader.close()
-    if self.x_predict_reader.is_open:
-      self.x_predict_reader.close()
-    if self.t_predict_reader.is_open:
-      self.t_predict_reader.close()
-    if self.iterations_reader.is_open:
-      self.iterations_reader.close()
-    if self.x_writer.is_open:
-      self.x_writer.close()
-    if self.t_delay_writer.is_open:
-      self.t_delay_writer.close()
-
-  def _write_x(self, x: np.ndarray):
-    # Pass the string back to C++.
-    # x_out_string = nump_vec_to_csv_string(x)
-    self.x_writer.write(x)# Write to pipe to C++
-
-  def _write_simulator_status(self, status: SimulatorStatus):
-    status_out_path = os.path.join(self.sim_dir, 'status_py_to_c++')
-    with open(status_out_path, "w") as status_file:
-      status_file.write(status.name)
-    print(f'Wrote status "{status.name}" to {status_out_path}')
-
-  def _write_t_delay(self, t_delay: float):
-    self.t_delay_writer.write(t_delay)
-
-  def _read_u(self):
-    if debug_levels.debug_interfile_communication_level >= 2:
-      print(f"Reading u file: {self.u_reader.filename}")
-    return self.u_reader.read()
-    
-  def _read_x_prediction(self):
-    if debug_levels.debug_interfile_communication_level >= 2:
-      print(f"Reading x_predict file: {self.x_predict_reader.filename}")
-    return self.x_predict_reader.read()
-    
-  def _read_t_prediction(self):
-    if debug_levels.debug_interfile_communication_level >= 2:
-      print(f"Reading t_predict file: {self.t_predict_reader.filename}")
-    return self.t_predict_reader.read()
-    
-  def _read_iterations(self):
-    if debug_levels.debug_interfile_communication_level >= 2:
-      print(f"Reading iterations file: {self.iterations_reader.filename}")
-    return self.iterations_reader.read()
       
 def controller_interface_factory(controller_interface_selection, computation_delay_provider, sim_dir) -> ControllerInterface:
   """ 

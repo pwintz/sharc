@@ -68,8 +68,13 @@ class PipeReader {
 
     void open() {
       assertFileExists(filename);
-      PRINT_WITH_FILE_LOCATION("Opening " << filename << ". Waiting for writer...");
+      if (global_debug_levels.debug_interfile_communication_level >= 1) {
+        PRINT("Opening " << filename << " for reading. Will wait for writer...");
+      }
       pipe_file_stream.open(filename, std::ofstream::in);
+      if (global_debug_levels.debug_interfile_communication_level >= 1) {
+        PRINT("     ..." << filename << " is open.");
+      }
     }
 
     void close() {
@@ -127,6 +132,21 @@ class PipeDoubleReader : public PipeReader {
   }
 };
 
+class PipeIntReader : public PipeReader {
+  public:
+    // Constructor (call parent constructor).
+    PipeIntReader (std::string filename) : PipeReader (filename) {}
+
+    void read(std::string label, int& value) {
+      std::string value_in_line_from_py;
+      read_line(label, value_in_line_from_py);
+
+      // Create a stringstream to parse the string.
+      std::stringstream value_ss(value_in_line_from_py);
+      value_ss >> value;
+  }
+};
+
 class PipeVectorReader : public PipeReader {
   public:
     // Constructor (call parent constructor).
@@ -164,8 +184,13 @@ class PipeWriter {
 
     void open() {
       assertFileExists(filename);
-      PRINT_WITH_FILE_LOCATION("Opening " << filename << ". Waiting for reader...");
+      if (global_debug_levels.debug_interfile_communication_level >= 1) {
+        PRINT("Opening " << filename << " for writing. Will wait for reader...");
+      }
       pipe_file_stream.open(filename, std::ofstream::out);
+      if (global_debug_levels.debug_interfile_communication_level >= 1) {
+        PRINT("     ..." << filename << " is open for writing.");
+      }
     }
 
     void close() {
@@ -200,12 +225,12 @@ class PipeVectorWriter : public PipeWriter {
       auto out_str = x.transpose().format(fmt_high_precision);
       if (global_debug_levels.debug_interfile_communication_level >= 1) 
       {
-        PRINT_WITH_FILE_LOCATION("Send \"" << label << "\" to Python: " << out_str);
+        PRINT("Send \"" << label << "\" to Python: " << out_str);
       } 
       pipe_file_stream << "Loop " << i_loop << ": " << out_str << std::endl;
       if (global_debug_levels.debug_interfile_communication_level >= 2) 
       {
-        PRINT_WITH_FILE_LOCATION("SENT \"" << label << "\" to Python: " << out_str);
+        PRINT("SENT \"" << label << "\" to Python: " << out_str);
       } 
     }
 };
@@ -230,7 +255,7 @@ class StatusReader {
 
     void open() {
       assertFileExists(filename);
-      PRINT_WITH_FILE_LOCATION("Opening status file: " << filename << ".");
+      PRINT("Opening status file: " << filename << ".");
       file_stream.open(filename, std::ofstream::in);
     }
 
@@ -301,7 +326,10 @@ int main()
   PipeDoubleWriter   iterations_writer(sim_dir + "iterations_c++_to_py");
   // Readers
   StatusReader     status_reader(sim_dir + "status_py_to_c++");
+  PipeIntReader         k_reader(sim_dir + "k_py_to_c++");
+  PipeDoubleReader      t_reader(sim_dir + "t_py_to_c++");
   PipeVectorReader      x_reader(sim_dir + "x_py_to_c++");
+  PipeVectorReader      w_reader(sim_dir + "w_py_to_c++");
   PipeDoubleReader delays_reader(sim_dir + "t_delay_py_to_c++");
   std::string optimizer_info_out_filename = sim_dir + "optimizer_info.csv";
 
@@ -342,11 +370,18 @@ int main()
 
   // In files.
   status_reader.open();
+  k_reader.open();
+  t_reader.open();
   x_reader.open();
+  w_reader.open();
   delays_reader.open();
   if (global_debug_levels.debug_interfile_communication_level >= 1) {
     PRINT_WITH_FILE_LOCATION("All files open.");
   }
+
+  // Time values, read from Python
+  int k;
+  double t;
 
   // State vector state.
   cvec<Tnx> modelX, modeldX;
@@ -360,6 +395,8 @@ int main()
 
   // Create a vector for storing the control input from the previous time step.
   cvec<Tnu> u;
+
+  cvec<Tndu> w;
   
   loadColumnValuesFromJson(u, json_data, "u0");
 
@@ -376,11 +413,14 @@ int main()
   while (true)
   {
     if (global_debug_levels.debug_program_flow_level >= 1) {
-      PRINT(std::endl << "====== Starting loop #" << i << " of " << n_time_steps << " ======");
+      PRINT(std::endl << "====== Starting loop #" << i+1 << " of " << n_time_steps << " ======");
     }
     
     // Read the value of 'x' for this iteration.
+    k_reader.read("k", k);
+    t_reader.read("t", t);
     x_reader.read("x", modelX);
+    w_reader.read("w", w);
     if (!status_reader.is_simulator_running()){
       break;
     }
@@ -433,11 +473,11 @@ int main()
     // Compute a step of the MPC controller. This does NOT change the value of modelX.
     // Result res = lmpc.step(x_predict, u);
 
-    // // Update internal state and calculate control
-    controller->update_internal_state(x_predict);
-    controller->calculateControl();
+    // Update internal state and calculate control
+    // controller->update_internal_state(x_predict);
+    controller->calculateControl(x_predict, w);
     u = controller->getLastControl();
-    // iterations = controller->getLastLmpcIterations()
+    // metadata = controller->getLastMetadata()
 
     #if defined(USE_DYNAMORIO)
     
@@ -547,12 +587,18 @@ int main()
     PRINT_WITH_FILE_LOCATION("Finished looping through " << i << " time steps. Closing files...")
   }
 
+  // Close writers.
   u_writer.close();
   x_prediction_writer.close();
   t_predict_writer.close();
   iterations_writer.close();
+
+  // Close readers.
   status_reader.close();
+  t_reader.close();
+  k_reader.close();
   x_reader.close();
+  w_reader.close();
   delays_reader.close();
 
   // PRINT_WITH_FILE_LOCATION("Closing optimizer_info_out_file...")

@@ -5,12 +5,7 @@ void CustomController::setup(const nlohmann::json &json_data){
     // tau = json_data.at("system_parameters").at("tau");
 }
 
-void CustomController::update_internal_state(const Eigen::VectorXd &x){
-    // Use this to update the internal state that is used for control calculations
-    state = x;
-}
-
-void CustomController::calculateControl(){
+void CustomController::calculateControl(const xVec &x, const wVec &w){
     // Calculate the control input, feel free to use internal state and last control as below
     // control = lmpc.step(state, control).cmd;
 }

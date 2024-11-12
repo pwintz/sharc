@@ -7,6 +7,7 @@ import numpy as np
 from scipy.integrate import ode
 import scipy.signal
 import numpy.linalg as linalg
+from scarabintheloop.utils import printIndented
 
 # TODO: Implement "appendComputedParameters" to generate computed parameters that need to be accessible from both the plant and controller. Currently, these values are hard coded in both the C++ controller and the Python plant.
 # def appendComputedParameters(config_data: dict):
@@ -111,10 +112,10 @@ def getDynamicsFunction(config_data: dict):
   
 
   solver = ode(system_derivative).set_integrator('vode', method='bdf')
-  def evolveState(t0, x0, u, tf):
+  def evolve_state(t0, x0, u, tf):
 
     if debug_dynamics_level >= 1:
-      print(f"== evolveState(t=[{t0:.2}, {tf:.2}]) ==")
+      print(f"== evolve_state(t=[{t0:.2}, {tf:.2}]) ==")
       print("x0': " + str(x0.transpose()))
       print(" u': " + str(u))
 
@@ -152,13 +153,4 @@ def getDynamicsFunction(config_data: dict):
       print(f"\tsolver.t = {repr(solver.t)}")
     return (tf, xf)
 
-  return evolveState
-
-
-# COPIED from plant_dynamics.py.
-# TODO: place it in a single place accesible from both python files.
-def printIndented(string_to_print:str, indent: int=1):
-  indent_str = '\t' * indent
-  indented_line_break = "\n" + indent_str
-  string_to_print = string_to_print.replace('\n', indented_line_break)
-  print(indent_str + string_to_print)
+  return evolve_state

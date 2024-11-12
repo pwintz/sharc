@@ -43,7 +43,6 @@ public:
     }
 
     void setup(const nlohmann::json &json_data) override;
-    void update_internal_state(const Eigen::VectorXd &x) override;
-    void calculateControl() override;
+    void calculateControl(const xVec &x, const wVec &w) override;
 };
 #endif // NLMPC_CONTROLLER_H

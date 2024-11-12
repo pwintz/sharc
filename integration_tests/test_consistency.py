@@ -5,6 +5,7 @@ import unittest
 import scarabintheloop
 import scarabintheloop.testing
 import os
+import numpy as np
 
 from scarabintheloop.data_types import ComputationData
 
@@ -100,7 +101,7 @@ class TestConsistency(scarabintheloop.testing.TestCase):
                          f'k={k}, {result["label"]} pending_computations[k]={this_pending_computations[k]}, {baseline_result["label"]} pending_computations[k]={baseline_pending_computations[k]}')
         self.assertAlmostEqual(this_pending_computations[k]._t_start, baseline_pending_computations[k]._t_start)
         # self.assertAlmostEqual(this_pending_computations[k]._delay, baseline_pending_computations[k]._delay)
-        self.assertAlmostEqual(this_pending_computations[k]._u, baseline_pending_computations[k]._u)
+        np.testing.assert_array_almost_equal(this_pending_computations[k]._u, baseline_pending_computations[k]._u)
         # self.assertAlmostEqual(this_pending_computations[k]._t_end, baseline_pending_computations[k]._t_end)
 
   def asssert_vector_list_almost_equal(self, list1, list2, places=6):

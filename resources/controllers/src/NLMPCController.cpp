@@ -21,9 +21,9 @@ void NLMPCController::setup(const nlohmann::json &json_data){
 
     // Dynamics differential equation
     auto stateEq = [&](
-                       mpc::cvec<TNX> &x_dot_,
-                       const mpc::cvec<TNX> &x_,
-                       const mpc::cvec<TNU> &u)
+                       xVec &x_dot_,
+                       const xVec &x_,
+                       const uVec &u)
     {
         // Constants
         double M_t = M + m;
@@ -52,12 +52,11 @@ void NLMPCController::setup(const nlohmann::json &json_data){
                     (J_t * (M_t / m) - m * (l * c_t) * (l * c_t));
     };
 
-    nlmpc.setStateSpaceFunction([&](
-                                        mpc::cvec<TNX> &dx,
-                                        const mpc::cvec<TNX> &x,
-                                        const mpc::cvec<TNU> &u,
-                                        const unsigned int &)
-                                    { stateEq(dx, x, u); });
+    nlmpc.setStateSpaceFunction(
+      [&](xVec &dx, const xVec &x, const uVec &u, const unsigned int &) { 
+          stateEq(dx, x, u); 
+      }
+    );
     nlmpc.setObjectiveFunction([&](
                                        const mpc::mat<prediction_horizon + 1, TNX> &x,
                                        const mpc::mat<prediction_horizon + 1, TNY> &,
@@ -69,11 +68,8 @@ void NLMPCController::setup(const nlohmann::json &json_data){
                                     return (x * state_cost_weights.asDiagonal()).array().square().sum() + u.array().square().sum() * input_cost_weight; });
 }
 
-void NLMPCController::update_internal_state(const Eigen::VectorXd &x){
+void NLMPCController::calculateControl(const xVec &x, const wVec &w){
     state = x;
-}
-
-void NLMPCController::calculateControl(){
     // Call NLMPC control calculation here
     control = nlmpc.step(state, control).cmd;
 }
