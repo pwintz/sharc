@@ -14,7 +14,7 @@
     "system_parameters": {
       "sample_time": 0.5,
       "osqp_options": {
-        "maximum_iteration": 1000
+        "maximum_iteration": 10000
       },
       "mpc_options":{
         "prediction_horizon": 5,
@@ -34,7 +34,7 @@
     "system_parameters": {
       "sample_time": 0.5,
       "osqp_options": {
-        "maximum_iteration": 1000
+        "maximum_iteration": 10000
       },
       "mpc_options":{
         "prediction_horizon": 5,

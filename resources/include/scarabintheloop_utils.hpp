@@ -75,6 +75,26 @@ void loadColumnValuesFromJson(mpc::cvec<rows>& vector_out, const nlohmann::json&
     }
 }
 
+template<int rows>
+void assertVectorLessThan(const std::string&  left_name, const mpc::cvec<rows> left, 
+                          const std::string& right_name, const mpc::cvec<rows> right) {
+    for(int row = 0; row < rows; row++) {
+      PRINT(       left_name << "[" << row << "]: " <<  left[row] << " must be less than " 
+              <<  right_name << "[" << row << "]: " << right[row])
+      assert(left[row] <= right[row] - 0.1);
+    }
+}
+
+template<int rows>
+void assertVectorAlmostLessThan(const std::string&  left_name, const mpc::cvec<rows> left, 
+                          const std::string& right_name, const mpc::cvec<rows> right, 
+                          double abs_tol) {
+    for(int row = 0; row < rows; row++) {
+      PRINT(       left_name << "[" << row << "]: " <<  left[row] << " must be less than " 
+              <<  right_name << "[" << row << "]: " << right[row] << " + " << abs_tol << " = " << right[row] + abs_tol)
+      assert(left[row] <= right[row] + abs_tol);
+    }
+}
 
 // template<int rows, int cols>
 // void loadColumnValuesFromJson(mat<rows, cols>& mat_out, nlohmann::json json_data, std::string key) {

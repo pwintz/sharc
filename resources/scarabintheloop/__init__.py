@@ -292,9 +292,9 @@ class Experiment:
     self.result = {
       "label":                self.label,
       "experiment directory": self.experiment_dir,
-      "experiment config":    self.experiment_config, 
+      "experiment wall time": end_time - start_time, 
       "experiment data":      experiment_data,
-      "experiment wall time": end_time - start_time
+      "experiment config":    self.experiment_config
     }
 
     # Check that we have the expected number of time steps. In particular, the last value of k must be one less
@@ -304,12 +304,17 @@ class Experiment:
 
     writeJson(os.path.join(self.experiment_dir, "experiment_result.json"), self.result)
 
+    for pc in experiment_data["pending_computations"]:
+      if pc: 
+        print(f'iterations: {pc.metadata["iterations"]:04d} cost: {pc.metadata["cost"]:10.9g}, status: {pc.metadata["status"]}, constraint_error={pc.metadata["constraint_error"]}, dual_residual={pc.metadata["dual_residual"]}')
+    printJson('x', experiment_data["x"])
+
   def __repr__(self):
     repr_str = f'Experiment("{self.label}", {self.status.name}'
     if self.status == ExperimentStatus.FAILED:
       repr_str += f', error msg: "{self.exception}"'
     if self.run_time:
-      repr_str += f' in {self.run_time:0.1f} s'
+      repr_str += f' in {seconds_to_duration_string(self.run_time)}'
     repr_str += ')'
     return repr_str
 
