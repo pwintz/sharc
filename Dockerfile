@@ -18,7 +18,7 @@ ARG SCARAB_ROOT=/scarab
 ARG DYNAMORIO_VERSION=DynamoRIO-Linux-9.0.19314
 ARG DYNAMORIO_HOME=/${DYNAMORIO_VERSION}
 
-ARG LIBMPC_DIR=/libmpc
+ARG LIBMPC_DIR=$RESOURCES_DIR/libmpc
 
 ##################################
 ############## BASE ##############
@@ -252,7 +252,7 @@ RUN apt-get install --assume-yes --quiet=2 --no-install-recommends \
       libomp-dev \ 
       man
 
-RUN yes | unminimize
+# RUN yes | unminimize
 
 # Copy Bash configurations
 COPY --chown=$USERNAME .profile /home/$USERNAME/.bashrc
@@ -297,6 +297,7 @@ ENV PATH "${PATH}:${RESOURCES_DIR}/scarabintheloop:${RESOURCES_DIR}/scarabinthel
 ########################
 FROM base	as mpc-examples-base
 ARG USERNAME
+ARG WORKSPACE_ROOT
 ARG RESOURCES_DIR
 
 RUN apt-get install --assume-yes --quiet=2 --no-install-recommends \
@@ -320,7 +321,7 @@ ARG LIBMPC_DIR
 ENV LIBMPC_DIR $LIBMPC_DIR 
 ADD https://github.com/pwintz/libmpc.git $LIBMPC_DIR
 RUN $LIBMPC_DIR/configure.sh
-RUN mkdir $LIBMPC_DIR/build && cd  $LIBMPC_DIR/build && cmake .. && cmake --install .
+RUN mkdir $LIBMPC_DIR/build && cd $LIBMPC_DIR/build && cmake .. && cmake --install .
 
 # Copy the example folders.
 COPY --chown=$USERNAME examples/acc_example $WORKSPACE_ROOT/examples/acc_example
@@ -330,12 +331,12 @@ ARG PIN_ROOT
 ARG RESOURCES_DIR
 ARG SCARAB_ROOT
 ARG DYNAMORIO_HOME
-RUN test -e $PIN_ROOT/source
-RUN test -e $RESOURCES_DIR
-RUN test -e $SCARAB_ROOT
-RUN test -e $DYNAMORIO_HOME
-RUN test -e $LIBMPC_DIR/build
-RUN test -e $WORKSPACE_ROOT/examples/acc_example
+RUN test -e $PIN_ROOT/source \
+    && test -e $RESOURCES_DIR    \
+    && test -e $SCARAB_ROOT      \
+    && test -e $DYNAMORIO_HOME   \
+    && test -e $LIBMPC_DIR/build \
+    && test -e $WORKSPACE_ROOT/examples/acc_example
 
 USER $USERNAME
 WORKDIR ${WORKSPACE_ROOT}/examples/acc_example

@@ -347,15 +347,15 @@ int main()
   PRINT_WITH_FILE_LOCATION("Simulation directory: " << sim_dir)
 
   // Writers
-  PipeVectorWriter            u_writer(sim_dir + "u_c++_to_py");
+  PipeVectorWriter            u_writer(sim_dir +        "u_c++_to_py");
   PipeJsonWriter       metadata_writer(sim_dir + "metadata_c++_to_py");
 
   // Readers
-  StatusReader     status_reader(sim_dir + "status_py_to_c++");
-  PipeIntReader         k_reader(sim_dir + "k_py_to_c++");
-  PipeDoubleReader      t_reader(sim_dir + "t_py_to_c++");
-  PipeVectorReader      x_reader(sim_dir + "x_py_to_c++");
-  PipeVectorReader      w_reader(sim_dir + "w_py_to_c++");
+  StatusReader     status_reader(sim_dir +  "status_py_to_c++");
+  PipeIntReader         k_reader(sim_dir +       "k_py_to_c++");
+  PipeDoubleReader      t_reader(sim_dir +       "t_py_to_c++");
+  PipeVectorReader      x_reader(sim_dir +       "x_py_to_c++");
+  PipeVectorReader      w_reader(sim_dir +       "w_py_to_c++");
   PipeDoubleReader delays_reader(sim_dir + "t_delay_py_to_c++");
 
   // Open and read JSON 

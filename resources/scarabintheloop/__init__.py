@@ -1,19 +1,11 @@
 from __future__ import print_function
 
-import json
 import os
 import sys
-import shutil
-import glob
 import concurrent.futures
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
-import subprocess
-import re
+from concurrent.futures import ThreadPoolExecutor
 import copy
 import argparse
-from warnings import warn
-from pathlib import Path
-import math
 from enum import Enum
 import traceback
 from contextlib import redirect_stdout
@@ -23,16 +15,9 @@ from scarabintheloop.data_types import *
 from scarabintheloop.controller_interface import DelayProvider, ControllerInterface, PipesControllerInterface
 from abc import abstractmethod, ABC
 from dataclasses import dataclass
-
-
-# Type hinting.
-from typing import List, Set, Dict, Tuple, Union
-
 import scarabintheloop.scarabizor as scarabizor
-
 from slugify import slugify
 import importlib
-
 import scarabintheloop.plant_runner as plant_runner
 
 controller_executable_provider = None
@@ -935,10 +920,13 @@ def run_experiment_parallelized(experiment_config, params_base: list):
     simulation.setup_files()
     batch_sim_data = simulation.run()
 
-    printJson("simulation config", simulation.sim_config)
-    print('batch_init:', batch_init)
+    if debug_levels.debug_configuration_level >= 1 and debug_levels.debug_batching_level >= 1:
+      printJson("simulation config", simulation.sim_config)
+      print('batch_init:', batch_init)
     batch_sim_data.printTimingData(f'batch_sim_data from running simulation in "run_batch()" with n_time_steps={n_time_steps}')
-    print('batch_sim_data:', batch_sim_data)
+
+    if debug_levels.debug_configuration_level >= 1 and debug_levels.debug_batching_level >= 1:
+      print('batch_sim_data:', batch_sim_data)
     assert batch_sim_data.n_time_steps == n_time_steps, \
       f'batch_sim_data.n_time_steps={batch_sim_data.n_time_steps} must equal n_time_steps={n_time_steps}'
     
