@@ -22,7 +22,7 @@ void ACC2_Controller::setup(const nlohmann::json &json_data){
     v_max                    = json_data.at("system_parameters").at("v_max");
     F_accel_max              = json_data.at("system_parameters").at("F_accel_max");
     F_brake_max              = json_data.at("system_parameters").at("F_brake_max");
-    F_accel_time_constant    = json_data.at("system_parameters").at("F_accel_time_constant");
+    // F_accel_time_constant    = json_data.at("system_parameters").at("F_accel_time_constant");
     max_brake_acceleration       = json_data.at("system_parameters").at("max_brake_acceleration");
     max_brake_acceleration_front = json_data.at("system_parameters").at("max_brake_acceleration_front");
     beta                     = json_data.at("system_parameters").at("beta");
@@ -35,7 +35,6 @@ void ACC2_Controller::setup(const nlohmann::json &json_data){
     assert(v_max > 0);
     assert(F_accel_max > 0);
     assert(F_brake_max > 0);
-    assert(F_accel_time_constant > 0);
     assert(max_brake_acceleration > 0);
     assert(max_brake_acceleration_front > 0);
     assert(beta  > 0);
@@ -75,13 +74,16 @@ void ACC2_Controller::setup(const nlohmann::json &json_data){
     control = u0;
     y0 = C * x0;
 
+    assert(v_max >= x0[v_index]);
+    assert(v_max >= y0[0]);
+
     PRINT_WITH_FILE_LOCATION("Checking initial conditions satisfy constraints.")
-    // assertVectorAlmostLessThan("xmin", xmin, "  x0",   x0, 1e-1);
-    // assertVectorAlmostLessThan("  x0",   x0, "xmax", xmax, 1e-1);
-    // assertVectorAlmostLessThan("umin", umin, "  u0",   u0, 1e-1);
-    // assertVectorAlmostLessThan("  u0",   u0, "umax", umax, 1e-1);
-    // assertVectorAlmostLessThan("ymin", ymin, "  y0",   y0, 1e-1);
-    // assertVectorAlmostLessThan("  y0",   y0, "ymax", ymax, 1e-1);
+    assertVectorAlmostLessThan("xmin", xmin, "  x0",   x0, 1e-1);
+    assertVectorAlmostLessThan("  x0",   x0, "xmax", xmax, 1e-1);
+    assertVectorAlmostLessThan("umin", umin, "  u0",   u0, 1e-1);
+    assertVectorAlmostLessThan("  u0",   u0, "umax", umax, 1e-1);
+    assertVectorAlmostLessThan("ymin", ymin, "  y0",   y0, 1e-1);
+    assertVectorAlmostLessThan("  y0",   y0, "ymax", ymax, 1e-1);
     
 }
 
@@ -90,8 +92,8 @@ void ACC2_Controller::calculateControl(int k, double t, const xVec &x, const wVe
     // current exogenuous input (or its estimate) "w".
 
     PRINT_WITH_FILE_LOCATION("Checking constraints for 'x' at start of calculateControl(k=" << k << ").")
-    // assertVectorAlmostLessThan("xmin", xmin, "   x",    x, 1e-1);
-    // assertVectorAlmostLessThan("   x",    x, "xmax", xmax, 1e-1);
+    assertVectorAlmostLessThan("xmin", xmin, "   x",    x, 1e-1);
+    assertVectorAlmostLessThan("   x",    x, "xmax", xmax, 1e-1);
 
     state            = x;
     exogeneous_input = w;
@@ -106,46 +108,49 @@ void ACC2_Controller::calculateControl(int k, double t, const xVec &x, const wVe
 
     for (int col = 0; col < prediction_horizon; col++){
       w_series(0, col) = std::max(0.0, v_front_underestimate - col * sample_time * max_brake_acceleration_front);
-      // w_series(0, col) = v_front_underestimate;
-      w_series(1, col) = 0.0; 
+      w_series(1, col) = 1.0; 
     }
     PRINT("w (predicted):\n" << w_series)
-    lmpc.setExogenuosInputs(w_series);
+    lmpc.setExogenousInputs(w_series);
 
     // Call LMPC control calculation here
-    lmpc_step_result = lmpc.step(state, control);
+    lmpc_step_result = lmpc.optimize(state, control);
     control = lmpc_step_result.cmd;
     PRINT("Result of calculateControl(): " << control)
 
     latest_metadata.clear();
-    latest_metadata["iterations"]      = lmpc_step_result.num_iterations;
-    latest_metadata["retcode"]         = lmpc_step_result.retcode;
-    latest_metadata["cost"]            = lmpc_step_result.cost;
+    latest_metadata["iterations"]       = lmpc_step_result.num_iterations;
+    latest_metadata["solver_status"]    = lmpc_step_result.solver_status;
+    latest_metadata["solver_status_msg"]= lmpc_step_result.solver_status_msg;
+    latest_metadata["is_feasible"]      = lmpc_step_result.is_feasible;
+    latest_metadata["cost"]             = lmpc_step_result.cost;
     latest_metadata["constraint_error"] = lmpc_step_result.primal_residual;
-    latest_metadata["dual_residual"]   = lmpc_step_result.dual_residual;
-    latest_metadata["status"]          = mpc::SolutionStats::resultStatusToString(lmpc_step_result.status);
+    latest_metadata["dual_residual"]    = lmpc_step_result.dual_residual;
+    latest_metadata["status"]           = mpc::SolutionStats::resultStatusToString(lmpc_step_result.status);
 
     mpc::OptSequence optimal_sequence = lmpc.getOptimalSequence();
-    mat<prediction_horizon, Tnx> opt_state_seq  = optimal_sequence.state;
-    mat<prediction_horizon, Tnu> opt_input_seq  = optimal_sequence.input;
-    mat<prediction_horizon, Tny> opt_output_seq = optimal_sequence.output ;
+    mat<prediction_horizon+1, Tnx> opt_state_seq  = optimal_sequence.state;
+    mat<prediction_horizon+1, Tnu> opt_input_seq  = optimal_sequence.input;
+    mat<prediction_horizon+1, Tny> opt_output_seq = optimal_sequence.output;
 
     xVec x_opt_next = opt_state_seq.row(0);
     PRINT("Checking if x satisfies xmin <= x <= xmax for k=" << k)
-    // assertVectorAlmostLessThan(  "xmin",       xmin, "x^*(0)", x_opt_next, 1e-1);
-    // assertVectorAlmostLessThan("x^*(0)", x_opt_next,   "xmax",       xmax, 1e-1);
+    assertVectorAlmostLessThan(  "xmin",       xmin, "x^*(0)", x_opt_next, 1e-1);
+    assertVectorAlmostLessThan("x^*(0)", x_opt_next,   "xmax",       xmax, 1e-1);
     
     uVec u_opt_next = opt_input_seq.row(0);
     PRINT("Checking if u satisfies umin <= u <= umax for k=" << k)
-    // assertVectorAlmostLessThan(  "umin",       umin, "u^*(0)", u_opt_next, 1e-1);
-    // assertVectorAlmostLessThan("u^*(0)", u_opt_next,   "umax",       umax, 1e-1);
+    assertVectorAlmostLessThan(  "umin",       umin, "u^*(0)", u_opt_next, 1e-1);
+    assertVectorAlmostLessThan("u^*(0)", u_opt_next,   "umax",       umax, 1e-1);
 
     PRINT("control - u_opt_next: " << control - u_opt_next)
 
     if (global_debug_levels.debug_optimizer_stats_level >= 1) 
     {
       PRINT_WITH_FILE_LOCATION("Optimizer Info")
-      PRINT("         Return code: " << lmpc_step_result.retcode)
+      PRINT("       solver_status: " << lmpc_step_result.solver_status)
+      PRINT("   solver_status_msg: " << lmpc_step_result.solver_status_msg)
+      PRINT("         is_feasible: " << lmpc_step_result.is_feasible)
       PRINT("       Result status: " << lmpc_step_result.status)
       PRINT("Number of iterations: " << lmpc_step_result.num_iterations)
       PRINT("                Cost: " << lmpc_step_result.cost)
@@ -177,27 +182,24 @@ void ACC2_Controller::updateStateSpaceMatrices(double v0) {
     }
 
     // Define continuous-time state matrix A_c
-    double tau = F_accel_time_constant;
-    Ac << 0, 0,               1,         0, // p   (position)
-          0, 0,              -1,         0, // h   (headway)
-          0, 0, -2*gamma*v0/mass,         1, // v   (velocity)
-          0, 0,               0,    -1/tau; // F^a (acceleration force)
+    Ac << 0, 0,                1, // p   (position)
+          0, 0,               -1, // h   (headway)
+          0, 0, -2*gamma*v0/mass; // v   (velocity)
 
     // Define continuous-time input matrix B_c
     Bc <<      0,          0, // p   (position)
                0,          0, // h   (headway)
-               0,         -1, // v   (velocity)
-           1/tau,          0; // F^a (acceleration force)
-    //       ^             ^   
-    // u:  T^a_ref         T^b    
+          1/mass,    -1/mass; // v   (velocity)
+    //         ^           ^   
+    // u:     T^a         T^b    
 
     printMat("Ac (continuous)", Ac);
     printMat("Bc (continuous)", Bc);
 
     // State to output matrix
-    C <<   0, 0, 1, 0;
-    //     ^  ^  ^  ^
-    // x:  p  h  v  F^a.
+    C <<   0, 0, 1;
+    //     ^  ^  ^
+    // x:  p  h  v
 
     // Constant force from friction: k = β + γv²
     double k = beta - gamma * std::pow(v0, 2); 
@@ -207,11 +209,9 @@ void ACC2_Controller::updateStateSpaceMatrices(double v0) {
     PRINT("         -k/mass: " << -k/mass)
 
     // Set input disturbance matrix.
-    Bc_disturbance << 0, 0, 
-                      1, 0, 
-                      0, -k/mass, 
-                      // 0, 0, 
-                      0, 0;
+    Bc_disturbance << 0,       0, 
+                      1,       0, 
+                      0, -k/mass;
     
     // ======= Discrete-time Matrices ========                         
     // State disturbance matrix
@@ -249,10 +249,6 @@ void ACC2_Controller::setWeights(const nlohmann::json &json_data) {
         throw std::invalid_argument("The output weight was negative.");
     }
 
-    // mat<Tny, Tny> OutputWMat     = mat<Tnx, Tnx>::Identity();
-    // mat<Tnu, Tnu> InputWMat;     // = mat<Tnu>::Ones() * inputWeight;
-    // mat<Tnu> DeltaInputWMat = mat<Tnu, Tnu>::Identity() * delta_input_cost_weight;
-
     yVec outputWeight     = yVec::Ones() * output_cost_weight;
     uVec inputWeight      = uVec::Ones() * input_cost_weight;
     uVec deltaInputWeight = uVec::Ones() * delta_input_cost_weight;
@@ -272,21 +268,19 @@ void ACC2_Controller::setConstraints() {
   }
   const double inf = std::numeric_limits<double>::infinity();
 
-  umin << 0, // acceleration force reference
+  umin << 0, // acceleration force
           0; // braking force
 
-  umax << 1200*F_accel_max/mass, // acceleration force reference
-          1200*F_brake_max/mass; // braking force
+  umax << F_accel_max, // acceleration force
+          F_brake_max; // braking force
 
   xmin <<       0, // p     (position)
             d_min, // h     (headway)
-                0, // v     (velocity)
-                0; // F^a/M (normalized acceleration force)
+                0; // v     (velocity)
 
   xmax <<          inf, // p     (position)
                    inf, // h     (headway)
-                 v_max, // v     (velocity)
-               umax[0]; // F^a/M (normalized acceleration force)
+                 v_max; // v     (velocity)
 
   ymin <<     0; // velocity
 
@@ -296,8 +290,12 @@ void ACC2_Controller::setConstraints() {
   printVector("umax: ", umax);
   printVector("ymax: ", ymax);
 
-  lmpc.setConstraints(xmin, umin, ymin,  
-                      xmax, umax, ymax, {0, prediction_horizon});
+  bool are_x_bounds_okay = lmpc.setStateBounds(xmin, xmax, {-1, -1});
+  bool are_u_bounds_okay = lmpc.setInputBounds(umin, umax, {-1, -1});
+  bool are_y_bounds_okay = lmpc.setOutputBounds(ymin, ymax, {-1, -1});
+  assert(are_x_bounds_okay);
+  assert(are_u_bounds_okay);
+  assert(are_y_bounds_okay);
 
   // Initially, set a terminal constraint that assume the front vehicle is not moving, 
   // until we have a sensor measurement to the contrary.
@@ -313,9 +311,9 @@ void ACC2_Controller::updateTerminalConstraint(double v_front_underestimate) {
 
   // Create a vector 'c' for a constraint in the form "cᵀ x ≥ s_min."
   xVec xc;
-  xc  << 0, 1, -v_max/(2*max_brake_acceleration), 0;
-  //     ^  ^         ^                ^
-  // x:  p  h         v               F^a.
+  xc  << 0, 1, -v_max/(2*max_brake_acceleration);
+  //     ^  ^            ^
+  // x:  p  h            v
 
   // Compute the velocity at the prediction horizon if it brakes as fast a possible.
   double worst_case_front_velocity_at_ph 
@@ -331,7 +329,7 @@ void ACC2_Controller::updateTerminalConstraint(double v_front_underestimate) {
   uVec uc = uVec::Zero();
   // Set the scalar constraint as a terminal constraint (using the slice "{prediction_horizon-1, prediction_horizon}")
   // means this contraint is only applied at the last step in the prediction horizon.
-  // lmpc.setScalarConstraint(constraint_min, inf, xc, uc, {prediction_horizon-1, prediction_horizon});
+  lmpc.setScalarConstraint(constraint_min, inf, xc, uc, {prediction_horizon-1, prediction_horizon});
 }
 
 void ACC2_Controller::setReferences(const nlohmann::json &json_data) {

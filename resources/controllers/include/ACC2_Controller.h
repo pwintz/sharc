@@ -26,8 +26,6 @@ private:
     int p_index = 0;
     int h_index = 1; // Higher than mine :`(
     int v_index = 2;
-    int F_index = 3;
-
 
     // System-specific Parameters
     double mass;  // Mass
@@ -36,7 +34,6 @@ private:
     double v_max; // Maximum velocity.
     double F_accel_max; // Maximum acceleration force.
     double F_brake_max; // Maximum braking force.
-    double F_accel_time_constant; // Time constant of acceleration force
     double max_brake_acceleration; // Braking acceleration magnitude lower bound.
     double max_brake_acceleration_front; // Braking acceleration magnitude lower bound for front vehicle.
     double beta; // From friction force: F = beta + gamma v^2. 
@@ -89,14 +86,6 @@ private:
     void setOptimizerParameters(const nlohmann::json &json_data);
     void setWeights(const nlohmann::json &json_data);
     void setReferences(const nlohmann::json &json_data);
-
-    // Generated Values Used in MPC Constraints
-    // mat<Tnx, Tnx>    A;
-    // mat<Tnu, Tnu>    B;
-    // mat<Tndu, Tndu> Bd;
-    // double worst_case_front_velocity; // E.g., "\hat{v}_F"
-
-    // void updateMpcConstraints();
 
 public:
     // Constructor that initializes dimensions and calls setup

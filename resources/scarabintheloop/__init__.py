@@ -308,6 +308,7 @@ class Experiment:
       if pc: 
         print(f'iterations: {pc.metadata["iterations"]:04d} cost: {pc.metadata["cost"]:10.9g}, status: {pc.metadata["status"]}, constraint_error={pc.metadata["constraint_error"]}, dual_residual={pc.metadata["dual_residual"]}')
     printJson('x', experiment_data["x"])
+    printJson('u', experiment_data["u"])
 
   def __repr__(self):
     repr_str = f'Experiment("{self.label}", {self.status.name}'
@@ -904,8 +905,14 @@ def assert_consistent_simulation_config_dimensions(simulation_config: dict):
   u0 = simulation_config["u0"]
   state_dimension = simulation_config["system_parameters"]["state_dimension"]
   input_dimension = simulation_config["system_parameters"]["input_dimension"]
+  x_names = simulation_config["system_parameters"]["x_names"]
+  u_names = simulation_config["system_parameters"]["u_names"]
   assert len(x0) == state_dimension, f'x0={x0} did not have the expected number of entries: state_dimension={state_dimension}'
   assert len(u0) == input_dimension, f'u0={u0} did not have the expected number of entries: input_dimension={input_dimension}'
+  assert len(x_names) == state_dimension, \
+          f'x_names={x_names} did not have the expected number of entries: state_dimension={state_dimension}'
+  assert len(u_names) == input_dimension, \
+          f'u_names={simulation_config["u_names"]} did not have the expected number of entries: input_dimension={input_dimension}'
   
 
 

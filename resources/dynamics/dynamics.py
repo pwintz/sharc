@@ -86,8 +86,7 @@ class ACC2Dynamics(OdeDynamics):
       # System parameters
       self.beta  = self.config["system_parameters"]["beta"]              
       self.gamma = self.config["system_parameters"]["gamma"]             
-      self.M     = self.config["system_parameters"]["mass"]                  # "M"
-      self.tau   = self.config["system_parameters"]["F_accel_time_constant"] # "tau"
+      self.M     = self.config["system_parameters"]["mass"]
 
     def system_derivative(self, t, x, u, w):
         """
@@ -101,11 +100,10 @@ class ACC2Dynamics(OdeDynamics):
         p       = x[0] # Position
         h       = x[1] # Headway
         v       = x[2] # Velocity
-        F_accel = x[3] # Acceleration Force
 
         # Separate input components
-        F_accel_ref = u[0]
-        F_brake     = u[1]
+        F_accel = u[0]
+        F_brake = u[1]
 
         # Exogenous Inputs
         v_front = w[0]
@@ -118,20 +116,19 @@ class ACC2Dynamics(OdeDynamics):
         pdot        = v
         hdot        = v_front - v
         vdot        = (1/self.M) * (F_accel - F_brake - F_friction)
-        F_accel_dot = (1/self.tau) * (F_accel_ref - F_accel)
+        # vdot        = F_accel - F_brake - F_friction
         
         # Calculate derivatives
-        dxdt = np.zeros((4,1), float)
+        dxdt = np.zeros((self.n, 1), float)
         dxdt[0] = pdot        # Position
         dxdt[1] = hdot        # Headway
         dxdt[2] = vdot        # Velocity
-        dxdt[3] = F_accel_dot # Acceleration Force
         
         assert dxdt.shape == x.shape, (dxdt.shape, x.shape)
         return dxdt
     
     def get_exogenous_input(self, t):
-        front_velocity = 16 + 2*math.sin(t) + 1*math.sin(3.23*t) + 0.4*math.sin(12.1*t)
+        front_velocity = 12 + 2*math.sin(t) + 1*math.sin(3.23*t) + 0.4*math.sin(12.1*t)
         return np.array([[front_velocity], [1.0]])
 
 class CartPoleDynamics(OdeDynamics):
