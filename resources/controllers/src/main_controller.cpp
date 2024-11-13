@@ -529,7 +529,7 @@ int main()
           bool is_dynamorio_trace = std::regex_match(full_path, dynamorio_trace_filename_regex);
           if (is_dynamorio_trace) {
             PRINT("- " << folder_entry.path().string())
-            std::string new_dir_name("dynamorio_trace_" +  std::to_string(i));
+            std::string new_dir_name("dynamorio_trace_" +  std::to_string(k));
             std::string new_path = std::regex_replace(full_path, dynamorio_trace_filename_regex, new_dir_name);
             
             if (global_debug_levels.debug_scarab_level >= 2) {
