@@ -37,6 +37,9 @@ def main():
   first_experiment = experiment_results[experiment_labels[0]]
   n = first_experiment["experiment config"]["system_parameters"]["state_dimension"]
   m = first_experiment["experiment config"]["system_parameters"]["input_dimension"]
+  x_names = first_experiment["experiment config"]["system_parameters"]['x_names']
+  y_names = first_experiment["experiment config"]["system_parameters"]['y_names']
+  u_names = first_experiment["experiment config"]["system_parameters"]['u_names']
   
   # Create a figure with subplots for each column
   n_plot_columns = 1 # len(experiment_labels)
@@ -45,7 +48,6 @@ def main():
   batches_axs            =            batches_axs.reshape(n, n_plot_columns)
   u_and_computations_axs = u_and_computations_axs.reshape(2, n_plot_columns)
   batches_axs[0,0].set_title(f'State')
-  x_names = first_experiment["experiment config"]["system_parameters"]['x names']
   
 
   # For now, we'll just plot the first experiment>>>----vvv

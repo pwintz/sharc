@@ -42,9 +42,9 @@
     "tau": 0.5,
     "yref": [10, 0],
     "convergence_termination_tol": 0.05,
-    "x names": ["v1", "a1", "d2", "v2", "a2"],
-    "u names": ["u"], 
-    "y names": ["d", "delta v"], 
+    "x_names": ["v1", "a1", "d2", "v2", "a2"],
+    "u_names": ["u"], 
+    "y_names": ["d", "delta v"], 
     "constraints":{
       "xmin": [-1e9, -1e9, -1e9,   0, -1e9], 
       "xmax": [ 1e9,  1e9,  1e9,  32,  1e9],
