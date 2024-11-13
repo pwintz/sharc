@@ -268,6 +268,7 @@ class Experiment:
         f'expected experiment_data["batches"] to be a list. Instead it was {type(experiment_data["batches"])}'
     assert isinstance(experiment_data["x"], list)
     assert isinstance(experiment_data["u"], list)
+    assert isinstance(experiment_data["w"], list)
     assert isinstance(experiment_data["t"], list)
     assert isinstance(experiment_data["k"], list)
     assert isinstance(experiment_data["i"], list)
@@ -667,11 +668,12 @@ def run_experiment_sequential(experiment_config, params_base: scarabizor.ParamsD
   simulation = Simulation.from_experiment_config_unbatched(experiment_config, params_base, n_time_steps=experiment_config["n_time_steps"])
   simulation.setup_files()
   simulation_data = simulation.run()
-  experiment_data = {"x": simulation_data.x,
-                     "u": simulation_data.u,
-                     "t": simulation_data.t,
-                     "k": simulation_data.k, # Time steps
+  experiment_data = {"k": simulation_data.k, # Time steps
                      "i": simulation_data.i, # Sample time indices
+                     "t": simulation_data.t,
+                     "x": simulation_data.x,
+                     "u": simulation_data.u, 
+                     "w": simulation_data.w, 
                      "pending_computations": simulation_data.pending_computation,
                      "batches": None,
                      "config": experiment_config}
@@ -967,13 +969,15 @@ def run_experiment_parallelized(experiment_config, params_base: list):
       assert np.array_equal(list_to_column_vec(batch.valid_simulation_data.u[0]), batch.batch_init.u0), \
       f'batch.valid_simulation_data.u[0] = {batch.valid_simulation_data.u[0]} must equal batch_init.u0={batch.batch_init.u0}'
 
-    experiment_data = {"batches": batch_list,
-                        "x": actual_time_series.x,
-                        "u": actual_time_series.u,
-                        "t": actual_time_series.t,
+    experiment_data = {
                         "k": actual_time_series.k, # Time steps
                         "i": actual_time_series.i, # Sample time indices
+                        "t": actual_time_series.t,
+                        "x": actual_time_series.x,
+                        "u": actual_time_series.u,
+                        "w": actual_time_series.w,
                         "pending_computations": actual_time_series.pending_computation,
+                        "batches": batch_list,
                         "config": experiment_config}
 
     writeJson(experiment_dir + "/experiment_data_incremental.json", experiment_data, label="Incremental experiment data")

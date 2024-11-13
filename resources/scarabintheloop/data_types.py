@@ -114,19 +114,17 @@ class TimeStepSeries:
   k0: int
   i0: int
   t0: float
-  x0: list
-  x: list
-  u: list
-  t: list
-  k: list
-  i: list
+  x0: List[float]
+  x: List[List[float]]
+  u: List[List[float]]
+  w: List[List[float]]
+  t: List[float] # time  
+  k: List[int]   # k_time_step 
+  i: List[int]   # i_time_index
   metadata: dict
   pending_computation_prior: ComputationData
   pending_computation: ComputationData
   cause_of_termination: str
-  # datetime_of_run
-  # _walltime_start
-  # walltime
 
   @staticmethod
   def _from_lists(k0, t_list, x_list, u_list, delay_list): 
@@ -156,7 +154,7 @@ class TimeStepSeries:
     time_series.append_multiple(t_list, x_list, u_list, pc_list)
     return time_series
 
-  def __init__(self, k0, t0, x0, pending_computation_prior=None):
+  def __init__(self, k0, t0, x0, pending_computation_prior: Union[ComputationData, None]=None):
     assert k0 is not None, f"k0={k0} must not be None"
     assert t0 is not None, f"t0={t0} must not be None"
     assert x0 is not None, f"x0={x0} must not be None"
@@ -180,6 +178,7 @@ class TimeStepSeries:
     ### Time-index aligned values ###
     self.x = []
     self.u = []
+    self.w = []
     self.t = []
     self.k = [] # Time step number
     self.i = [] # Sample index number
@@ -195,7 +194,7 @@ class TimeStepSeries:
     self.cause_of_termination: str = "In Progress"
     self.datetime_of_run = datetime.datetime.now().isoformat()
 
-  def finish(self, cause_of_termination=None):
+  def finish(self, cause_of_termination: Exception = None):
     self.walltime = time.time() - self._walltime_start
     if not cause_of_termination:
       self.cause_of_termination = "Finished"
@@ -260,6 +259,7 @@ class TimeStepSeries:
        and self.x0 == other.x0 \
        and self.x  == other.x  \
        and self.u  == other.u  \
+       and self.w  == other.w  \
        and self.t  == other.t  \
        and self.k  == other.k  \
        and self.i  == other.i  \
@@ -272,15 +272,17 @@ class TimeStepSeries:
     # Copy values.
     copied.x                   = self.x.copy()
     copied.u                   = self.u.copy()
+    copied.w                   = self.w.copy()
     copied.t                   = self.t.copy()
     copied.k                   = self.k.copy()
     copied.i                   = self.i.copy()
     copied.pending_computation = self.pending_computation.copy()
     return copied
 
-  def append(self, t_end, x_end, u, pending_computation: ComputationData, t_mid=None, x_mid=None):
+  def append(self, t_end, x_end, u, w, pending_computation: ComputationData, t_mid=None, x_mid=None, w_mid=None):
 
     assert isinstance(u, (np.ndarray, list)), f'u={u} had an unexpected type: {type(u)}. Must be a list or numpy array. For scalar values, make it a list of length 1.'
+    assert isinstance(w, (np.ndarray, list)), f'w={w} had an unexpected type: {type(w)}. Must be a list or numpy array. For scalar values, make it a list of length 1.'
     assert isinstance(x_end, (np.ndarray, list)), f'x_end={x_end} had an unexpected type: {type(x_end)}. Must be a list or numpy array. For scalar values, make it a list of length 1.'
     assert isinstance(t_end, (float, int)), f't_end={t_end} had an unexpected type: {type(t_end)}.'
     assert (t_mid is None) == (x_mid is None),  f'It must be that t_mid={t_mid} is None if and only if x_mid={x_mid} is None.'
@@ -292,6 +294,7 @@ class TimeStepSeries:
     # is_x_end_None = x_end is None
     x_end     = TimeStepSeries.cast_vector(x_end)
     u         = TimeStepSeries.cast_vector(u)
+    w         = TimeStepSeries.cast_vector(w)
     x_mid     = TimeStepSeries.cast_vector(x_mid)
 
     if x_end is None:
@@ -334,6 +337,7 @@ class TimeStepSeries:
       self.t                   += [            t_start,               t_end]
       self.x                   += [            x_start,               x_end]
       self.u                   += [                  u,                   u]
+      self.w                   += [                  w,                   w]
       self.pending_computation += [pending_computation, pending_computation]
 
     else: # A mid point was given, indicating an update to u part of the way through.
@@ -341,9 +345,11 @@ class TimeStepSeries:
       assert len(x_start) == len(x_end)
       u_mid = TimeStepSeries.cast_vector(pending_computation.u)
       assert len(u) == len(u_mid)
+      assert len(w) == len(w_mid)
       self.t += [t_start, t_mid, t_mid, t_end]
       self.x += [x_start, x_mid, x_mid, x_end]
       self.u += [       u,    u, u_mid, u_mid]
+      self.w += [       w,    w, w_mid, w_mid]
       self.k += [       k,    k,     k,     k]
       self.i += [       k,    k,     k, k + 1] # Sample index
       # The value of u_pending was applied, starting at t_mid, so it is no longer pending 
@@ -354,35 +360,44 @@ class TimeStepSeries:
                       t_end: List, 
                       x_end: List, 
                       u: List, 
+                      w: List, 
                       pending_computation: List, 
                       t_mid=None, 
-                      x_mid=None):
+                      x_mid=None, 
+                      w_mid=None):
     assert len(t_end) == len(x_end), \
       f"len(t_end)={len(t_end)} must equal len(x_end)={len(x_end)}"
 
     assert len(t_end) == len(u), \
       f"len(t_end)={len(t_end)} must equal len(u)={len(u)}"
     
+    assert len(t_end) == len(w), \
+      f"len(t_end)={len(t_end)} must equal len(w)={len(w)}"
+    
     assert len(t_end) == len(pending_computation), \
       f"len(t_end)={len(t_end)} must equal len(pending_computation)={len(pending_computation)}"
 
     for i in range(len(t_end)):
+      assert t_mid is None == x_mid is None, f"t_mid={t_mid} is None iff x_mid={x_mid} is None." 
+      assert t_mid is None == w_mid is None, f"t_mid={t_mid} is None iff w_mid={w_mid} is None." 
+      
       if t_mid is None:
         i_t_mid = None
+        i_x_mid = None
+        i_w_mid = None
       else:
         i_t_mid = t_mid[i]
-
-      if x_mid is None:
-        i_x_mid = None
-      else:
         i_x_mid = x_mid[i]
+        i_w_mid = w_mid[i]
 
-      self.append(t_end[i], x_end[i], u[i], pending_computation=pending_computation[i], t_mid=i_t_mid, x_mid=i_x_mid)
+      self.append(    t = t_end[i],    x = x_end[i], u = u[i],     w = w[i], pending_computation=pending_computation[i], 
+                  t_mid = i_t_mid, x_mid = i_x_mid,            w_mid = i_w_mid)
 
   def to_dict(self):
     return {
       "x":self.x,
       "u":self.u,
+      "w":self.w,
       "t":self.t,
       "k":self.k,
       "i":self.i,
@@ -437,6 +452,7 @@ class TimeStepSeries:
     concatenated = self.copy()
     concatenated.x                   += other.x
     concatenated.u                   += other.u
+    concatenated.w                   += other.w
     concatenated.t                   += other.t
     concatenated.k                   += other.k # Time step index
     concatenated.i                   += other.i # Sample time index
@@ -464,6 +480,7 @@ class TimeStepSeries:
     ndxs = slice(0, last_index_of_last_k+1)
     truncated.x                    = self.x[ndxs]
     truncated.u                    = self.u[ndxs]
+    truncated.w                    = self.w[ndxs]
     truncated.t                    = self.t[ndxs]
     truncated.k                    = self.k[ndxs]
     truncated.i                    = self.i[ndxs]
@@ -546,6 +563,7 @@ class TimeStepSeries:
     for i in range(len(self.x[0])):
       TimeStepSeries.print_sample_time_values(f"x_{i}(k)", [x[i] for x in self.x])
     TimeStepSeries.print_sample_time_values("u([k, k+1))", [u[0] for u in self.u])
+    TimeStepSeries.print_sample_time_values("w([k, k+1))", [w[0] for w in self.w])
     TimeStepSeries.print_sample_time_values("comp delay", [(pc.delay if pc else pc) for pc in self.pending_computation])
     TimeStepSeries.print_sample_time_values("comp u", [(pc.u[0][0] if pc else pc) for pc in self.pending_computation])
     TimeStepSeries.print_sample_time_values("comp t_end", [(pc.t_end if pc else pc) for pc in self.pending_computation])
