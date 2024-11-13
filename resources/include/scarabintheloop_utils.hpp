@@ -79,9 +79,12 @@ template<int rows>
 void assertVectorLessThan(const std::string&  left_name, const mpc::cvec<rows> left, 
                           const std::string& right_name, const mpc::cvec<rows> right) {
     for(int row = 0; row < rows; row++) {
-      PRINT(       left_name << "[" << row << "]: " <<  left[row] << " must be less than " 
-              <<  right_name << "[" << row << "]: " << right[row])
-      assert(left[row] <= right[row] - 0.1);
+      if (left[row] > right[row] - 0.1){
+        std::ostringstream oss;
+        oss <<  left_name << "[" << row << "]: " <<  left[row] << " must be less than " 
+            << right_name << "[" << row << "]: " << right[row];
+        throw std::runtime_error(oss.str());
+      }
     }
 }
 

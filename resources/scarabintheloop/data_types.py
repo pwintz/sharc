@@ -322,8 +322,7 @@ class TimeStepSeries:
     if pending_computation and pending_computation.t_start < t_start:
       assert pending_computation_prev == pending_computation
     
-
-    assert t_start < t_end,                f't_start={t_start} >= t_end={t_end}. self:{self}'
+    assert t_start < t_end, f't_start={t_start} must be greater than or equal to t_end={t_end}. self:{self}'
     if t_mid: 
       assert t_start <= t_mid and t_mid <= t_end, f'We must have t_start={t_start} <= t_mid={t_mid} <= t_end={t_end}'
 
@@ -472,7 +471,7 @@ class TimeStepSeries:
 
     if truncated.n_time_steps > 0:
       assert truncated.k[-2] == truncated.k[-1]
-      assert truncated.t[-2] < truncated.t[-1]
+      assert truncated.t[-2]  < truncated.t[-1]
 
     return truncated 
 
@@ -523,23 +522,13 @@ class TimeStepSeries:
       if pc is not None and pc.delay > sample_time:
         has_missed_computation_time = True
         first_late_timestep = self.k[i_step]
-        # print(f'first_late_timestep: {first_late_timestep}')
         return first_late_timestep, has_missed_computation_time 
     
     has_missed_computation_time = False
     return None, has_missed_computation_time
 
   def printTimingData(self, label):
-    timing_data = {
-      "t0": self.t0,
-      "k0": self.k0,
-      "t":  self.t,
-      "k":  self.k,
-      "i":  self.i
-    }
-    # printJson(label + ' (timing data)', timing_data)
-    
-    print(f'{label} timing data:')
+    print(f'{label} (timing data):')
     TimeStepSeries.print_sample_time_values("k_time_step", self.k)
     TimeStepSeries.print_sample_time_values("i_sample_ndx", self.i)
     TimeStepSeries.print_sample_time_values("t(k)", self.t)

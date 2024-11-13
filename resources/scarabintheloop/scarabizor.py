@@ -11,12 +11,12 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 
 from abc import ABC, abstractmethod #  AbstractBaseClass
 
-from scarabintheloop.utils import run_shell_cmd, assertFileExists, openLog
+from scarabintheloop.utils import run_shell_cmd, assertFileExists, openLog, seconds_to_duration_string
 
 from scarab_globals import *
 from scarab_globals import scarab_paths
+import scarabintheloop.debug_levels as debug_levels
 
-debug_scarab_level = 0
 
 # params_in_dir = 'docker_user_home'
 log_dir_regex = re.compile(r"\nLog directory is (.*?)\n")
@@ -480,14 +480,15 @@ class ScarabTracesToComputationTimesProcessor(TracesToComputationTimesProcessor)
 
   @staticmethod 
   def portabalize_trace(trace_dir): 
-    print(f"Starting portabilization of trace in {trace_dir}.")
+    if debug_levels.debug_scarab_level >= 1:
+      print(f"Starting portabilization of trace in {trace_dir}.")
     log_path = trace_dir + "/portabilize.log"
     with openLog(log_path, f"Portablize \"{trace_dir}\"") as portabilize_log:
       try:
           run_shell_cmd("run_portabilize_trace.sh", working_dir=trace_dir, log=portabilize_log)
       except Exception as e:
         raise Exception(f'failed to portablize trace in {trace_dir}. See logs: {portabilize_log}') from e
-    if debug_scarab_level > 1:
+    if debug_levels.debug_scarab_level > 1:
       print(f"Finished portabilization of trace in {trace_dir}.")
 
   def get_computation_time_from_trace(self, dir_index):
@@ -512,7 +513,9 @@ class ScarabTracesToComputationTimesProcessor(TracesToComputationTimesProcessor)
                     "--cbp_trace_r0=trace", 
                     "--memtrace_modules_log=bin"] 
     with openLog(log_path, header_text=f"Scarab log for {trace_dir}") as scarab_log:
+      start_time = time.time()
       run_shell_cmd(scarab_cmd, working_dir=trace_dir, log=scarab_log)
+      end_time = time.time()
 
     # Read the generated statistics files.
     stats_reader = ScarabStatsReader(trace_dir, is_using_roi=False)
@@ -520,12 +523,13 @@ class ScarabTracesToComputationTimesProcessor(TracesToComputationTimesProcessor)
     computation_time = stats_reader.readTime(stats_file_index)
     if computation_time == 0:
       raise ValueError(f'The computation time was zero (computation_time = {computation_time}). This typically indicates that Scarab did not find a PARAMS.in file.')
-    data = {
-            "index": int(dir_index), 
-            "trace_dir": trace_dir, 
-            "computation_time": computation_time
-            }
-    print(f"Finished Scarab simulation. Time to compute controller: {computation_time} seconds.")
+    # data = {
+    #         "index": int(dir_index), 
+    #         "trace_dir": trace_dir, 
+    #         "computation_time": computation_time
+    #         }
+    runtime_str = seconds_to_duration_string(end_time - start_time)
+    print(f"Finished Scarab simulation for k={dir_index}. The (simulated) computational delay is {computation_time:.3f} seconds. The simulation took {runtime_str} to run.")
     # return data
     return float(computation_time)
 

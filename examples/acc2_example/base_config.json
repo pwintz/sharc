@@ -22,7 +22,7 @@
     "computation_delay_y-intercept": 0.147
   },
   "==== Debgugging Levels ====": {
-    "debug_program_flow_level": 2,
+    "debug_program_flow_level": 1,
     "debug_interfile_communication_level": 1,
     "debug_optimizer_stats_level": 1,
     "debug_dynamics_level":        0,
@@ -62,8 +62,8 @@
       "delta_input_cost_weight": 1.0 
     }, 
     "osqp_options": {
-      "abs_tolerance": 1e-5,
-      "rel_tolerance": 1e-5,
+      "abs_tolerance": 1e-3,
+      "rel_tolerance": 1e-3,
       "dual_infeasibility_tolerance": 1e-3,
       "primal_infeasibility_tolerance": 1e-3,
       "maximum_iteration": 10000,
