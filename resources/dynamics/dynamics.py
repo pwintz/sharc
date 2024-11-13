@@ -128,7 +128,7 @@ class ACC2Dynamics(OdeDynamics):
         return dxdt
     
     def get_exogenous_input(self, t):
-        front_velocity = 12 + 2*math.sin(t) + 1*math.sin(3.23*t) + 0.4*math.sin(12.1*t)
+        front_velocity = 11 + 2*math.sin(t) + 1*math.sin(3.23*t) + 0.4*math.sin(12.1*t)
         return np.array([[front_velocity], [1.0]])
 
 class CartPoleDynamics(OdeDynamics):
