@@ -335,9 +335,9 @@ int main()
                    "-client_lib ';;-offline'"))
         std::cerr << "failed to set env var!\n";
   #elif defined(USE_EXECUTION_DRIVEN_SCARAB)
-    PRINT_WITH_FILE_LOCATION("Running without DyanmoRIO (Execution-driven Scarab or just plain execution)")
+    PRINT_WITH_FILE_LOCATION("Running without DynamoRIO (Execution-driven Scarab or just plain execution)")
   #else
-    PRINT_WITH_FILE_LOCATION("Not using Scarab or DyanmoRIO to track statistics.")
+    PRINT_WITH_FILE_LOCATION("Not using Scarab or DynamoRIO to track statistics.")
   #endif
   PRINT("PREDICTION_HORIZON: " << PREDICTION_HORIZON)
   PRINT("CONTROL_HORIZON: " << CONTROL_HORIZON)
@@ -445,6 +445,9 @@ int main()
     if (!status_reader.is_simulator_running()){
       break;
     }
+    if (global_debug_levels.debug_program_flow_level >= 1) {
+      PRINT(std::endl << "k = " << k << ", t = " << t )
+    }
 
     // Begin a batch of Scarab statistics
     #if defined(USE_DYNAMORIO)
@@ -544,14 +547,14 @@ int main()
             }
             is_first_dir_found = false;
           } else {
-            // PRINT("- Not a DyanmoRIO trace directory: " << full_path)
+            // PRINT("- Not a DynamoRIO trace directory: " << full_path)
           }
       }
       if (is_first_dir_found) {
         throw std::runtime_error("No DynamoRIO trace folder found in " + folder.string());
       }
 
-      PRINT_WITH_FILE_LOCATION("Finished saving trace with DyanmoRIO")
+      PRINT_WITH_FILE_LOCATION("Finished saving trace with DynamoRIO")
     #elif defined(USE_EXECUTION_DRIVEN_SCARAB)
         // Save a batch of Scarab statistics
           if (global_debug_levels.debug_scarab_level >= 1) {

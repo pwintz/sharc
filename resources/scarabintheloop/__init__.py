@@ -290,11 +290,12 @@ class Experiment:
 
     writeJson(os.path.join(self.experiment_dir, "experiment_result.json"), self.result)
 
-    for pc in experiment_data["pending_computations"]:
-      if pc: 
-        print(f'iterations: {pc.metadata["iterations"]:04d} cost: {pc.metadata["cost"]:10.9g}, status: {pc.metadata["status"]}, constraint_error={pc.metadata["constraint_error"]}, dual_residual={pc.metadata["dual_residual"]}')
-    printJson('x', experiment_data["x"])
-    printJson('u', experiment_data["u"])
+    if (debug_levels.debug_optimizer_stats_level >= 1):
+      for k, pc in enumerate(experiment_data["pending_computations"][::2]):
+        if pc: 
+          print(f'k={k}. iterations: {pc.metadata["iterations"]:04d} cost: {pc.metadata["cost"]:10.9g}, status: {pc.metadata["status"]}, constraint_error={pc.metadata["constraint_error"]}, dual_residual={pc.metadata["dual_residual"]}')
+    # printJson('x', experiment_data["x"])
+    # printJson('u', experiment_data["u"])
 
   def __repr__(self):
     repr_str = f'Experiment("{self.label}", {self.status.name}'
@@ -515,13 +516,11 @@ class Simulation:
       # Execute the simulation.
       simulation_data = self.simulation_executor.run_simulation()
       
-      sim_data_path = os.path.join(self.simulation_dir, 'simulation_data.json')
       if debug_levels.debug_program_flow_level >= 1:
         printHeader2(f'Finished Simulation: "{self.label}"')
         print(f'↳ Simulation dir: {self.simulation_dir}')
         print(f'↳ Controller log: {self.controller_log_path}')
         print(f'↳      Plant log: {self.plant_log_path}')
-        print(f"↳  Data out file: {sim_data_path}")
       
       simulation_data.metadata["controller_log_path"] = self.controller_log_path
       simulation_data.metadata["plant_log_path"]      = self.plant_log_path

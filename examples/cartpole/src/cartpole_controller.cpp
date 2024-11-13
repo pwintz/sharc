@@ -436,14 +436,14 @@ int main()
             }
             is_first_dir_found = false;
           } else {
-            // PRINT("- Not a DyanmoRIO trace directory: " << full_path)
+            // PRINT("- Not a DynamoRIO trace directory: " << full_path)
           }
       }
       if (is_first_dir_found) {
         throw std::runtime_error("No DynamoRIO trace folder found in " + folder.string());
       }
 
-      PRINT_WITH_FILE_LOCATION("Finished saving trace with DyanmoRIO")
+      PRINT_WITH_FILE_LOCATION("Finished saving trace with DynamoRIO")
     #else
       if (!json_data["Simulation Options"]["use_fake_scarab_computation_times"]) {
         // Save a batch of Scarab statistics
