@@ -80,6 +80,7 @@ def run(sim_dir: str, config_data: dict, dynamics: Dynamics, controller_interfac
       t_mid   = None
       t_end   = (k_time_step + 1) * sample_time
       x_mid   = None
+      w_mid   = None
 
       w = dynamics.get_exogenous_input(t_start)
       u_after, pending_computation_after, _ = controller_interface.get_u(k_time_step, t_start, x_start, u_before, w, pending_computation_before)
@@ -89,10 +90,6 @@ def run(sim_dir: str, config_data: dict, dynamics: Dynamics, controller_interfac
         
       assert pending_computation_after is not None, f'pending_computation_after is None'
 
-      # if pending_computation_after.delay:
-      #   assert pending_computation_after.delay < 2*sample_time, \
-      #     "Missing a computation by multiple time steps is not supported, yet."
-
       if only_update_control_at_sample_times or pending_computation_after.delay >= sample_time:
         # Evolve state for entire time step and then update u_after
         (t_end, x_end) = dynamics.evolve_state(t_start, x_start, u_after, w, t_end)
@@ -100,6 +97,7 @@ def run(sim_dir: str, config_data: dict, dynamics: Dynamics, controller_interfac
         # Evolve the state halfway and then update u.
         t_mid = pending_computation_after.t_end
         u_mid = pending_computation_after.u
+        w_mid = dynamics.get_exogenous_input(t_mid)
         (t_mid, x_mid) = dynamics.evolve_state(t_start, x_start, u_after, w, t_mid)
         (t_end, x_end) = dynamics.evolve_state(t_mid,   x_mid,     u_mid, w, t_end)
         assert pending_computation_after.delay < sample_time
@@ -113,12 +111,14 @@ def run(sim_dir: str, config_data: dict, dynamics: Dynamics, controller_interfac
         print(f'u_before={u_before}, u_after={u_after}')
 
       # Save the data.
-      time_step_series.append(t_end=t_end, 
-                              x_end=x_end, 
-                              u    =u_after, 
-                              pending_computation=pending_computation_after, 
-                              t_mid=t_mid, 
-                              x_mid=x_mid)
+      time_step_series.append(t_end = t_end, 
+                              x_end = x_end, 
+                              u     = u_after, 
+                              w     = w,
+                              pending_computation = pending_computation_after, 
+                              t_mid = t_mid, 
+                              x_mid = x_mid,
+                              w_mid = w_mid)
       
       assert time_step_series.last_time_step == k_time_step
       if debug_levels.debug_dynamics_level >= 1:
