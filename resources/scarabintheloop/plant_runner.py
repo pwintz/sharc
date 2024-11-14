@@ -83,10 +83,12 @@ def run(sim_dir: str, config_data: dict, dynamics: Dynamics, controller_interfac
       w_mid   = None
 
       w = dynamics.get_exogenous_input(t_start)
-      u_after, pending_computation_after, _ = controller_interface.get_u(k_time_step, t_start, x_start, u_before, w, pending_computation_before)
+      u_after, pending_computation_after, did_start_computation = controller_interface.get_u(k_time_step, t_start, x_start, u_before, w, pending_computation_before)
       
       if pending_computation_before is None:
         assert np.array_equal(u_before, u_after), f'When there is no pending computation, u cannot change from u_before={u_before} to u_after={u_after}.'
+      else:
+        assert pending_computation_before == pending_computation_after or pending_computation_before.t_end <= pending_computation_after.t_start, f'pending_computation_before.t_end={pending_computation_before.t_end} must be less than pending_computation_after.t_start={pending_computation_after.t_start}. did_start_computation={did_start_computation}' 
         
       assert pending_computation_after is not None, f'pending_computation_after is None'
 
@@ -138,9 +140,6 @@ def run(sim_dir: str, config_data: dict, dynamics: Dynamics, controller_interfac
     time_step_series.finish(repr(err))
     traceback.print_exc()
     raise err
-  finally:
-    controller_interface.close()
-
 
   print(f'time_step_series at end of run(): {time_step_series}')
   return time_step_series

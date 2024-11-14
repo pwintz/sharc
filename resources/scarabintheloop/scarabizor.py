@@ -386,19 +386,25 @@ class TracesToComputationTimesProcessor(ABC):
   def get_computation_time_from_trace(self):
     pass
 
-  def get_all_computation_times(self):
-    sorted_indices = self._get_trace_directories_indices()
-    # print('sorted_trace_dirs', sorted_trace_dirs)
-    # print('self.sim_dir:', self.sim_dir)
+  def get_all_computation_times(self) -> Dict[int, float]:
+    k_of_computation = self._get_trace_directories_indices()
+    assert k_of_computation is not None, f'k_of_computation={k_of_computation} should not be None.'
 
-    if len(sorted_indices) > os.cpu_count():
+    if len(k_of_computation) > os.cpu_count():
       warnings.warn("There were more traces generated in a batch than the number of CPUs.", Warning)
 
+    for i in range(1, len(k_of_computation)):
+      assert k_of_computation[i-1] + 1 == k_of_computation[i] , f'The list k_of_computation={k_of_computation} must not contain any gaps.'
+
     with ProcessPoolExecutor(max_workers = os.cpu_count()) as scarab_executor:
-      computation_times = scarab_executor.map(self.get_computation_time_from_trace, sorted_indices)
+      computation_times = scarab_executor.map(self.get_computation_time_from_trace, k_of_computation)
     
-    # The executor returns a iterator, but we want a list.
-    return list(computation_times)
+    # Convert the generator into a list, so it is easier to work with.
+    computation_times = list(computation_times)
+    assert len(k_of_computation) == len(computation_times)
+    
+    # Create a dictionary with the keys being the values of "k" and the values be corresponding computation time.
+    return dict(zip(k_of_computation, computation_times))
 
   def _get_trace_directory_from_index(self, index):
     trace_dir = os.path.join(self.sim_dir, f'dynamorio_trace_{index}')

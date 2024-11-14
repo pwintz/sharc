@@ -29,6 +29,7 @@ class MockControllerInterface(ControllerInterface):
     self.t_prediction = 0
     self.iterations = 0
     self.simulator_status = None
+    self.metadata = {}
 
   def get_last_x_written(self):
     return self.x_last_write
@@ -75,15 +76,6 @@ class MockControllerInterface(ControllerInterface):
   # Override abstract superclass function 
   def _read_u(self):
     return self.u
-    
-  # Override abstract superclass function 
-  def _read_x_prediction(self):
-    return self.x_prediction
-    
-  # Override abstract superclass function 
-  def _read_t_prediction(self):
-    return self.t_prediction
-    
-  # Override abstract superclass function 
-  def _read_iterations(self):
-    return self.iterations
+  
+  def _read_metadata(self):
+    return self.metadata

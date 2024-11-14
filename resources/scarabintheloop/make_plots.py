@@ -10,19 +10,6 @@ from typing import List, Set, Dict, Tuple, Union
 import numpy as np
 import matplotlib.pyplot as plt
 
-
-def plot_x_vs_t(batches_axs, sim_data):
-  x = sim_data['x']
-  t = sim_data['t']
-  x = np.array(x)
-  # print(x)
-  # print(t)
-
-  # Plot each column in a separate subplot
-  for i in range(x.shape[1]):
-      batches_axs[i,0].plot(t, x[:, i], label=f"x_{i+1}")
-      batches_axs[i,0].set_xlabel('Time')
-
 def main():
   parser = argparse.ArgumentParser(prog='Generate Plots')
   parser.add_argument('experiment_path')           # positional argument
