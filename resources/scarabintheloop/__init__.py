@@ -285,7 +285,7 @@ class Experiment:
 
     # Check that we have the expected number of time steps. In particular, the last value of k must be one less
     # than n_time_steps because k is zero-indexed.
-    assert experiment_data["k"][-1] == self.experiment_config["n_time_steps"] - 1, \
+    assert experiment_data["k"][-1] <= self.experiment_config["n_time_steps"] - 1, \
       f'experiment_data["k"][-1]={experiment_data["k"][-1]} must equal n_time_steps-1={self.experiment_config["n_time_steps"] - 1}. ({self.label})'
 
     writeJson(os.path.join(self.experiment_dir, "experiment_result.json"), self.result)
@@ -303,6 +303,8 @@ class Experiment:
       repr_str += f', error msg: "{self.exception}"'
     if self.run_time:
       repr_str += f' in {seconds_to_duration_string(self.run_time)}'
+    if self.result and self.result["experiment data"]["batches"]:
+      repr_str += f' with {len(self.result["experiment data"]["batches"])} batches'
     repr_str += ')'
     return repr_str
 
@@ -413,8 +415,8 @@ class Simulation:
     self.x0                  = x0
     self.u0                  = u0
     self.simulation_dir      = simulation_dir
-    self.first_time_index    = first_time_index
-    self.n_time_steps        = n_time_steps
+    self.first_time_index    = int(first_time_index)
+    self.n_time_steps        = int(n_time_steps)
     self.pending_computation = pending_computation
     self.params              = params
 
@@ -462,12 +464,7 @@ class Simulation:
     PARAMS_out_file = os.path.join(self.simulation_dir, 'PARAMS.generated')
     self.params.to_file(PARAMS_out_file)
 
-    # # Create the pipe files in the current directory.
-    # run_shell_cmd("make_scarabintheloop_pipes.sh", working_dir=self.simulation_dir)
-    # assertFileExists(self.simulation_dir + "/u_c++_to_py")
-    # assertFileExists(self.simulation_dir + "/x_py_to_c++")
-
-    sample_time = self.sim_config["system_parameters"]["sample_time"]
+    sample_time     = self.sim_config["system_parameters"]["sample_time"]
     use_fake_delays = self.sim_config["Simulation Options"]["use_fake_delays"]
     if use_fake_delays:
       # Create some fake delay data.
@@ -475,20 +472,17 @@ class Simulation:
       fake_delays = [0.1*sample_time]*self.n_time_steps
 
       # Update one of the queued delays to be longer than the sample time
-      index_for_delay = 1e9
-      if len(fake_delays) >= index_for_delay+1:
-        fake_delays[index_for_delay] = 1.1*sample_time
+      ndx_start_of_long_delays = 1 # self.n_time_steps // 2
+      for index_for_delay in range(ndx_start_of_long_delays, self.n_time_steps):
+      # if self.n_time_steps >= index_for_delay+1:
+        fake_delays[index_for_delay] = 200 # *sample_time
     else:
       fake_delays = None
 
     in_the_loop_delay_provider =  self.sim_config["Simulation Options"]["in-the-loop_delay_provider"]
-    # delay_provider_config = sim_config["Simulation Options"]["in-the-loop_delay_provider"]
-    # assert in_the_loop_delay_provider == "execution-driven scarab", \
-    #   f'delay_provider_config={in_the_loop_delay_provider} must be "execution-driven scarab" when doing serial execution.'
     computation_delay_provider = computation_delay_provider_factory(in_the_loop_delay_provider, self.simulation_dir, sample_time, fake_delays)
     
     controller_interface = PipesControllerInterface(computation_delay_provider, self.simulation_dir)
-    # controller_interface_factory("pipes", computation_delay_provider, )
 
     self.simulation_executor = getSimulationExecutor(
                                                 self.simulation_dir, 
@@ -662,7 +656,7 @@ def main():
   if experiment_list.n_failed():
     exit(1)
 
-def run_experiment_sequential(experiment_config, params_base: scarabizor.ParamsData):
+def run_experiment_sequential(experiment_config, params_base: scarabizor.ParamsData) -> dict:
   print(f'Start of run_experiment_sequential(<{experiment_config["experiment_label"]}>)')
   simulation = Simulation.from_experiment_config_unbatched(experiment_config, params_base, n_time_steps=experiment_config["n_time_steps"])
   simulation.setup_files()
@@ -753,21 +747,22 @@ class Batch:
     assert isinstance(batch_init, BatchInit)
     assert isinstance(full_simulation_data, TimeStepSeries)
     assert isinstance(sample_time, float)
+    assert full_simulation_data.pending_computation[0] is not None
     self.batch_init      = batch_init
     self.full_simulation_data = full_simulation_data.copy()
 
-    first_late_timestep, has_missed_computation = full_simulation_data.find_first_late_timestep(sample_time)
+    first_late_timestep = full_simulation_data.find_first_missed_computation_started_during_series()
 
-    if has_missed_computation:
-      valid_simulation_data = full_simulation_data.truncate(first_late_timestep)
-    else: 
+    if first_late_timestep is None:
       valid_simulation_data = full_simulation_data.copy()
+    else: 
+      valid_simulation_data = full_simulation_data.truncate(last_k = first_late_timestep)
 
     if debug_levels.debug_batching_level >= 2:
-      if has_missed_computation:
-        valid_simulation_data.printTimingData(f'valid_simulation_data (truncated to {first_late_timestep} time steps.)')
-      else:
+      if first_late_timestep is None:
         valid_simulation_data.printTimingData(f'valid_simulation_data (no truncated time steps.)')
+      else:
+        valid_simulation_data.printTimingData(f'valid_simulation_data (truncated to {first_late_timestep} time steps.)')
 
     # # Check that the next_first_time_index doesn't skip over any timesteps.
     # last_time_index_in_previous_batch = valid_simulation_data.last_time_index
@@ -781,7 +776,7 @@ class Batch:
     else:
       self.first_late_timestep  = None
       self.last_valid_timestep  = full_simulation_data.k[-1]
-    self.has_missed_computation = has_missed_computation
+    self.has_missed_computation = first_late_timestep is not None
     self.valid_simulation_data  = valid_simulation_data
 
   def next_init(self) -> BatchInit:
@@ -921,6 +916,8 @@ def run_experiment_parallelized(experiment_config, params_base: list):
     simulation.setup_files()
     batch_sim_data = simulation.run()
 
+    assert batch_sim_data.pending_computation[0] is not None, f'There must be a computation during the first time step.'
+
     if debug_levels.debug_configuration_level >= 1 and debug_levels.debug_batching_level >= 1:
       printJson("simulation config", simulation.sim_config)
       print('batch_init:', batch_init)
@@ -957,7 +954,7 @@ def run_experiment_parallelized(experiment_config, params_base: list):
     batch_list.append(batch)
     # Append all of the valid data (up to the point of the missed computation) except for the first index, 
     # which overlaps with the last index of the previous batch.
-    batch.valid_simulation_data.printTimingData(f'Actual time series before appending batch #{actual_time_series}')
+    actual_time_series.printTimingData(f'Actual time series before appending batch #{batch.batch_init.i_batch}')
     batch.valid_simulation_data.printTimingData(f'Batch #{batch.batch_init.i_batch}')
     actual_time_series += batch.valid_simulation_data
     pending_computation = batch.batch_init.pending_computation
@@ -1143,7 +1140,6 @@ class SimulationExecutor(ABC):
     except Exception as e:
       self.plant_log.write(f'Plant dynamics had an error: {e}')
       raise Exception(f'Plant dynamics for "{sim_label}" had an error. See logs: {self.plant_log.name}') from e
-      
     finally:
       self.controller_interface.close()
 
@@ -1260,16 +1256,8 @@ class ParallelSimulationExecutor(SimulationExecutor):
     use simulated computation times. In this function, we simulate the traces 
     using Scarab to get the computation times.
     """
-    computation_times = self.trace_processor.get_all_computation_times()
-    while len(computation_times) < simulation_data.n_time_steps :
-      computation_times += [None]
-    assert len(computation_times) == simulation_data.n_time_steps , \
-          f"""computation_times={computation_times} must have 
-          simulation_data.n_time_steps={simulation_data.n_time_steps } many values, 
-          because there is a computation during each time step. 
-          None values represent times when computations are not running.
-          """
-    simulation_data.overwrite_computation_times(computation_times)
+    computation_delay_for_k_dict = self.trace_processor.get_all_computation_times()
+    simulation_data.overwrite_computation_times(computation_delay_for_k_dict)
     return simulation_data
 
 

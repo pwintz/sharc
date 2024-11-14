@@ -19,6 +19,7 @@ def create_batch(i_batch:int, k0: int, n_time_steps: int, k_of_missed_time_step=
   t_list = [SAMPLE_TIME*k for k in range(k0, k_end + 1)]
   x_list = [[ 10.0*k, 10.0*k+0.1] for k in range(k0, k_end + 1)]
   u_list = [[-10.0*k,-10.0*k-0.1] for k in range(k0, k_end)]
+  w_list = [[-11.0*k,-11.0*k-0.1] for k in range(k0, k_end)]
   delay_list = [0.1*SAMPLE_TIME if k != k_of_missed_time_step else 1.1* SAMPLE_TIME for k in range(k0, k_end)]
   assert len(t_list) == n_time_steps + 1
   assert len(x_list) == n_time_steps + 1
@@ -36,6 +37,7 @@ def create_batch(i_batch:int, k0: int, n_time_steps: int, k_of_missed_time_step=
       t_list=t_list,
       x_list=x_list,
       u_list=u_list,
+      w_list=w_list,
       delay_list=delay_list
     )
   return Batch(batch_init, full_simulation_data, SAMPLE_TIME)
@@ -98,6 +100,7 @@ class Test_create_batch(unittest.TestCase):
         t_list=[10*SAMPLE_TIME, 11*SAMPLE_TIME, 12*SAMPLE_TIME],
         x_list=[[100, 100.1],   [110, 110.1],          [120, 120.1]],
         u_list=[        [-100, -100.1],   [-110, -110.1]],
+        w_list=[        [-111, -111.1],   [-220, -220.1]],
         delay_list=[0.1*SAMPLE_TIME, 0.1*SAMPLE_TIME]
       )
     batch_init = BatchInit(i_batch=2, 

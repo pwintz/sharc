@@ -38,7 +38,6 @@ class ComputationData:
       if not isinstance(value, (float, int)):
           raise ValueError(f"delay must be a float or int. instead it was {type(value)}")
       self._delay = float(value)
-      self._t_end = self._t_start + self._delay  # Update t_end whenever delay changes
 
   @property
   def u(self) -> np.ndarray:
@@ -122,17 +121,24 @@ class TimeStepSeries:
   k: List[int]   # k_time_step 
   i: List[int]   # i_time_index
   metadata: dict
-  pending_computation_prior: ComputationData
-  pending_computation: ComputationData
+  pending_computation_prior: Union[ComputationData, None]
+  pending_computation: List[Union[ComputationData, None]]
   cause_of_termination: str
 
   @staticmethod
-  def _from_lists(k0, t_list, x_list, u_list, delay_list): 
+  def _from_lists(k0: int, 
+                  t_list: List[float], 
+                  x_list: List[np.ndarray], 
+                  u_list: List[np.ndarray], 
+                  w_list: List[np.ndarray], 
+                  delay_list: List[Union[float, None]], # "None" indicates to use the previous computation.
+                  pending_computation_prior: Union[ComputationData, None] = None): 
     # Make copies of the lists so that modificaitons don't effect the 
     # lists where this function is called.
     t_list     = t_list.copy()    
     x_list     = x_list.copy()
     u_list     = u_list.copy()
+    w_list     = w_list.copy()
     delay_list = delay_list.copy()
 
     assert isinstance(k0, int)
@@ -145,13 +151,19 @@ class TimeStepSeries:
     assert len(t_list) == len(u_list) + 1 , f'len(t_list)={len(t_list)} must equal = len(u_list) + 1 = {len(u_list) + 1}'
     
     pc_list = []
-    for i in range(len(delay_list)):
-      pc_list.append(ComputationData(t_list[i], delay_list[i], 0.0))
+    for i, delay in enumerate(delay_list):
+      if delay is not None: 
+        pc_list.append(ComputationData(t_list[i], delay, 0.0))
+      elif len(pc_list) > 0:
+        pc_list.append(pc_list[-1])
+      else:
+        assert pending_computation_prior is not None
+        pc_list.append(pending_computation_prior)
 
     t0 = t_list.pop(0) # Pop first element.
     x0 = x_list.pop(0) # Pop first element.
-    time_series = TimeStepSeries(k0, t0, x0)
-    time_series.append_multiple(t_list, x_list, u_list, pc_list)
+    time_series = TimeStepSeries(k0, t0, x0, pending_computation_prior)
+    time_series.append_multiple(t_list, x_list, u_list, w_list, pc_list)
     return time_series
 
   def __init__(self, k0, t0, x0, pending_computation_prior: Union[ComputationData, None]=None):
@@ -281,10 +293,11 @@ class TimeStepSeries:
 
   def append(self, t_end, x_end, u, w, pending_computation: ComputationData, t_mid=None, x_mid=None, w_mid=None):
 
-    assert isinstance(u, (np.ndarray, list)), f'u={u} had an unexpected type: {type(u)}. Must be a list or numpy array. For scalar values, make it a list of length 1.'
-    assert isinstance(w, (np.ndarray, list)), f'w={w} had an unexpected type: {type(w)}. Must be a list or numpy array. For scalar values, make it a list of length 1.'
+    assert isinstance(u, (np.ndarray, list)),     f'u={u} had an unexpected type: {type(u)}. Must be a list or numpy array. For scalar values, make it a list of length 1.'
+    assert isinstance(w, (np.ndarray, list)),     f'w={w} had an unexpected type: {type(w)}. Must be a list or numpy array. For scalar values, make it a list of length 1.'
     assert isinstance(x_end, (np.ndarray, list)), f'x_end={x_end} had an unexpected type: {type(x_end)}. Must be a list or numpy array. For scalar values, make it a list of length 1.'
-    assert isinstance(t_end, (float, int)), f't_end={t_end} had an unexpected type: {type(t_end)}.'
+    assert isinstance(t_end, (float, int)),       f't_end={t_end} had an unexpected type: {type(t_end)}.'
+    assert isinstance(pending_computation, ComputationData), f'pending_computation={pending_computation} had an unexpected type: {type(pending_computation)}. Must be ComputationData.'
     assert (t_mid is None) == (x_mid is None),  f'It must be that t_mid={t_mid} is None if and only if x_mid={x_mid} is None.'
     if t_mid:
       assert isinstance(t_mid, (float, int)), f't_mid={t_mid} had an unexpected type: {type(t_mid)}.'
@@ -324,6 +337,12 @@ class TimeStepSeries:
     # then the new pending computation must equal the previous pending computation.
     if pending_computation and pending_computation.t_start < t_start:
       assert pending_computation_prev == pending_computation
+
+    if pending_computation_prev and pending_computation and (pending_computation_prev is not pending_computation):
+      if pending_computation_prev.t_end > pending_computation.t_start:
+        raise ValueError(f'The value t_end={pending_computation_prev.t_end} of the previous computation is after the t_start={pending_computation.t_start} of the pending computation that is being appended.')
+        
+
     
     assert t_start < t_end, f't_start={t_start} must be greater than or equal to t_end={t_end}. self:{self}'
     if t_mid: 
@@ -355,6 +374,7 @@ class TimeStepSeries:
       # The value of u_pending was applied, starting at t_mid, so it is no longer pending 
       # at the end of the sample. Thus, we set it to None.
       self.pending_computation += [pending_computation, pending_computation, None, None]
+    assert self.pending_computation[0] is not None
 
   def append_multiple(self, 
                       t_end: List, 
@@ -378,8 +398,8 @@ class TimeStepSeries:
       f"len(t_end)={len(t_end)} must equal len(pending_computation)={len(pending_computation)}"
 
     for i in range(len(t_end)):
-      assert t_mid is None == x_mid is None, f"t_mid={t_mid} is None iff x_mid={x_mid} is None." 
-      assert t_mid is None == w_mid is None, f"t_mid={t_mid} is None iff w_mid={w_mid} is None." 
+      assert (t_mid is None) == (x_mid is None), f"t_mid={t_mid} is None iff x_mid={x_mid} is None." 
+      assert (t_mid is None) == (w_mid is None), f"t_mid={t_mid} is None iff w_mid={w_mid} is None." 
       
       if t_mid is None:
         i_t_mid = None
@@ -390,7 +410,7 @@ class TimeStepSeries:
         i_x_mid = x_mid[i]
         i_w_mid = w_mid[i]
 
-      self.append(    t = t_end[i],    x = x_end[i], u = u[i],     w = w[i], pending_computation=pending_computation[i], 
+      self.append(t_end = t_end[i], x_end = x_end[i], u = u[i],     w = w[i], pending_computation=pending_computation[i], 
                   t_mid = i_t_mid, x_mid = i_x_mid,            w_mid = i_w_mid)
 
   def to_dict(self):
@@ -404,34 +424,23 @@ class TimeStepSeries:
       "pending_computation":self.pending_computation
     }
 
-  def overwrite_computation_times(self, computation_times):
+  def overwrite_computation_times(self, computation_for_k_dict: dict) -> None:
     """
     This function overwrites the computation times recorded in the time series.
     """
-    
-    # assert not any(delay is None for delay in computation_times), f"computation_times={computation_times} must not contain any None values."
-
-    if len(computation_times) != self.n_time_steps:
-      raise ValueError(f"len(computation_times) = {len(computation_times)} != self.n_time_steps = {self.n_time_steps}.\nself: {self}.\ncomputation_times: {computation_times}")
-
-    if len(self.pending_computation) != 2*len(computation_times):
-      raise ValueError(f'len(self.pending_computation)={len(self.pending_computation)} != 2*len(computation_times) = {2*len(computation_times)}')
-      
-    # print(f'Overwriting computation times. computation_times={computation_times}, self.pending_computation={self.pending_computation}.')
-    i_pending_computation = 0
-    i_computation_time    = 0
-    while i_pending_computation < len(self.pending_computation):
-      pc = self.pending_computation[i_pending_computation]
-      delay = computation_times[i_computation_time]
-      if delay is not None:
-        new_pending_computation = ComputationData(t_start=pc.t_start, delay=delay, u=pc.u, metadata=pc.metadata)
-      else:
-        new_pending_computation = None
-      
-      self.pending_computation[i_pending_computation]     = new_pending_computation
-      self.pending_computation[i_pending_computation + 1] = new_pending_computation
-      i_pending_computation += 2
-      i_computation_time    += 1
+    assert isinstance(computation_for_k_dict, dict)
+    # assert computation_for_k_dict, f'computation_for_k_dict={computation_for_k_dict} should not be empty or None.'
+    printJson("computation_for_k_dict", computation_for_k_dict)
+    for (i, k) in enumerate(self.k):
+      if k in computation_for_k_dict:
+        current_pc = self.pending_computation[i]
+        delay = computation_for_k_dict[k]
+        assert delay is not None
+        assert delay >= 0
+        self.pending_computation[i] = ComputationData(t_start=current_pc.t_start, 
+                                                      delay=delay, # <- Update!
+                                                      u=current_pc.u, 
+                                                      metadata=current_pc.metadata)
 
   # Override the + operator to define concatenation of TimeStepSeries.
   def __add__(self, other):
@@ -534,15 +543,60 @@ class TimeStepSeries:
     else:
       return self.k[-1]
 
-  def find_first_late_timestep(self, sample_time):
-    for (i_step, pc) in enumerate(self.pending_computation):
-      if pc is not None and pc.delay > sample_time:
-        has_missed_computation_time = True
-        first_late_timestep = self.k[i_step]
-        return first_late_timestep, has_missed_computation_time 
+  # def find_first_late_timestep(self, sample_time):
+  #   for (i_step, t) in enumerate(self.t):
+  #     if i_step == 0 or self.pending_computation[i_step-1] is None:
+  #       continue # Skip first step.
+  #     if self.pending_computation[i_step-1].t_end > t:
+  #       has_missed_computation_time = True
+  #       first_late_timestep = self.k[i_step]
+  #       return first_late_timestep, has_missed_computation_time 
+  #   
+  #   has_missed_computation_time = False
+  #   return None, has_missed_computation_time
+  
+#   def t_at(self, i=None, k_start=None, k_end=None):
+#     if i:
+#       assert k_start is None and k_end is None
+#       row = self.i.index(i)
+#     elif k_start:
+#       assert k_start is None and i is None
+#     elif k_end:
+#       assert k_start is None and i is None
+# 
+#     return self.t[row] 
+  
+  def find_first_missed_computation_started_during_series(self):
+    """
+    Search through the time series to find 
+    """
+    # Check all of the pending computations, except the one in the last row (which 
+    # should equal the pending computation in the penultimate row).
+    for (row, pc) in enumerate(self.pending_computation[:-1]):
+      # If there is no computation going at the current row, then it cannot be late, so skip.
+      if pc is None:
+        continue
+      # If the current computation equals self.pending_computation_prior, then it was not 
+      # started during this time series, so we skip
+      if pc == self.pending_computation_prior:
+        continue
+
+      # If the end of this pending computation is after the next time
+      if pc.t_end > self.t[row+1]:
+        first_late_timestep = self.k[row]
+        return first_late_timestep 
     
-    has_missed_computation_time = False
-    return None, has_missed_computation_time
+    # has_missed_computation_time = False
+    return None
+  
+    # for (i_step, pc) in enumerate(self.pending_computation):
+    #   if pc is not None and pc.delay > sample_time:
+    #     has_missed_computation_time = True
+    #     first_late_timestep = self.k[i_step]
+    #     return first_late_timestep, has_missed_computation_time 
+    # 
+    # has_missed_computation_time = False
+    # return None, has_missed_computation_time
 
   def printTimingData(self, label):
     print(f'{label} (timing data):')

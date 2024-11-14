@@ -115,7 +115,12 @@ class ControllerInterface(ABC):
 #     return metadata
     pass
 
-  def get_u(self, k: int, t: float, x: np.ndarray, u_before: np.ndarray, w: np.ndarray, pending_computation_before: ComputationData):
+  def get_u(self,         k: int, 
+                          t: float, 
+                          x: np.ndarray, 
+                   u_before: np.ndarray, 
+                          w: np.ndarray, 
+            pending_computation_before: Union[ComputationData, None]):
     """ 
     Get an (possibly) updated value of u. 
     Returns: u, u_delay, u_pending, u_pending_time, metadata,
@@ -131,7 +136,16 @@ class ControllerInterface(ABC):
       print(f'u_before[0]: {u_before[0]}')
       printJson("pending_computation_before", pending_computation_before)
 
-    if pending_computation_before is not None and pending_computation_before.t_end > t:
+    # If there is no "pending_computation_before", then we keep the same control value and start a computation.
+    if pending_computation_before is None:
+      u_after = u_before
+      did_start_computation = True
+      pending_computation_after = self.create_next_pending_computation(k, t, x, w)
+      return u_after, pending_computation_after, did_start_computation
+
+    assert pending_computation_before is not None
+
+    if pending_computation_before.t_end > t:
       # If last_computation is provided and the end of the computation is after the current time then we do not update anything. 
       # print(f'Keeping the same pending_computation: {pending_computation_before}')
       if debug_levels.debug_dynamics_level >= 2:
@@ -144,39 +158,36 @@ class ControllerInterface(ABC):
         print(f'u_after[0]: {u_after[0]}')
         printJson("pending_computation_after", pending_computation_after)
       did_start_computation = False
-      return u_after, pending_computation_after, did_start_computation
 
-    if pending_computation_before is not None and pending_computation_before.t_end <= t:
+    # Update u_after, if there is a pending u ready.
+    elif pending_computation_before.t_end <= t:
       # If the last computation data is "done", then we set u_after to the pending value of u.
       
       if debug_levels.debug_dynamics_level >= 2:
         print(f'Set u_after = pending_computation_before.u = {pending_computation_before.u}. (computation finished)')
       u_after = pending_computation_before.u
-    elif pending_computation_before is None:
-      if debug_levels.debug_dynamics_level >= 2:
-        print(f'Set u_after = u_before = {u_before} (no pending computation).')
-      u_after = u_before
-    else:
-      raise ValueError(f'Unexpected case.')
       
-    # If there is no pending_computation_before or the given pending_computation_before finishes before the current time t, then we run the computation of the next control value.
-    if debug_levels.debug_dynamics_level >= 2:
-      print(f"About to get the next control value for x = {x}, w={w}")
+      # If pending_computation_before finishes before the current time t, then we run the computation of the next control value.
+      if debug_levels.debug_dynamics_level >= 2:
+        print(f"About to get the next control value for x = {x}, w={w}")
 
-    u_pending, u_delay, metadata = self.get_next_control_from_controller(k, t, x, w)
-    did_start_computation = True
-    pending_computation_after = ComputationData(t, u_delay, u_pending, metadata)
+      did_start_computation = True
+      pending_computation_after = self.create_next_pending_computation(k, t, x, w)
+      assert pending_computation_before.t_end <= pending_computation_after.t_start
 
+    else:
+      raise Exception(f'Unexpected case.')
+      
     if debug_levels.debug_dynamics_level >= 1:
       printHeader2('----- get_u (AFTER - With update) ----- ')
       print(f'u_after: {u_after}')
       printJson("pending_computation_after", pending_computation_after)
-    # if u_delay == 0:
-    #   # If there is no delay, then we update immediately.
-    #   return u_pending, None
-    assert u_delay > 0, 'Expected a positive value for u_delay.'
-      # print(f'Updated pending_computation: {pending_computation_after}')
+    assert pending_computation_after.delay > 0, 'Expected a positive value for u_delay.'
     return u_after, pending_computation_after, did_start_computation
+
+  def create_next_pending_computation(self, k, t, x, w):
+    u_pending, u_delay, metadata = self.get_next_control_from_controller(k, t, x, w)
+    return ComputationData(t, u_delay, u_pending, metadata)
 
   def get_next_control_from_controller(self, k:int, t:float, x: np.ndarray, w:np.ndarray) -> Tuple[np.ndarray, float, dict]:
     """
