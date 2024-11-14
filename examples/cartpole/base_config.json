@@ -60,13 +60,13 @@
     "g": 9.81,
     "mpc_options":{
       "use_state_after_delay_prediction": false,
-      "prediction_horizon": 25,
-      "control_horizon": 5,
+      "prediction_horizon": 20,
+      "control_horizon": 4,
       "output_cost_weight": 10,
       "state_cost_weights": [
         1,
-        0.1,
-        0.01,
+        1,
+        1,
         1
     ],
     "input_cost_weight": 1

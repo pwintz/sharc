@@ -1295,7 +1295,9 @@ class OneTimeStepDelayProvider(DelayProvider):
     self.use_fake_scarab = use_fake_scarab
     
   def get_delay(self, metadata):
-    t_delay = self.sample_time
+    # Make the delay slightly less than sample time so that floating point rounding doesn't 
+    # cause it to be larger than the sample time.
+    t_delay = self.sample_time * (1 - 1e-6) 
     metadata = {}
 
     if self.use_fake_scarab:

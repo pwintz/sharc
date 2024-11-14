@@ -31,7 +31,7 @@ ARG RESOURCES_DIR
 # Environment Variables
 ENV RESOURCES_DIR $RESOURCES_DIR
 # ENV CONTROLLERS_DIR "${RESOURCES_DIR}/controllers"
-# ENV DYNAMICS_DIR "${RESOURCES_DIR}/dynamics"
+ENV DYNAMICS_DIR "${RESOURCES_DIR}/dynamics"
 
 # Set the timezone to avoid getting stuck on a prompt when installing packages with apt-get.
 RUN ln -fs /usr/share/zoneinfo/$TIME_ZONE /etc/localtime 
