@@ -3,8 +3,8 @@
 
 from abc import ABC, abstractmethod
 from enum import Enum
-from scarabintheloop.utils import *
-from scarabintheloop.data_types import ComputationData
+from sharc.utils import *
+from sharc.data_types import ComputationData
 import numpy as np
 
 class SimulatorStatus(Enum):
@@ -128,7 +128,7 @@ class ControllerInterface(ABC):
     
     If the updated value requires calling the controller, then u_delay does so.
 
-    This function is tested in <root>/tests/test_scarabintheloop_plant_runner.py/Test_get_u
+    This function is tested in <root>/tests/test_sharc_plant_runner.py/Test_get_u
     """
     
     if debug_levels.debug_dynamics_level >= 1:

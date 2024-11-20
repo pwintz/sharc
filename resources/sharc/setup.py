@@ -2,11 +2,11 @@
 
 from distutils.core import setup
 
-setup(name='scarabinloop',
+setup(name='sharc',
       version='1.0',
-      # description='Python Distribution Utilities',
-      # author='Greg Ward',
-      # author_email='gward@python.net',
+      description='Simulator for Hardware Architecture and Real-time Control',
+      author='Paul Wintz, Yasin Sonmez',
+      author_email='pwintz@ucsc.edu',
       # url='https://www.python.org/sigs/distutils-sig/',
       # packages=['distutils', 'distutils.command'],
-     )
+     ) 

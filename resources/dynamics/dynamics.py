@@ -1,6 +1,6 @@
 import math
 import numpy as np
-from scarabintheloop.dynamics_base import OdeDynamics
+from sharc.dynamics_base import OdeDynamics
 
 class LTIDynamics(OdeDynamics):
     

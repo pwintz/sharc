@@ -1,5 +1,5 @@
 // controller/LMPCController.cpp
-#include "scarabintheloop_utils.hpp"
+#include "sharc/utils.hpp"
 #include "debug_levels.hpp"
 #include "LMPCController.h"
 

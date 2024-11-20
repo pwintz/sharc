@@ -1,4 +1,4 @@
-from scarabintheloop.controller_interface import ControllerInterface, DelayProvider, SimulatorStatus
+from sharc.controller_interface import ControllerInterface, DelayProvider, SimulatorStatus
 import queue
 
 

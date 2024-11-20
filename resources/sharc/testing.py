@@ -1,8 +1,8 @@
 import unittest
 import numpy as np
 
-from scarabintheloop.data_types import ComputationData
-from scarabintheloop.utils import *
+from sharc.data_types import ComputationData
+from sharc.utils import *
 from typing import List
 
 

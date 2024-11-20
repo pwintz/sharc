@@ -1,11 +1,11 @@
 #! /bin/env python3
 
 import unittest
-import scarabintheloop
+import sharc
 import copy
-from scarabintheloop.plant_runner import ComputationData
-from scarabintheloop_mocks import MockDelayProvider, MockControllerInterface
-from scarabintheloop.utils import printJson
+from sharc.plant_runner import ComputationData
+from sharc_mocks import MockDelayProvider, MockControllerInterface
+from sharc.utils import printJson
 
 
 class Test_get_u(unittest.TestCase):

@@ -1,11 +1,11 @@
 #! /bin/env python3
 
 import unittest
-import scarabintheloop
-# from scarabintheloop.plant_runner import  EchoerControllerInterface
+import sharc
+# from sharc.plant_runner import  EchoerControllerInterface
 import copy
-from scarabintheloop_mocks import MockControllerInterface, MockDelayProvider
-import scarabintheloop.plant_runner as plant_runner
+from sharc_mocks import MockControllerInterface, MockDelayProvider
+import sharc.plant_runner as plant_runner
 
 ### Enable more debugging.
 # plant_runner.debug_interfile_communication_level = 2

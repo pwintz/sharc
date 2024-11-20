@@ -3,7 +3,7 @@
 import unittest
 import os
 import copy
-from scarabintheloop.scarabizor import ScarabTracesToComputationTimesProcessor, MockTracesToComputationTimesProcessor
+from sharc.scarabizor import ScarabTracesToComputationTimesProcessor, MockTracesToComputationTimesProcessor
 from unittest.mock import mock_open, patch
 
 @unittest.skip

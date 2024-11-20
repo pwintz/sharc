@@ -6,9 +6,9 @@ example directory and expirement configuration values.
 
 import subprocess
 import os
-from scarabintheloop.utils import run_shell_cmd
-import scarabintheloop.debug_levels as debug_levels
-from scarabintheloop.controller_delegator_base import CmakeControllerExecutableProvider
+from sharc.utils import run_shell_cmd
+import sharc.debug_levels as debug_levels
+from sharc.controller_delegator_base import CmakeControllerExecutableProvider
 
 
 

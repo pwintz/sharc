@@ -2,7 +2,7 @@
 """ 
 This script computes the evolution of a system (plant) using control imputs received from a controller executable. 
 The communication is done via pipe files contained in the simdir directory.
-Instead of calling this script directly, call run_scarabintheloop.py
+Instead of calling this script directly, call run_sharc.py
 """
 import numpy as np
 from scipy.integrate import ode
@@ -19,19 +19,19 @@ import time
 import traceback # Provides pretty printing of exceptions (https://stackoverflow.com/a/1483494/6651650)
 from abc import abstractmethod, ABC
 
-# from scarabintheloop import ControllerInterface
-from scarabintheloop.controller_interface import ControllerInterface
-from scarabintheloop.utils import *
-import scarabintheloop.debug_levels as debug_levels
-from scarabintheloop.data_types import *
-from scarabintheloop.dynamics_base import Dynamics
+# from sharc import ControllerInterface
+from sharc.controller_interface import ControllerInterface
+from sharc.utils import *
+import sharc.debug_levels as debug_levels
+from sharc.data_types import *
+from sharc.dynamics_base import Dynamics
 
 from typing import Callable, List, Set, Dict, Tuple, Union
 
 try:
   # Ensure that assertions are enabled.
   assert False
-  raise Exception('Python assertions are not working. Scarab-in-the-loop relies on Python assertions to fail quickly when problems arise. Possible causes for assertions being disabled are running with the "-O" flag or running a precompiled (".pyo" or ".pyc") module.')
+  raise Exception('Python assertions are not working. SHARC relies on Python assertions to fail quickly when problems arise. Possible causes for assertions being disabled are running with the "-O" flag or running a precompiled (".pyo" or ".pyc") module.')
 except AssertionError:
     pass
 

@@ -1,8 +1,8 @@
 
-// a. write scarabintheloop.h library that is imported by the controller C++ written by the user. 
+// a. write sharc.h library that is imported by the controller C++ written by the user. 
 
 // File controller.cpp
-#include "scarabintheloop.h"
+#include "sharc.h"
 
 void setup(json config)
 {
@@ -23,7 +23,7 @@ stats_obj = get_last_stats()
   return last_stats
 }
 
-// File scarabintheloop.cpp //
+// File sharc.cpp //
 int main(int argc, char *argv[])
 {
   // Do setup
@@ -43,9 +43,9 @@ int main(int argc, char *argv[])
 
 
 ////////////////////////////////////////////////
-// b. Write the controller as a library that is imported by scarabintheloop.cpp.
+// b. Write the controller as a library that is imported by sharc.cpp.
 
-// File: scarabintheloop.cpp
+// File: sharc.cpp
 #include "controller.h"
 
 int main(int argc, char *argv[])

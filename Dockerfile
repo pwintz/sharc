@@ -7,7 +7,7 @@ ARG TIME_ZONE=America/Los_Angeles
 # to be the workspaceMount target path. 
 ARG WORKSPACE_ROOT=/home/$USERNAME
 
-# The "resources" directory contains files that were developed as a part of scarab-in-the-loop. 
+# The "resources" directory contains files that were developed as a part of SHARC. 
 # For development, this directory should persist after a container is closed.
 ARG RESOURCES_DIR=$WORKSPACE_ROOT/resources
 
@@ -213,9 +213,6 @@ FROM scarab	as base
 ARG USERNAME
 ARG RESOURCES_DIR
 
-# Copy the resources directory. 
-COPY --chown=$USERNAME resources $RESOURCES_DIR
-
 ARG PIN_ROOT
 ENV PIN_ROOT $PIN_ROOT
 
@@ -257,8 +254,8 @@ RUN apt-get install --assume-yes --quiet=2 --no-install-recommends \
 # Copy Bash configurations
 COPY --chown=$USERNAME .profile /home/$USERNAME/.bashrc
 
-COPY resources/scarabintheloop/requirements.txt scarabintheloop-requirements.txt
-RUN pip3 install -r scarabintheloop-requirements.txt && rm scarabintheloop-requirements.txt
+COPY resources/sharc/requirements.txt sharc-requirements.txt
+RUN pip3 install -r sharc-requirements.txt && rm sharc-requirements.txt
 
 #####################################
 ############# DynamoRIO #############
@@ -287,10 +284,12 @@ ADD https://github.com/DynamoRIO/dynamorio/releases/download/cronbuild-9.0.19314
 RUN tar --extract --gzip --verbose --strip-components=1 -f $DYNAMORIO_VERSION.tar.gz --directory $DYNAMORIO_HOME && rm $DYNAMORIO_VERSION.tar.gz 
 
 
-### Setup scarabintheloop for development in a Dev Contiainer ###  
-ENV PYTHONPATH "${PYTHONPATH}:${RESOURCES_DIR}"
-ENV PATH "${PATH}:${RESOURCES_DIR}/scarabintheloop:${RESOURCES_DIR}/scarabintheloop/scripts"
+# Copy the resources directory. We do this after the other installation tasks because every time the resources directory changes, Docker has to repeat all of the tasks below this line. 
+COPY --chown=$USERNAME resources $RESOURCES_DIR
 
+### Setup the PATH and PYTHONPATH ###  
+ENV PATH "${PATH}:${RESOURCES_DIR}/sharc:${RESOURCES_DIR}/sharc/scripts"
+ENV PYTHONPATH "${PYTHONPATH}:${RESOURCES_DIR}"
 
 ########################
 ##### MPC EXAMPLES #####
@@ -368,7 +367,7 @@ WORKDIR ${WORKSPACE_ROOT}/examples/acc_example
 # # COPY --chown=$USERNAME resources/controllers $RESOURCES_DIR/controllers
 # # COPY --chown=$USERNAME resources/dynamics $RESOURCES_DIR/dynamics
 # # COPY --chown=$USERNAME resources/include $RESOURCES_DIR/include
-# # COPY --chown=$USERNAME resources/scarabintheloop $RESOURCES_DIR/scarabintheloop
+# # COPY --chown=$USERNAME resources/sharc $RESOURCES_DIR/sharc
 # # ENV CONTROLLERS_DIR $RESOURCES_DIR/controllers
 # # ENV DYNAMICS_DIR $RESOURCES_DIR/dynamics
 # # Set the working directory

@@ -1,7 +1,7 @@
 import os
 from abc import ABC, abstractmethod #  AbstractBaseClass
-import scarabintheloop.debug_levels as debug_levels
-from scarabintheloop.utils import run_shell_cmd, assertFileExists
+import sharc.debug_levels as debug_levels
+from sharc.utils import run_shell_cmd, assertFileExists
 
 CMAKE_VERBOSITY_FROM_DEBUG_LEVEL = {
   0: "ERROR",
@@ -18,9 +18,6 @@ class BaseControllerExecutableProvider(ABC):
   @abstractmethod
   def get_controller_executable(self, build_config:dict) -> str:
     pass
-
-
-
 
 class CmakeControllerExecutableProvider(BaseControllerExecutableProvider):
 

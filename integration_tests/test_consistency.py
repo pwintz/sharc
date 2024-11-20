@@ -2,23 +2,23 @@
 
 from typing import List
 import unittest
-import scarabintheloop
-import scarabintheloop.testing
+import sharc
+import sharc.testing
 import os
 import numpy as np
 
-from scarabintheloop.data_types import ComputationData
+from sharc.data_types import ComputationData
 
-class TestConsistency(scarabintheloop.testing.TestCase):
+class TestConsistency(sharc.testing.TestCase):
 
-  def test_working_dir_unchanged_by_scarabintheloop(self):
+  def test_working_dir_unchanged_by_sharc(self):
     # ---- Setup ---- 
     example_dir = os.path.abspath('../examples/acc_example')
     config_file = 'fake_delays.json'
     working_dir_before = os.getcwd()
 
     # ---- Execution ----
-    experiment_list = scarabintheloop.run(example_dir, config_file, fail_fast=True)
+    experiment_list = sharc.run(example_dir, config_file, fail_fast=True)
 
     # ---- Assertions ---- 
     self.assertEqual(os.getcwd(), working_dir_before)
@@ -29,7 +29,7 @@ class TestConsistency(scarabintheloop.testing.TestCase):
     config_file = 'test_serial_consistency_with_fake_delays.json'
 
     # ---- Execution ----
-    experiment_list = scarabintheloop.run(example_dir, config_file, fail_fast=True)
+    experiment_list = sharc.run(example_dir, config_file, fail_fast=True)
 
     # ---- Assertions ---- 
     self.assert_all_results_equal(experiment_list)
@@ -40,7 +40,7 @@ class TestConsistency(scarabintheloop.testing.TestCase):
     config_file = 'test_serial_vs_parallel_with_fake_delays.json'
     
     # ---- Execution ----
-    experiment_list = scarabintheloop.run(example_dir, config_file, fail_fast=True)
+    experiment_list = sharc.run(example_dir, config_file, fail_fast=True)
 
     # ---- Assertions ---- 
     self.maxDiff = 1000
@@ -54,7 +54,7 @@ class TestConsistency(scarabintheloop.testing.TestCase):
     config_file = 'test_consistency_serial_vs_parallel.json'
     
     # ---- Execution ----
-    experiment_list = scarabintheloop.run(example_dir, config_file, fail_fast=True)
+    experiment_list = sharc.run(example_dir, config_file, fail_fast=True)
 
     # ---- Assertions ---- 
     self.assertEqual(experiment_list.n_failed(), 0)

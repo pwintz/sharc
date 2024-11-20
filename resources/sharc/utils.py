@@ -1,5 +1,5 @@
 """
-This package provides several utility functions that are used by Scarab-in-the-loop.
+This package provides several utility functions that are used by SHARC.
 """
 
 import io
@@ -20,7 +20,7 @@ from typing import Union
 # Import contextmanager to allow defining commands to be used to create "with" blocks.
 from contextlib import contextmanager 
 
-import scarabintheloop.debug_levels as debug_levels
+import sharc.debug_levels as debug_levels
 # Level 1: Print shell commands that are called.
 # Level 2: Also print the current working directory.
 

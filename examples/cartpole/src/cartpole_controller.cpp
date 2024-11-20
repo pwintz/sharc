@@ -30,7 +30,7 @@ using namespace mpc;
     #endif
   }
 #endif
-// #include "scarabintheloop.h"
+// #include "sharc.h"
 
 // Define a macro to print a value 
 #define PRINT(x) std::cout << x << std::endl;
@@ -201,7 +201,7 @@ int main()
   //     PRINT_WITH_FILE_LOCATION("Adaptive Cruise Control (ACC) controller. Example usage:")
   //     PRINT_WITH_FILE_LOCATION("\tacc_controller <simulation_directory>")
   //     PRINT_WITH_FILE_LOCATION("Typically, you wouldn't call this directly. Instead, call")
-  //     PRINT_WITH_FILE_LOCATION("\t run_scarabintheloop <example_directory>.")
+  //     PRINT_WITH_FILE_LOCATION("\t run_sharc <example_directory>.")
   //     return 0;
   // }
 

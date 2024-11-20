@@ -7,7 +7,7 @@ import numpy as np
 from scipy.integrate import ode
 import scipy.signal
 import numpy.linalg as linalg
-from scarabintheloop.utils import printIndented
+from sharc.utils import printIndented
 
 # TODO: Implement "appendComputedParameters" to generate computed parameters that need to be accessible from both the plant and controller. Currently, these values are hard coded in both the C++ controller and the Python plant.
 # def appendComputedParameters(config_data: dict):

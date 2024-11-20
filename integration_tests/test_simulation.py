@@ -3,12 +3,12 @@
 import shutil
 import unittest
 
-from scarabintheloop import BatchInit, Simulation, load_controller_delegator
-from scarabintheloop.data_types import ComputationData, TimeStepSeries
-from scarabintheloop.scarabizor import ParamsData
-from scarabintheloop.utils import list_to_column_vec, printJson, readJson
+from sharc import BatchInit, Simulation, load_controller_delegator
+from sharc.data_types import ComputationData, TimeStepSeries
+from sharc.scarabizor import ParamsData
+from sharc.utils import list_to_column_vec, printJson, readJson
 
-import scarabintheloop.debug_levels as debug_levels
+import sharc.debug_levels as debug_levels
 
 # Turn off debugging statements.
 debug_levels.debug_program_flow_level = 0

@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Callable, Tuple
 import numpy as np
 from scipy.integrate import solve_ivp
-from scarabintheloop.utils import assert_is_column_vector
+from sharc.utils import assert_is_column_vector
 
 # # Function signature for evolve_state: 
 # #                 evolve_state(t0,         x0,          u,         w,    tf)->(        tf,         xf)
@@ -17,14 +17,13 @@ class Dynamics(ABC):
         self.w_dim = self.config["system_parameters"]["exogenous_input_dimension"]
         self.setup_system()
 
-    @abstractmethod
     def setup_system(self):
       pass
 
     @abstractmethod
     def evolve_state(self, t0: float, x0: np.ndarray, u: np.ndarray, w: np.ndarray, tf: float):
         """
-        Evolve the state from t0 to tf given the initial state x0 and control input u.
+        Evolve the state from t0 to tf given the initial state x0, control input u, and exogenous input w.
 
         Parameters:
         - t0: Initial time

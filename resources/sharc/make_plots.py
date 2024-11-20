@@ -4,7 +4,7 @@ import os
 import argparse
 import math
 import json
-from scarabintheloop.utils import assertFileExists, readJson, printJson
+from sharc.utils import assertFileExists, readJson, printJson
 # Type hinting.
 from typing import List, Set, Dict, Tuple, Union
 import numpy as np

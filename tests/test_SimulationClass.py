@@ -1,10 +1,10 @@
 #! /bin/env python3
 
 import unittest
-import scarabintheloop
-from scarabintheloop import Simulation, BatchInit, Batch
-import scarabintheloop.scarabizor as scarabizor
-from scarabintheloop.data_types import *
+import sharc
+from sharc import Simulation, BatchInit, Batch
+import sharc.scarabizor as scarabizor
+from sharc.data_types import *
 import numpy as np
 import copy
 import os
@@ -284,7 +284,7 @@ class Test_BatchInit(unittest.TestCase):
 #     # Save the input simulation data so we can check that it is not modified.
 #     expected_valid_sim_data = copy.deepcopy(batch_simulation_data)
 # 
-#     valid_data_from_batch, next_batch_init = scarabintheloop.processBatchSimulationData(batch_init, batch_simulation_data, sample_time)
+#     valid_data_from_batch, next_batch_init = sharc.processBatchSimulationData(batch_init, batch_simulation_data, sample_time)
 # 
 #     # Check that the valid simulation data contains all of the original data.
 #     self.assertEqual(valid_data_from_batch, expected_valid_sim_data)
@@ -322,7 +322,7 @@ class Test_BatchInit(unittest.TestCase):
 #     # Save the input simulation data so we can check that it is not modified.
 #     expected_valid_sim_data = copy.deepcopy(batch_simulation_data)
 # 
-#     valid_data_from_batch, next_batch_init = scarabintheloop.processBatchSimulationData(batch_init, batch_simulation_data, sample_time)
+#     valid_data_from_batch, next_batch_init = sharc.processBatchSimulationData(batch_init, batch_simulation_data, sample_time)
 # 
 #     # Check that the valid simulation data contains all of the original data.
 #     self.assertEqual(valid_data_from_batch, expected_valid_sim_data)
@@ -367,7 +367,7 @@ class Test_BatchInit(unittest.TestCase):
 # #     # Save the input simulation data so we can check that it is not modified.
 #     # expected_valid_sim_data = copy.deepcopy(batch_simulation_data)
 # 
-#     valid_data_from_batch, next_batch_init = scarabintheloop.processBatchSimulationData(batch_init, batch_simulation_data, sample_time)
+#     valid_data_from_batch, next_batch_init = sharc.processBatchSimulationData(batch_init, batch_simulation_data, sample_time)
 # 
 #     expected_valid_sim_data = TimeStepSeries(k0=k0, t0=0.0, x0=x0)
 #     expected_valid_sim_data.append(t_end=t[1], x_end=x[1], u=u[1], pending_computation=pending_computations[0])
@@ -426,7 +426,7 @@ class Test_Simulation(unittest.TestCase):
     params_base = scarabizor.ParamsData(['--chip_cycle_time   100000000'])
 
     # Execution
-    simulation = scarabintheloop.Simulation.from_experiment_config_unbatched(experiment_config, params_base, n_time_steps=200)
+    simulation = sharc.Simulation.from_experiment_config_unbatched(experiment_config, params_base, n_time_steps=200)
     
     # Assertions 
     self.assertEqual(simulation.sim_config["first_time_index"], 0)
@@ -472,7 +472,7 @@ class Test_Simulation(unittest.TestCase):
     params_base = scarabizor.ParamsData([])
     
     # ----- Execution ----- 
-    simulation = scarabintheloop.Simulation.from_experiment_config_batched(
+    simulation = sharc.Simulation.from_experiment_config_batched(
                                               experiment_config, params_base, batch_init, n_time_steps_in_batch=max_batch_size)
     
     # ----- Assertions ----- 
@@ -527,7 +527,7 @@ class Test_Simulation(unittest.TestCase):
     params = scarabizor.ParamsData([])
 
     # ----- Execution ----- 
-    simulation = scarabintheloop.Simulation.from_experiment_config_batched(
+    simulation = sharc.Simulation.from_experiment_config_batched(
                                               experiment_config, 
                                               params, 
                                               batch_init, 

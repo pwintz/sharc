@@ -4,7 +4,7 @@ import time
 import datetime
 import warnings
 
-from scarabintheloop.utils import *
+from sharc.utils import *
 
 
 class DataNotRecievedViaFileError(IOError):

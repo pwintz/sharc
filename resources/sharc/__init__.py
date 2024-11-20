@@ -9,16 +9,16 @@ import argparse
 from enum import Enum
 import traceback
 from contextlib import redirect_stdout
-from scarabintheloop.utils import *
-import scarabintheloop.debug_levels as debug_levels
-from scarabintheloop.data_types import *
-from scarabintheloop.controller_interface import DelayProvider, ControllerInterface, PipesControllerInterface
+from sharc.utils import *
+import sharc.debug_levels as debug_levels
+from sharc.data_types import *
+from sharc.controller_interface import DelayProvider, ControllerInterface, PipesControllerInterface
 from abc import abstractmethod, ABC
 from dataclasses import dataclass
-import scarabintheloop.scarabizor as scarabizor
+import sharc.scarabizor as scarabizor
 from slugify import slugify
 import importlib
-import scarabintheloop.plant_runner as plant_runner
+import sharc.plant_runner as plant_runner
 
 controller_executable_provider = None
 
@@ -521,91 +521,6 @@ class Simulation:
 
     return simulation_data
 
-# class DelayMode(Enum):
-#   """
-#   The DelayMode enum is used to specify the type of computation delay that is used in the simulation.
-#   """
-#   # For GRID_ALIGNED, the controller delay is always a multiple of the sample time. 
-#   # If the computation finishes before the next sample time, the controller will wait until the next sample time to update the control signal. 
-#   GRID_ALIGNED = 1
-#   # For ASAP, the controller will update the control signal as soon as the computation is finished.
-#   ASAP = 2
-#   # For NONE, the controller will update the control signal at the time when the computation starts, ignoring the actual computational delay.
-#   NONE = 3
-# 
-# class DelaySource(Enum):
-#   SCARAB = 1
-#   FAKE   = 2
-# 
-# class ExecutionMode(Enum):
-#   PARALLEL = 1
-#   SERIAL = 2
-
-
-# def get_controller_interface(delay_mode: DelayMode, delay_source: DelaySource, execution_mode: ExecutionMode):
-#   """
-#   Factory method for creating a controller interface.
-#   """
-#   if delay_source == DelaySource.SCARAB:
-#     if execution_mode == ExecutionMode.PARALLEL:
-#       return ParallelControllerInterface(delay_mode)
-#     elif execution_mode == ExecutionMode.SERIAL:
-#       return SerialControllerInterface(delay_mode)
-#     else:
-#       raise ValueError(f'execution_mode={execution_mode} is not a valid ExecutionMode.')
-#   elif delay_source == DelaySource.FAKE:
-#     return FakeDelayControllerInterface(delay_mode)
-#   else:
-#     raise ValueError(f'delay_source={delay_source} is not a valid DelaySource.')
-# 
-# class DelaysProvider(ABC):
-#   pass
-# 
-# class FakeDelaysProvider(DelaysProvider):
-#   pass
-# 
-# class ExecutionDrivenScarabDelaysProvider(DelaysProvider):
-#   pass
-# 
-# class TraceBasedScarabDelaysProvider(DelaysProvider):
-#   pass
-# 
-# class ControllerInterface(ABC):
-# 
-#   def __init__(self, state_dimension: int, input_dimension: int):
-#     self.state_dimension = state_dimension
-#     self.input_dimension = input_dimension
-# 
-#   @abstractmethod
-#   def get_control_computation(self, x) -> np.ndarray:
-#     """
-#     Calculate the control signal u given the state x and return a ControlComputation object.
-#     The delay time of the ControlComputation object may be a preliminary value that is updated later by the 
-#     get_actual_delay() function.
-#     """
-#     pass
-# 
-#   @abstractmethod
-#   def get_actual_delay() -> float:
-#     """
-#     Calculate and return the actual delay.
-# 
-#     Returns:
-#       float: The actual delay in seconds. If 
-#     """
-#     pass
-# 
-# 
-# class MockControllerInterface(ControllerInterface):
-#   def __init__(self, delay: float):
-#     self.delay = delay
-# 
-#   def get_control_computation(self, x) -> np.ndarray:
-#     return ControlComputation(0, 0, self.delay, 0)
-# 
-#   def get_actual_delay(self) -> float:
-#     return self.delay
-# 
 def load_controller_delegator(example_dir: str):
   global controller_executable_provider
   controller_delegator_module = loadModuleInDir(example_dir, "controller_delegator")
@@ -614,7 +529,7 @@ def load_controller_delegator(example_dir: str):
 
 def run(example_dir:str, config_filename:str, fail_fast = False):
   """
-  This function is the entry point for running scarabintheloop 
+  This function is the entry point for running sharc 
   from other Python scripts (e.g., in unit testint). 
   When running from command line, the entry point is main(), instead,
   which then calls this function. 

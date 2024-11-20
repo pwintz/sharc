@@ -1,7 +1,7 @@
 
 
 # Simulation Batching
-This Section describes the data representation for simulations executed by Scarab-in-the-loop when using batching. 
+This Section describes the data representation for simulations executed by SHARC when using batching. 
 
 ## Simulation Batch With No Misses
 

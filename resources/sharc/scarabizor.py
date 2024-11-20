@@ -11,11 +11,11 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 
 from abc import ABC, abstractmethod #  AbstractBaseClass
 
-from scarabintheloop.utils import run_shell_cmd, assertFileExists, openLog, seconds_to_duration_string
+from sharc.utils import run_shell_cmd, assertFileExists, openLog, seconds_to_duration_string
 
 from scarab_globals import *
 from scarab_globals import scarab_paths
-import scarabintheloop.debug_levels as debug_levels
+import sharc.debug_levels as debug_levels
 
 
 # params_in_dir = 'docker_user_home'

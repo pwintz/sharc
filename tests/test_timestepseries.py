@@ -1,7 +1,7 @@
 #! /bin/env python3
 
 import unittest
-from scarabintheloop.plant_runner import TimeStepSeries, ComputationData
+from sharc.plant_runner import TimeStepSeries, ComputationData
 import copy
 import numpy as np
 from io import StringIO

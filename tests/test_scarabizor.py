@@ -3,7 +3,7 @@
 import unittest
 import os
 import copy
-from scarabintheloop.scarabizor import ParamsData, ScarabPARAMSReader, MockExecutionDrivenScarabRunner, ScarabStatsReader, SECONDS_PER_FEMTOSECOND
+from sharc.scarabizor import ParamsData, ScarabPARAMSReader, MockExecutionDrivenScarabRunner, ScarabStatsReader, SECONDS_PER_FEMTOSECOND
 from unittest.mock import mock_open, patch
 
 PARAMS_data_in = """# Here is a comment

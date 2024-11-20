@@ -9,7 +9,7 @@
 #include <thread>
 
 #include "debug_levels.hpp"
-#include "scarabintheloop_utils.hpp"
+#include "sharc/utils.hpp"
 #include "nlohmann/json.hpp"
 using json = nlohmann::json;
 

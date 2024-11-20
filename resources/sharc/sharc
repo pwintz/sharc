@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# This script calls run_scarabintheloop.py to run in the background.
+# This script calls run_sharc.py to run in the background.
 # The motivation for this is because Scarab seems to crash when run directly in the terminal if the terminal is resized during execution (it's a weird bug, I know).
 # This script ensures the background process stops if the user interrupts it, e.g., with Ctrl+C.
-# You can pass arguments to this command that are pass through to run_scarabintheloop.py.
+# You can pass arguments to this command that are pass through to run_sharc.py.
 
 # Start the background process with the provided arguments
-run_scarabintheloop.py "$@" &
+run_sharc.py "$@" &
 
 # Capture the process ID of the background process
-scarabintheloop_bg_pid=$!
+sharc_bg_pid=$!
 
 # Set a trap to kill the background process when Ctrl+C is pressed
-trap "kill $scarabintheloop_bg_pid 2>/dev/null" SIGINT
+trap "kill $sharc_bg_pid 2>/dev/null" SIGINT
 
 # Wait for the background process to finish
-wait $scarabintheloop_bg_pid
+wait $sharc_bg_pid

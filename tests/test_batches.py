@@ -2,10 +2,10 @@
 
 import unittest
 
-from scarabintheloop import Batcher, BatchInit, Batch
-from scarabintheloop.data_types import TimeStepSeries
+from sharc import Batcher, BatchInit, Batch
+from sharc.data_types import TimeStepSeries
 import dataclasses 
-from scarabintheloop.utils import list_to_column_vec
+from sharc.utils import list_to_column_vec
 import numpy as np
 
 SAMPLE_TIME = 1.0

@@ -2,7 +2,7 @@
 
 import unittest
 import copy
-from scarabintheloop.utils import patch_dictionary
+from sharc.utils import patch_dictionary
 
 class TestPatchDictionary(unittest.TestCase):
   def test_empty_patch(self):

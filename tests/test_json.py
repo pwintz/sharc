@@ -2,7 +2,7 @@
 
 import unittest
 import copy
-import scarabintheloop.utils as utils
+import sharc.utils as utils
 import numpy as np
 
 class Test_JSON(unittest.TestCase):
