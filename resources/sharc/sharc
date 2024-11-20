@@ -5,7 +5,7 @@
 # You can pass arguments to this command that are pass through to run_sharc.py.
 
 # Start the background process with the provided arguments
-run_sharc.py "$@" &
+python3 -m sharc "$@" &
 
 # Capture the process ID of the background process
 sharc_bg_pid=$!
