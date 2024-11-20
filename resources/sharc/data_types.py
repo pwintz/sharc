@@ -340,7 +340,7 @@ class TimeStepSeries:
 
     if pending_computation_prev and pending_computation and (pending_computation_prev is not pending_computation):
       if pending_computation_prev.t_end > pending_computation.t_start:
-        raise ValueError(f'The value t_end={pending_computation_prev.t_end} of the previous computation is after the t_start={pending_computation.t_start} of the pending computation that is being appended.')
+        raise ValueError(f'The value t_end={pending_computation_prev.t_end} of the previous computation is after the t_start={pending_computation.t_start} of the pending computation that is being appended. Time step is k={k}.')
         
 
     
@@ -429,8 +429,6 @@ class TimeStepSeries:
     This function overwrites the computation times recorded in the time series.
     """
     assert isinstance(computation_for_k_dict, dict)
-    # assert computation_for_k_dict, f'computation_for_k_dict={computation_for_k_dict} should not be empty or None.'
-    printJson("computation_for_k_dict", computation_for_k_dict)
     for (i, k) in enumerate(self.k):
       if k in computation_for_k_dict:
         current_pc = self.pending_computation[i]

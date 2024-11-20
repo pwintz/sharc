@@ -20,7 +20,20 @@ def create_batch(i_batch:int, k0: int, n_time_steps: int, k_of_missed_time_step=
   x_list = [[ 10.0*k, 10.0*k+0.1] for k in range(k0, k_end + 1)]
   u_list = [[-10.0*k,-10.0*k-0.1] for k in range(k0, k_end)]
   w_list = [[-11.0*k,-11.0*k-0.1] for k in range(k0, k_end)]
-  delay_list = [0.1*SAMPLE_TIME if k != k_of_missed_time_step else 1.1* SAMPLE_TIME for k in range(k0, k_end)]
+  delay_list = []
+  t_end_list = []
+  for i,k in enumerate(range(k0, k_end)):
+    if delay_list and delay_list[-1] and delay_list[-1] > SAMPLE_TIME:
+      # If the prior step was a missed computation
+      delay_list.append(None)
+      t_end_list.append(t_end_list[-1])
+    elif k == k_of_missed_time_step:
+      delay_list.append(1.1* SAMPLE_TIME)
+      t_end_list.append(t_list[i] + delay_list[i])
+    else:
+      delay_list.append(0.1*SAMPLE_TIME)
+      t_end_list.append(t_list[i] + delay_list[i])
+  # delay_list = [0.1*SAMPLE_TIME if k != k_of_missed_time_step else 1.1* SAMPLE_TIME for k in range(k0, k_end)]
   assert len(t_list) == n_time_steps + 1
   assert len(x_list) == n_time_steps + 1
   assert len(u_list) == n_time_steps
@@ -86,7 +99,7 @@ class Test_BatchInit(unittest.TestCase):
   
 class Test_create_batch(unittest.TestCase):
   """
-  Check that our fake batch funciton works OK.
+  Check that our fake batch function works OK.
   """
   def test_multiple_steps_without_misses(self):
     # ---- Execution ----
@@ -100,7 +113,7 @@ class Test_create_batch(unittest.TestCase):
         t_list=[10*SAMPLE_TIME, 11*SAMPLE_TIME, 12*SAMPLE_TIME],
         x_list=[[100, 100.1],   [110, 110.1],          [120, 120.1]],
         u_list=[        [-100, -100.1],   [-110, -110.1]],
-        w_list=[        [-111, -111.1],   [-220, -220.1]],
+        w_list=[        [-110, -110.1],   [-121, -121.1]],
         delay_list=[0.1*SAMPLE_TIME, 0.1*SAMPLE_TIME]
       )
     batch_init = BatchInit(i_batch=2, 
@@ -125,6 +138,11 @@ class Test_create_batch(unittest.TestCase):
     # Compare first_batch (created by "create_batch") with second_batch
     self.assertIsInstance(second_batch.batch_init, BatchInit)
     self.assertEqual(first_batch.batch_init, second_batch.batch_init, f'first batch_init: {first_batch.batch_init}, second batch_init: {second_batch.batch_init}')
+    self.assertEqual(first_batch.full_simulation_data.k, second_batch.full_simulation_data.k)
+    self.assertEqual(first_batch.full_simulation_data.t, second_batch.full_simulation_data.t)
+    self.assertEqual(first_batch.full_simulation_data.x, second_batch.full_simulation_data.x)
+    self.assertEqual(first_batch.full_simulation_data.u, second_batch.full_simulation_data.u)
+    self.assertEqual(first_batch.full_simulation_data.w, second_batch.full_simulation_data.w)
     self.assertEqual(first_batch.full_simulation_data, second_batch.full_simulation_data)
     self.assertEqual(first_batch.valid_simulation_data, second_batch.valid_simulation_data)
     self.assertEqual(first_batch.first_late_timestep, second_batch.first_late_timestep)
@@ -143,7 +161,8 @@ class Test_create_batch(unittest.TestCase):
         t_list=[10*SAMPLE_TIME, 11*SAMPLE_TIME, 12*SAMPLE_TIME, 13*SAMPLE_TIME],
         x_list=[[100, 100.1],   [110, 110.1],          [120, 120.1],       [130, 130.1]],
         u_list=[        [-100, -100.1],   [-110, -110.1],   [-120, -120.1]],
-        delay_list=[0.1*SAMPLE_TIME, 1.1*SAMPLE_TIME, 0.1*SAMPLE_TIME]
+        w_list=[        [-110, -110.1],   [-121, -121.1],   [-132, -132.1]],
+        delay_list=[0.1*SAMPLE_TIME, 1.1*SAMPLE_TIME, None]
         #                             ^--- This is how we specify the miss 
       )
     batch_init = BatchInit(i_batch=2, 
@@ -186,8 +205,9 @@ class Test_create_batch(unittest.TestCase):
 class Test_Batch(unittest.TestCase):
   def test_one_step_with_no_missed_computations(self):
     # ---- Setup ---- 
-    x0 = list_to_column_vec([3, 4])
-    u0 = list_to_column_vec([1, 2])
+    x0 = list_to_column_vec([ 3,  4])
+    u0 = list_to_column_vec([ 1,  2])
+    w0 = list_to_column_vec([-1, -2])
     
     batch_init = BatchInit.first(x0=x0, u0=u0)
     sample_time = 1.1
@@ -196,6 +216,7 @@ class Test_Batch(unittest.TestCase):
         t_list=[0.0, sample_time],
         x_list=[[x0], [ 20]],
         u_list=[[u0]],
+        w_list=[[w0]],
         delay_list=[0.1*sample_time]
       )
     # ---- Execution ----
@@ -228,8 +249,9 @@ class Test_Batch(unittest.TestCase):
     full_simulation_data = TimeStepSeries._from_lists(
         k0=0, 
         t_list=[0.0, sample_time, 2*sample_time],
-        x_list=[[x0], [ 20], [30]],
-        u_list=[[u0], [-20]],
+        x_list=[[x0],   [ 20],   [30]],
+        u_list=[   [u0],    [-20]],
+        w_list=[   [-0.1],  [-0.2]],
         delay_list=[0.1*sample_time, 0.1*sample_time]
       )
     # ---- Execution ----

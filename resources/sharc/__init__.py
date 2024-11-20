@@ -636,6 +636,13 @@ class BatchInit:
   }
 
 class Batch:
+  batch_init: BatchInit
+  full_simulation_data:  TimeStepSeries
+  valid_simulation_data: TimeStepSeries
+  first_late_timestep: Union[int, None]
+  last_valid_timestep: int
+  has_missed_computation: bool
+
 
   def __init__(self, batch_init: BatchInit, full_simulation_data: TimeStepSeries, sample_time: float):
     assert isinstance(batch_init, BatchInit)

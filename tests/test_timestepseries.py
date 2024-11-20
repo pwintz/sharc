@@ -379,7 +379,6 @@ class Test_overwrite_computation_times(unittest.TestCase):
       ComputationData(t_start=t[0], delay=new_delays[2], u=[11]),
       ComputationData(t_start=t[1], delay=new_delays[3], u=[22])
     ]
-    print("ts_series.pending_computation", ts_series.pending_computation)
     self.assertEqual(ts_series.pending_computation[0].delay, new_delays[2])
     self.assertEqual(ts_series.pending_computation[-1].delay, new_delays[3])
     self.assertEqual(ts_series.get_pending_computation_started_at_sample_time_index(2), expected_pending_computations[0])
