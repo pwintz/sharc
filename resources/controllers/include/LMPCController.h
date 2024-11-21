@@ -53,7 +53,7 @@ public:
     // Result<Tnu> getLastLmpcStepResult() {
     //   return lmpc_step_result;
     // }
-    // Eigen::VectorXd getLastestControl() {
+    // Eigen::VectorXd getLatestControl() {
     //   return lmpc_step_result.cmd;
     // }
     // Result<Tnu> getLastLmpcIterations() {

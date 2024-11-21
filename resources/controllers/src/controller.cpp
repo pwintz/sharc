@@ -1,6 +1,19 @@
 // controller/controller.cpp
 #include "controller.h"
 
+// Initialize dimensions based on JSON data
+void Controller::initializeDimensions(const nlohmann::json& json_data) {
+    int state_dim = json_data.at("system_parameters").at("state_dimension");
+    int control_dim = json_data.at("system_parameters").at("input_dimension");
+
+    if (state_dim != Tnx) {
+        throw std::invalid_argument("State dimension from JSON does not match compilation parameter Tnx.");
+    }
+    if (control_dim != Tnu) {
+        throw std::invalid_argument("Control dimension from JSON does not match compilation parameter Tnu.");
+    }
+}
+
 // Static registry to hold the controller types
 std::unordered_map<std::string, Controller::CreatorFunc>& Controller::getRegistry() {
     static std::unordered_map<std::string, CreatorFunc> registry;

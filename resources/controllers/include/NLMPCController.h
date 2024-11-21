@@ -33,6 +33,9 @@ private:
     // double M, m, J, l, c, gamma, g;    
     // double sample_time;
     // double input_cost_weight;
+    
+    // MPC Computation Result
+    Result<Tnu> nlmpc_step_result;
 
     NLMPC<Tnx, Tnu, Tny, prediction_horizon, control_horizon, ineq_c, eq_c> nlmpc;
 

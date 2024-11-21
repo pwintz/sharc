@@ -26,16 +26,18 @@ void LMPCController::calculateControl(int k, double t, const xVec &x, const wVec
     state = x;
 
     // Call LMPC control calculation here
-    lmpc_step_result = lmpc.step(state, control);
+    lmpc_step_result = lmpc.optimize(state, control);
     control = lmpc_step_result.cmd;
 
     latest_metadata.clear();
-    latest_metadata["iterations"]      = lmpc_step_result.num_iterations;
-    latest_metadata["retcode"]         = lmpc_step_result.retcode;
-    latest_metadata["cost"]            = lmpc_step_result.cost;
+    latest_metadata["iterations"]       = lmpc_step_result.num_iterations;
+    latest_metadata["solver_status"]    = lmpc_step_result.solver_status;
+    latest_metadata["solver_status_msg"]= lmpc_step_result.solver_status_msg;
+    latest_metadata["is_feasible"]      = lmpc_step_result.is_feasible;
+    latest_metadata["cost"]             = lmpc_step_result.cost;
     latest_metadata["constraint_error"] = lmpc_step_result.primal_residual;
-    latest_metadata["dual_residual"]   = lmpc_step_result.dual_residual;
-    latest_metadata["status"]          = mpc::SolutionStats::resultStatusToString(lmpc_step_result.status);
+    latest_metadata["dual_residual"]    = lmpc_step_result.dual_residual;
+    latest_metadata["status"]           = mpc::SolutionStats::resultStatusToString(lmpc_step_result.status);
 
     mpc::OptSequence optimal_sequence = lmpc.getOptimalSequence();
     auto opt_state_seq  = optimal_sequence.state;
@@ -45,7 +47,9 @@ void LMPCController::calculateControl(int k, double t, const xVec &x, const wVec
     if (global_debug_levels.debug_optimizer_stats_level >= 1) 
     {
       PRINT_WITH_FILE_LOCATION("Optimizer Info")
-      PRINT("         Return code: " << lmpc_step_result.retcode)
+      PRINT("       solver_status: " << lmpc_step_result.solver_status)
+      PRINT("   solver_status_msg: " << lmpc_step_result.solver_status_msg)
+      PRINT("         is_feasible: " << lmpc_step_result.is_feasible)
       PRINT("       Result status: " << lmpc_step_result.status)
       PRINT("Number of iterations: " << lmpc_step_result.num_iterations)
       PRINT("                Cost: " << lmpc_step_result.cost)
@@ -142,7 +146,14 @@ void LMPCController::setConstraints(const nlohmann::json &json_data) {
     loadColumnValuesFromJson(umin, constraint_data, "umin");
     loadColumnValuesFromJson(umax, constraint_data, "umax");
 
-    lmpc.setConstraints(xmin, umin, ymin, xmax, umax, ymax, {0, prediction_horizon});
+    bool are_x_bounds_okay = lmpc.setStateBounds(xmin, xmax, {-1, -1});
+    bool are_u_bounds_okay = lmpc.setInputBounds(umin, umax, {-1, -1});
+    bool are_y_bounds_okay = lmpc.setOutputBounds(ymin, ymax, {-1, -1});
+    assert(are_x_bounds_okay);
+    assert(are_u_bounds_okay);
+    assert(are_y_bounds_okay);
+
+    // lmpc.setConstraints(xmin, umin, ymin, xmax, umax, ymax, {0, prediction_horizon});
 }
 
 void LMPCController::setReferences(const nlohmann::json &json_data) {
