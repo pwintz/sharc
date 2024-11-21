@@ -501,9 +501,6 @@ int main()
     // controller->update_internal_state(x_predict);
     
     controller->calculateControl(k, t, x_predict, w);
-    u = controller->getLastestControl();
-    metadata_json = controller->getLastestMetadata();
-    PRINT_WITH_FILE_LOCATION("Metadata: " << metadata_json)
 
     #if defined(USE_DYNAMORIO)
     
@@ -567,6 +564,10 @@ int main()
       }
     #endif
 
+    u = controller->getLatestControl();
+    metadata_json = controller->getLatestMetadata();
+    PRINT_WITH_FILE_LOCATION("Metadata: " << metadata_json)
+    
     // OptSequence has three properties: state, input, and output. 
     // Each predicted time step is stored in one row.
     // There are <prediction_horizon> many rows. 

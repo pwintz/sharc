@@ -87,5 +87,8 @@ class CmakeControllerExecutableProvider(BaseControllerExecutableProvider):
     if debug_levels.debug_build_level == 0:
       cmake_cmd += ["--", "--quiet"]
 
+    jobs = os.cpu_count()  # Automatically set to the number of available CPU cores
+    cmake_cmd += ["-j", str(jobs)]
+
     run_shell_cmd(cmake_cmd)
     assertFileExists(executable_path, f'The expected executable file "{executable_path}" was not built.')
