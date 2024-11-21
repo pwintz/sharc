@@ -25,7 +25,8 @@
       "extensions": [
 		"ms-vscode.cpptools-extension-pack",
 		"ms-python.python",
-		"ZainChen.json"
+		"ZainChen.json",
+		"ms-toolsai.jupyter"
 	]
     }
   }

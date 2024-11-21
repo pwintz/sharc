@@ -3,10 +3,18 @@
         {
             "name": "Linux",
             "includePath": [
-                "${workspaceFolder}/**",
-                "${workspaceFolder}/resources/include"
+                "${workspaceFolder}/resources/include",
+                "${workspaceFolder}/resources/controllers/include",
+                "/usr/include/eigen3"
             ],
-            "defines": [],
+            "defines": [
+                "TNX = 1",
+                "TNU = 1",
+                "TNY = 1",
+                "TNDU= 1",
+                "PREDICTION_HORIZON = 5",
+                "CONTROL_HORIZON = 5"
+            ],
             "cStandard": "c17",
             "cppStandard": "c++20",
             "intelliSenseMode": "linux-gcc-x64",
