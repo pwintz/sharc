@@ -7,10 +7,24 @@
 #include <functional>
 #include <unordered_map>
 
-using xVec = Eigen::Matrix<double, TNX, 1>;
-using uVec = Eigen::Matrix<double, TNU, 1>;
+// These MUST be overwritten
+#ifndef TNX
+  #define TNX -1
+#endif
+#ifndef TNU
+  #define TNU -1
+#endif
+#ifndef TNDU
+  #define TNDU -1
+#endif
+#ifndef TNY
+  #define TNY -1
+#endif
+
+using xVec = Eigen::Matrix<double, TNX,  1>;
+using uVec = Eigen::Matrix<double, TNU,  1>;
 using wVec = Eigen::Matrix<double, TNDU, 1>;
-using yVec = Eigen::Matrix<double, TNY, 1>;
+using yVec = Eigen::Matrix<double, TNY,  1>;
 
 // Define a macro to print a value 
 #define PRINT(x) std::cout << x << std::endl;
@@ -24,24 +38,29 @@ protected:
   constexpr static int Tny  = TNY;
   xVec state;   // Internal state
   uVec control; // Control input
-  wVec exogeneous_input; // Control input    
+  wVec exogenous_input; // Control input    
 
   nlohmann::json latest_metadata;
 
 public:
     // Constructor that initializes state dimensions and calls setup
     Controller(const nlohmann::json &json_data) {
-        initializeDimensions(json_data);
-        state            = xVec::Zero();  
-        control          = uVec::Zero(); 
-        exogeneous_input = wVec::Zero();
+      initializeDimensions(json_data);
+      state           = xVec::Zero();  
+      control         = uVec::Zero(); 
+      exogenous_input = wVec::Zero();
+      assert(Tnx > 0);
+      assert(Tnu > 0);
+      assert(Tndu > 0);
+      assert(Tny > 0);
+      initializeDimensions(json_data);
     }
 
     // Default constructor
     Controller()  {
-      state            = xVec::Zero();  
-      control          = uVec::Zero(); 
-      exogeneous_input = wVec::Zero();
+      state           = xVec::Zero();  
+      control         = uVec::Zero(); 
+      exogenous_input = wVec::Zero();
     }
 
     using CreatorFunc = std::function<Controller*(const nlohmann::json&)>;
@@ -69,12 +88,12 @@ private:
 
 // Registration macro
 #define REGISTER_CONTROLLER(NAME, TYPE) \
-    namespace { \
-        const bool registered_##TYPE = []() { \
-            Controller::registerController(NAME, [](const nlohmann::json& json_data) -> Controller* { \
-                return new TYPE(json_data); \
-            }); \
-            return true; \
-        }(); \
-    }
+namespace { \
+    const bool registered_##TYPE = []() { \
+        Controller::registerController(NAME, [](const nlohmann::json& json_data) -> Controller* { \
+            return new TYPE(json_data); \
+        }); \
+        return true; \
+    }(); \
+}
     

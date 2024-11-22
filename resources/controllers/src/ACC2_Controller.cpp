@@ -10,7 +10,9 @@
 #include "nlohmann/json.hpp"
 
 void ACC2_Controller::setup(const nlohmann::json &json_data){
-    PRINT_WITH_FILE_LOCATION("Start of ACC2_Controller::setup()")
+    if (global_debug_levels.debug_program_flow_level >= 2) {
+      PRINT_WITH_FILE_LOCATION("Start of ACC2_Controller::setup()")
+    }
 
     // Load generic system parameters
     sample_time              = json_data.at("system_parameters").at("sample_time");
@@ -29,7 +31,7 @@ void ACC2_Controller::setup(const nlohmann::json &json_data){
     gamma                    = json_data.at("system_parameters").at("gamma");
 
     // Check the values are reasonable.
-    assert(mass > 0);
+    assert(mass  > 0);
     assert(v_des > 0);
     assert(d_min > 0);
     assert(v_max > 0);
@@ -96,7 +98,7 @@ void ACC2_Controller::calculateControl(int k, double t, const xVec &x, const wVe
     assertVectorAlmostLessThan("   x",    x, "xmax", xmax, 1e-1);
 
     state            = x;
-    exogeneous_input = w;
+    exogenous_input = w;
 
     // Update the state matrices to linearize around the current velocity.
     double v = x[v_index];
@@ -286,9 +288,9 @@ void ACC2_Controller::setConstraints() {
 
   ymax << v_max; // velocity
 
-  printVector("xmax: ", xmax);
-  printVector("umax: ", umax);
-  printVector("ymax: ", ymax);
+  printVector("xmax", xmax);
+  printVector("umax", umax);
+  printVector("ymax", ymax);
 
   bool are_x_bounds_okay = lmpc.setStateBounds(xmin, xmax, {-1, -1});
   bool are_u_bounds_okay = lmpc.setInputBounds(umin, umax, {-1, -1});

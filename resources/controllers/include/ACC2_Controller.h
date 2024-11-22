@@ -6,13 +6,13 @@
 #include <mpc/Utils.hpp>
 using namespace mpc;
 
-// This code requires the following preprocessor variables to be defined:
-// * PREDICTION_HORIZON
-// * CONTROL_HORIZON
-// * TNX
-// * TNU
-// * TNDU
-// * TNY
+// These MUST be overwritten
+#ifndef PREDICTION_HORIZON
+  #define PREDICTION_HORIZON -1
+#endif
+#ifndef CONTROL_HORIZON
+  #define CONTROL_HORIZON -1
+#endif
 
 class ACC2_Controller : public Controller {
 private:
@@ -42,7 +42,7 @@ private:
     // Cost weights
     double       output_cost_weight;
     double        input_cost_weight; // Input weight in cost function.
-    double  delta_input_cost_weight; // Input diff weight in cost funciton.
+    double  delta_input_cost_weight; // Input diff weight in cost function.
 
     // Create an array to store a series of predictions for w.
     Eigen::Matrix<double, TNDU, PREDICTION_HORIZON> w_series; 
@@ -90,6 +90,8 @@ private:
 public:
     // Constructor that initializes dimensions and calls setup
     ACC2_Controller(const nlohmann::json &json_data) : Controller(json_data) {
+        assert(prediction_horizon > 0);
+        assert(control_horizon > 0);
         setup(json_data);  // Call setup in the derived class constructor
     }
 

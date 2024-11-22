@@ -20,6 +20,18 @@ void LMPCController::setup(const nlohmann::json &json_data){
     setWeights(json_data);
     setConstraints(json_data);
     setReferences(json_data);
+    
+    if (global_debug_levels.debug_dynamics_level >= 1) {
+      printMat("Ad", Ad);
+      printMat("Bd", Bd);
+      printMat("Bd_disturbance", Bd_disturbance);
+      printVector("xmin", xmin);
+      printVector("xmax", xmax);
+      printVector("ymin", ymin);
+      printVector("ymax", ymax);
+      printVector("umin", umin);
+      printVector("umax", umax);
+    }
 }
 
 void LMPCController::calculateControl(int k, double t, const xVec &x, const wVec &w){
@@ -58,13 +70,11 @@ void LMPCController::calculateControl(int k, double t, const xVec &x, const wVec
       PRINT("  Optimal x Sequence:\n" << opt_state_seq)
       PRINT("  Optimal u Sequence:\n" << opt_input_seq)
       PRINT("  Optimal y Sequence:\n" << opt_output_seq)
-      
     }
 }
 
 void LMPCController::createStateSpaceMatrices(const nlohmann::json &json_data) {
     // Define continuous-time state matrix A_c
-    mat<Tnx, Tnx> Ac;
     Ac << 0,      1, 0,  0,      0,
           0, -1/tau, 0,  0,      0,
           1,      0, 0, -1,      0,
@@ -72,7 +82,6 @@ void LMPCController::createStateSpaceMatrices(const nlohmann::json &json_data) {
           0,      0, 0,  0, -1/tau;
 
     // Define continuous-time input matrix B_c
-    mat<Tnx, Tnu> Bc;
     Bc << 0,
           0,
           0, 
@@ -80,17 +89,13 @@ void LMPCController::createStateSpaceMatrices(const nlohmann::json &json_data) {
           -1/tau;
 
     // State to output matrix
-    mat<Tny, Tnx> C;
     C << 0, 0, 1, 0, 0, 
          1, 0, 0,-1, 0;
 
     // Set input disturbance matrix.
-    mat<Tnx, Tndu> Bc_disturbance;
     Bc_disturbance << 0, 1/tau, 0, 0, 0;
     
-    mat<Tnx, Tnx> Ad;
-    mat<Tnx, Tnu> Bd;
-    mat<Tnx, Tndu> Bd_disturbance;
+    Cd_disturbance = mat<Tny, Tndu>::Zero() ; // Output disturbance matrix
 
     discretization<Tnx, Tnu, Tndu>(Ac, Bc, Bc_disturbance, sample_time, Ad, Bd, Bd_disturbance);
     
@@ -102,7 +107,7 @@ void LMPCController::createStateSpaceMatrices(const nlohmann::json &json_data) {
 void LMPCController::setOptimizerParameters(const nlohmann::json &json_data) {
     LParameters params;
     params.alpha = 1.6;
-    params.rho = 1e-6;
+    params.rho   = 1e-6;
     params.adaptive_rho      = true;
     params.eps_rel           = json_data.at("system_parameters").at("osqp_options").at("rel_tolerance");
     params.eps_abs           = json_data.at("system_parameters").at("osqp_options").at("abs_tolerance");
@@ -134,26 +139,24 @@ void LMPCController::setWeights(const nlohmann::json &json_data) {
 
 void LMPCController::setConstraints(const nlohmann::json &json_data) {
     auto constraint_data = json_data.at("system_parameters").at("constraints");
-    xVec xmin, xmax;
     loadColumnValuesFromJson(xmin, constraint_data, "xmin");
     loadColumnValuesFromJson(xmax, constraint_data, "xmax");
 
-    yVec ymin, ymax;
     loadColumnValuesFromJson(ymin, constraint_data, "ymin");
     loadColumnValuesFromJson(ymax, constraint_data, "ymax");
 
-    uVec umin, umax;
     loadColumnValuesFromJson(umin, constraint_data, "umin");
     loadColumnValuesFromJson(umax, constraint_data, "umax");
 
-    bool are_x_bounds_okay = lmpc.setStateBounds(xmin, xmax, {-1, -1});
-    bool are_u_bounds_okay = lmpc.setInputBounds(umin, umax, {-1, -1});
+    //                        Impose bounds on entire prediction horizon: ─┐
+    //                                                        ┌───┬────────┘
+    //                                                        ▼   ▼  
+    bool are_x_bounds_okay = lmpc.setStateBounds( xmin, xmax, {-1, -1});
+    bool are_u_bounds_okay = lmpc.setInputBounds( umin, umax, {-1, -1});
     bool are_y_bounds_okay = lmpc.setOutputBounds(ymin, ymax, {-1, -1});
     assert(are_x_bounds_okay);
     assert(are_u_bounds_okay);
     assert(are_y_bounds_okay);
-
-    // lmpc.setConstraints(xmin, umin, ymin, xmax, umax, ymax, {0, prediction_horizon});
 }
 
 void LMPCController::setReferences(const nlohmann::json &json_data) {
