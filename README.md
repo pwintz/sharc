@@ -50,7 +50,7 @@ Get SHARC up and running in three simple steps:
    ```
 
 2. **Make the Setup Script Executable**  
-   Change the permissions of the `sharc_setup_and_run.sh` script to make it executable:  
+   Change the permissions of the [`sharc_setup_and_run.sh`](https://github.com/pwintz/sharc/blob/quick-start/sharc_setup_and_run.sh) script to make it executable:  
    ```bash
    chmod +x sharc_setup_and_run.sh
    ```
