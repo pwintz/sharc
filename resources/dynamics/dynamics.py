@@ -182,20 +182,24 @@ class CartPoleDynamics(OdeDynamics):
         assert dxdt.shape == x.shape, (dxdt.shape, x.shape)
         return dxdt
     
+# Implement your own dynamics function here
 # class CustomDynamics(OdeDynamics):
+#     def __init__(self, config):
+#         super().__init__(config)
+        
 #     def setup_system(self):
 #         # System parameters, feel free to use self.config to get the parameters you need
 #         # from the config files as below
 #         # self.M = self.config["system_parameters"]["M"]
 #         return
-#     
+    
 #     def system_derivative(self, t, x, u, w):
 #         """
 #         Implement the abstract system_derivative method from OdeDynamics.
 #         """
 #         # Calculate and return the derivative of the state as a function of x,t,u,w
 #         # make sure it has the same shape as x before returning
-#         
+        
 #         # assert dxdt.shape == x.shape, (dxdt.shape, x.shape)
 #         # return dxdt
 #         return

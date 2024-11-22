@@ -5,7 +5,7 @@
 //     // tau = json_data.at("system_parameters").at("tau");
 // }
 // 
-// void CustomController::calculateControl(const xVec &x, const wVec &w){
+// void CustomController::calculateControl(int k, double t, const xVec &x, const wVec &w){
 //     // Calculate the control input, feel free to use internal state and last control as below
 //     // control = lmpc.step(state, control).cmd;
 // }
