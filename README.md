@@ -48,7 +48,7 @@ Get SHARC up and running in two simple steps:
    git clone git@github.com:pwintz/sharc.git && cd sharc
    ```
 
-2. **Make the Setup Script Executable Run the Setup Script**  
+2. **Make the Setup Script Executable and Run It**  
    Change the permissions of the [`sharc_setup_and_run.sh`](https://github.com/pwintz/sharc/blob/quick-start/sharc_setup_and_run.sh) script to make it executable, then execute it. This script pulls the SHARC Docker image, binds the necessary directories, and runs the Adaptive Cruise Control (ACC) example:
    ```bash
    chmod +x sharc_setup_and_run.sh && ./sharc_setup_and_run.sh
