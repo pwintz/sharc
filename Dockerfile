@@ -323,7 +323,7 @@ RUN $LIBMPC_DIR/configure.sh
 RUN mkdir $LIBMPC_DIR/build && cd $LIBMPC_DIR/build && cmake .. && cmake --install .
 
 # Copy the example folders.
-COPY --chown=$USERNAME examples/acc_example $WORKSPACE_ROOT/examples/acc_example
+COPY --chown=$USERNAME examples $WORKSPACE_ROOT/examples
 
 # Check that all of the expected directories exist.
 ARG PIN_ROOT
@@ -338,7 +338,7 @@ RUN test -e $PIN_ROOT/source \
     && test -e $WORKSPACE_ROOT/examples/acc_example
 
 USER $USERNAME
-WORKDIR ${WORKSPACE_ROOT}/examples/acc_example
+WORKDIR ${WORKSPACE_ROOT}/examples
 
 # ###################################
 # ## DevContainer for mpc-examples ##
