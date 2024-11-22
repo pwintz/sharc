@@ -1181,9 +1181,9 @@ class ScarabDelayProvider(DelayProvider):
     self._stats_reader         = scarabizor.ScarabStatsReader(sim_dir)
     self._scarab_params_reader = scarabizor.ScarabPARAMSReader(sim_dir)
 
-  def get_delay(self, k: int, metadata: dict):
+  def get_delay(self, k: int):
     if debug_levels.debug_interfile_communication_level >= 2:
-      print('Waiting for statistics from Scarab.')
+      print(f'Waiting for statistics file number {self._stats_file_number} from Scarab.')
 
     self._stats_reader.waitForStatsFile(self._stats_file_number)
     t_delay           = self._stats_reader.readTime(self._stats_file_number)
@@ -1207,7 +1207,7 @@ class OneTimeStepDelayProvider(DelayProvider):
     self.sim_dir         = sim_dir
     self.use_fake_scarab = use_fake_scarab
     
-  def get_delay(self, k: int, metadata: dict):
+  def get_delay(self, k: int):
     # Make the delay slightly less than sample time so that floating point rounding doesn't 
     # cause it to be larger than the sample time.
     t_delay = self.sample_time * (1 - 1e-6) 
@@ -1230,7 +1230,7 @@ class NoneDelayProvider(DelayProvider):
   def __init__(self):
     pass
 
-  def get_delay(self, k: int, metadata: dict):
+  def get_delay(self, k: int):
     t_delay = None
     metadata = {}
     return t_delay, metadata
@@ -1241,7 +1241,7 @@ class GaussianDelayProvider(DelayProvider):
     self.mean = mean
     self.std_dev = std_dev
 
-  def get_delay(self, k: int, metadata: dict):
+  def get_delay(self, k: int):
     # Generate a random number from the Gaussian distribution
     t_delay = np.random.normal(self.mean, self.std_dev)
     metadata = {}

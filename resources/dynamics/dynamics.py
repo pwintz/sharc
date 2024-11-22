@@ -35,46 +35,7 @@ class LTIDynamics(OdeDynamics):
         assert dxdt.shape == (self.n, 1), f'Expected dxdt.shape = {(self.n, 1)}, but instead dxdt.shape={dxdt.shape}.\nx.shape={x.shap}, u.shape={u.shape}, w.shape={"N/A" if w is None else w.shape}, (self.A @ x).shape={(self.A @ x).shape}, (self.B_dist @ w).shape={"N/A" if w is None else (self.B_dist @ w).shape}.' 
         return dxdt
     
-class ACCDynamics(LTIDynamics):
-    
-    def __init__(self, config):
-       super().__init__(config)
-
-    # Similar to LTI system but matrices are dependent on tau
-    def setup_system(self):
-        tau = self.config["system_parameters"]["tau"]
-        self.A = np.array([
-            [0, 1, 0, 0, 0],
-            [0, -1/tau, 0, 0, 0],
-            [1, 0, 0, -1, 0],
-            [0, 0, 0, 0, 1],
-            [0, 0, 0, 0, -1/tau]
-        ])
-        self.B = np.array([
-            [0],
-            [0],
-            [0],
-            [0],
-            [-1/tau]
-        ])
-        self.B_dist = np.array([
-            [0],
-            [1/tau],
-            [0],
-            [0],
-            [0]
-        ])
-        self.C = np.array([
-            [0, 0, 1, 0, 0],
-            [1, 0, 0, -1, 0]
-        ])
-        self.D = np.zeros([5, 1])
-        
-        self.n = self.config["system_parameters"]["state_dimension"]
-        self.m = self.config["system_parameters"]["input_dimension"]
-        self.p = self.config["system_parameters"]["output_dimension"]
-
-class ACC2Dynamics(OdeDynamics):
+class ACCDynamics(OdeDynamics):
     def __init__(self, config):
        super().__init__(config)
 
@@ -181,25 +142,3 @@ class CartPoleDynamics(OdeDynamics):
         dxdt = dxdt.reshape(4,1)
         assert dxdt.shape == x.shape, (dxdt.shape, x.shape)
         return dxdt
-    
-# Implement your own dynamics function here
-# class CustomDynamics(OdeDynamics):
-#     def __init__(self, config):
-#         super().__init__(config)
-        
-#     def setup_system(self):
-#         # System parameters, feel free to use self.config to get the parameters you need
-#         # from the config files as below
-#         # self.M = self.config["system_parameters"]["M"]
-#         return
-    
-#     def system_derivative(self, t, x, u, w):
-#         """
-#         Implement the abstract system_derivative method from OdeDynamics.
-#         """
-#         # Calculate and return the derivative of the state as a function of x,t,u,w
-#         # make sure it has the same shape as x before returning
-        
-#         # assert dxdt.shape == x.shape, (dxdt.shape, x.shape)
-#         # return dxdt
-#         return

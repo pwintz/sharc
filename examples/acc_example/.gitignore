@@ -17,3 +17,7 @@ out
 bin
 obj
 experiments
+latest
+saved_data_out_files
+saved_experiments
+plotting

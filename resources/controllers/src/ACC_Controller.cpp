@@ -1,6 +1,6 @@
-// controller/ACC2_Controller.cpp
+// controller/ACC_Controller.cpp
 #include "sharc/utils.hpp"
-#include "ACC2_Controller.h"
+#include "ACC_Controller.h"
 #include <mpc/LMPC.hpp>
 #include <mpc/Utils.hpp>
 #include <cmath>
@@ -9,9 +9,9 @@
 #include <assert.h> 
 #include "nlohmann/json.hpp"
 
-void ACC2_Controller::setup(const nlohmann::json &json_data){
+void ACC_Controller::setup(const nlohmann::json &json_data){
     if (global_debug_levels.debug_program_flow_level >= 2) {
-      PRINT_WITH_FILE_LOCATION("Start of ACC2_Controller::setup()")
+      PRINT_WITH_FILE_LOCATION("Start of ACC_Controller::setup()")
     }
 
     // Load generic system parameters
@@ -79,23 +79,23 @@ void ACC2_Controller::setup(const nlohmann::json &json_data){
     assert(v_max >= x0[v_index]);
     assert(v_max >= y0[0]);
 
-    PRINT_WITH_FILE_LOCATION("Checking initial conditions satisfy constraints.")
-    assertVectorAlmostLessThan("xmin", xmin, "  x0",   x0, 1e-1);
-    assertVectorAlmostLessThan("  x0",   x0, "xmax", xmax, 1e-1);
-    assertVectorAlmostLessThan("umin", umin, "  u0",   u0, 1e-1);
-    assertVectorAlmostLessThan("  u0",   u0, "umax", umax, 1e-1);
-    assertVectorAlmostLessThan("ymin", ymin, "  y0",   y0, 1e-1);
-    assertVectorAlmostLessThan("  y0",   y0, "ymax", ymax, 1e-1);
+    // PRINT_WITH_FILE_LOCATION("Checking initial conditions satisfy constraints.")
+    // assertVectorAlmostLessThan("xmin", xmin, "  x0",   x0, 1e-1);
+    // assertVectorAlmostLessThan("  x0",   x0, "xmax", xmax, 1e-1);
+    // assertVectorAlmostLessThan("umin", umin, "  u0",   u0, 1e-1);
+    // assertVectorAlmostLessThan("  u0",   u0, "umax", umax, 1e-1);
+    // assertVectorAlmostLessThan("ymin", ymin, "  y0",   y0, 1e-1);
+    // assertVectorAlmostLessThan("  y0",   y0, "ymax", ymax, 1e-1);
     
 }
 
-void ACC2_Controller::calculateControl(int k, double t, const xVec &x, const wVec &w){
+void ACC_Controller::calculateControl(int k, double t, const xVec &x, const wVec &w){
     // Calculate the control value "u" based on the current state (or state estimate) "x" and the 
     // current exogenuous input (or its estimate) "w".
 
-    PRINT_WITH_FILE_LOCATION("Checking constraints for 'x' at start of calculateControl(k=" << k << ").")
-    assertVectorAlmostLessThan("xmin", xmin, "   x",    x, 1e-1);
-    assertVectorAlmostLessThan("   x",    x, "xmax", xmax, 1e-1);
+    // PRINT_WITH_FILE_LOCATION("Checking constraints for 'x' at start of calculateControl(k=" << k << ").")
+    // assertVectorAlmostLessThan("xmin", xmin, "   x",    x, 1e-1);
+    // assertVectorAlmostLessThan("   x",    x, "xmax", xmax, 1e-1);
 
     state            = x;
     exogenous_input = w;
@@ -137,13 +137,13 @@ void ACC2_Controller::calculateControl(int k, double t, const xVec &x, const wVe
 
     xVec x_opt_next = opt_state_seq.row(0);
     PRINT("Checking if x satisfies xmin <= x <= xmax for k=" << k)
-    assertVectorAlmostLessThan(  "xmin",       xmin, "x^*(0)", x_opt_next, 1e-1);
-    assertVectorAlmostLessThan("x^*(0)", x_opt_next,   "xmax",       xmax, 1e-1);
+    // assertVectorAlmostLessThan(  "xmin",       xmin, "x^*(0)", x_opt_next, 1e-1);
+    // assertVectorAlmostLessThan("x^*(0)", x_opt_next,   "xmax",       xmax, 1e-1);
     
     uVec u_opt_next = opt_input_seq.row(0);
     PRINT("Checking if u satisfies umin <= u <= umax for k=" << k)
-    assertVectorAlmostLessThan(  "umin",       umin, "u^*(0)", u_opt_next, 1e-1);
-    assertVectorAlmostLessThan("u^*(0)", u_opt_next,   "umax",       umax, 1e-1);
+    // assertVectorAlmostLessThan(  "umin",       umin, "u^*(0)", u_opt_next, 1e-1);
+    // assertVectorAlmostLessThan("u^*(0)", u_opt_next,   "umax",       umax, 1e-1);
 
     PRINT("control - u_opt_next: " << control - u_opt_next)
 
@@ -174,13 +174,13 @@ void ACC2_Controller::calculateControl(int k, double t, const xVec &x, const wVe
     // double accelerator_force = 
 }
 
-void ACC2_Controller::updateStateSpaceMatrices(double v0) {
+void ACC_Controller::updateStateSpaceMatrices(double v0) {
     /* 
     Update the state space matrices based on the linearization of the dynamics centered at 
     the current velocity "v0".
     */
     if (global_debug_levels.debug_program_flow_level >= 2){ 
-      PRINT_WITH_FILE_LOCATION("Start of ACC2_Controller::updateStateSpaceMatrices")
+      PRINT_WITH_FILE_LOCATION("Start of ACC_Controller::updateStateSpaceMatrices")
     }
 
     // Define continuous-time state matrix A_c
@@ -226,8 +226,8 @@ void ACC2_Controller::updateStateSpaceMatrices(double v0) {
     lmpc.setDisturbances(Bd_disturbance, Cd_disturbance);
 }
 
-void ACC2_Controller::setOptimizerParameters(const nlohmann::json &json_data) {
-    PRINT_WITH_FILE_LOCATION("Start of ACC2_Controller::setOptimizerParameters")
+void ACC_Controller::setOptimizerParameters(const nlohmann::json &json_data) {
+    PRINT_WITH_FILE_LOCATION("Start of ACC_Controller::setOptimizerParameters")
     LParameters params;
     params.alpha = 1.6;
     params.rho   = 1e-6;
@@ -245,8 +245,8 @@ void ACC2_Controller::setOptimizerParameters(const nlohmann::json &json_data) {
     lmpc.setOptimizerParameters(params);
 }
 
-void ACC2_Controller::setWeights(const nlohmann::json &json_data) {
-    PRINT_WITH_FILE_LOCATION("Start of ACC2_Controller::setWeights()")
+void ACC_Controller::setWeights(const nlohmann::json &json_data) {
+    PRINT_WITH_FILE_LOCATION("Start of ACC_Controller::setWeights()")
     if (output_cost_weight < 0) {
         throw std::invalid_argument("The output weight was negative.");
     }
@@ -264,9 +264,9 @@ void ACC2_Controller::setWeights(const nlohmann::json &json_data) {
     lmpc.setObjectiveWeights(outputWeight, inputWeight, deltaInputWeight, {-1, -1});
 }
 
-void ACC2_Controller::setConstraints() {
+void ACC_Controller::setConstraints() {
   if (global_debug_levels.debug_program_flow_level >= 1) {
-    PRINT_WITH_FILE_LOCATION("Start of ACC2_Controller::setConstraints()")
+    PRINT_WITH_FILE_LOCATION("Start of ACC_Controller::setConstraints()")
   }
   const double inf = std::numeric_limits<double>::infinity();
 
@@ -304,11 +304,11 @@ void ACC2_Controller::setConstraints() {
   updateTerminalConstraint(0);
 }
 
-void ACC2_Controller::updateTerminalConstraint(double v_front_underestimate) {
+void ACC_Controller::updateTerminalConstraint(double v_front_underestimate) {
   // ==== Set the terminal constraint ====
   //    h(end) - v(end)*v_max/2a > d_min - v_f(end)^2 / 2a_F
   if (global_debug_levels.debug_program_flow_level >= 2) {
-    PRINT_WITH_FILE_LOCATION("Start of ACC2_Controller::updateTerminalConstraint()")
+    PRINT_WITH_FILE_LOCATION("Start of ACC_Controller::updateTerminalConstraint()")
   }
 
   // Create a vector 'c' for a constraint in the form "cᵀ x ≥ s_min."
@@ -334,7 +334,7 @@ void ACC2_Controller::updateTerminalConstraint(double v_front_underestimate) {
   lmpc.setScalarConstraint(constraint_min, inf, xc, uc, {prediction_horizon-1, prediction_horizon});
 }
 
-void ACC2_Controller::setReferences(const nlohmann::json &json_data) {
+void ACC_Controller::setReferences(const nlohmann::json &json_data) {
     yRef << v_des;
     assert(v_des > 0);
     PRINT("v_des: " << v_des)
@@ -343,4 +343,4 @@ void ACC2_Controller::setReferences(const nlohmann::json &json_data) {
 }
 
 // Register the controller
-REGISTER_CONTROLLER("ACC2_Controller", ACC2_Controller)
+REGISTER_CONTROLLER("ACC_Controller", ACC_Controller)

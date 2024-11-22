@@ -19,7 +19,7 @@ class SimulatorStatus(Enum):
 class DelayProvider(ABC):
 
   @abstractmethod
-  def get_delay(self, k: int, metadata: dict):
+  def get_delay(self, k: int):
     """ 
     return t_delay, metadata 
     """
@@ -87,32 +87,8 @@ class ControllerInterface(ABC):
   def _read_u(self) -> np.ndarray:
     pass
     
-#   @abstractmethod
-#   def _read_x_prediction(self) -> np.ndarray:
-#     pass
-#     
-#   @abstractmethod
-#   def _read_t_prediction(self) -> float:
-#     pass
-# 
-#   @abstractmethod
-#   def _read_iterations(self) -> int:
-#     pass
-    
   @abstractmethod
-  def _read_metadata(self) -> int:
-#     x_prediction = self._read_x_prediction()
-#     t_prediction = self._read_t_prediction()
-#     iterations = self._read_iterations()
-#     if isinstance(x_prediction, np.ndarray):
-#       x_prediction = column_vec_to_list(x_prediction)
-#     metadata = {
-#       "x_prediction": x_prediction,
-#       "t_prediction": t_prediction,
-#       "iterations": iterations
-#     }
-# 
-#     return metadata
+  def _read_metadata(self) -> dict:
     pass
 
   def get_u(self,         k: int, 
@@ -202,7 +178,7 @@ class ControllerInterface(ABC):
     self._write_w(w)
     u = self._read_u()
     metadata = self._read_metadata()
-    u_delay, delay_metadata = self.computational_delay_provider.get_delay(k, metadata)
+    u_delay, delay_metadata = self.computational_delay_provider.get_delay(k)
     self._write_t_delay(u_delay)
     metadata.update(delay_metadata)
 
@@ -223,9 +199,6 @@ class PipesControllerInterface(ControllerInterface):
 
     # Readers
     self.u_reader          = PipeVectorReader(os.path.join(self.sim_dir, 'u_c++_to_py'))
-    # self.x_predict_reader  = PipeVectorReader(os.path.join(self.sim_dir, 'x_predict_c++_to_py'))
-    # self.t_predict_reader  = PipeFloatReader( os.path.join(self.sim_dir, 't_predict_c++_to_py'))
-    # self.iterations_reader = PipeFloatReader( os.path.join(self.sim_dir, 'iterations_c++_to_py'))
     self.metadata_reader   = PipeJsonReader(  os.path.join(self.sim_dir, 'metadata_c++_to_py')) 
 
     # Writers
@@ -242,9 +215,6 @@ class PipesControllerInterface(ControllerInterface):
     """
     assertFileExists(os.path.join(self.sim_dir, 'u_c++_to_py'))
     self.u_reader.open()
-    # self.x_predict_reader.open()
-    # self.t_predict_reader.open()
-    # self.iterations_reader.open()
     self.metadata_reader.open()
     self.k_writer.open()
     self.t_writer.open()
@@ -260,12 +230,10 @@ class PipesControllerInterface(ControllerInterface):
     """ 
     Close all of the files we opened.
     """
-    # CLose readers.
+    # Close readers.
     self.u_reader.close()
-    # self.x_predict_reader.close()
-    # self.t_predict_reader.close()
-    # self.iterations_reader.close()
     self.metadata_reader.close()
+
     # Close writers.
     self.k_writer.close()
     self.t_writer.close()
@@ -305,18 +273,3 @@ class PipesControllerInterface(ControllerInterface):
     if debug_levels.debug_interfile_communication_level >= 2:
       print(f"Reading metadata file: {self.metadata_reader.filename}")
     return self.metadata_reader.read()
-
-  # def _read_x_prediction(self):
-  #   if debug_levels.debug_interfile_communication_level >= 2:
-  #     print(f"Reading x_predict file: {self.x_predict_reader.filename}")
-  #   return self.x_predict_reader.read()
-  #   
-  # def _read_t_prediction(self):
-  #   if debug_levels.debug_interfile_communication_level >= 2:
-  #     print(f"Reading t_predict file: {self.t_predict_reader.filename}")
-  #   return self.t_predict_reader.read()
-  #   
-  # def _read_iterations(self):
-  #   if debug_levels.debug_interfile_communication_level >= 2:
-  #     print(f"Reading iterations file: {self.iterations_reader.filename}")
-  #   return self.iterations_reader.read()

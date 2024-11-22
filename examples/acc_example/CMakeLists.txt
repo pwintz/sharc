@@ -1,15 +1,15 @@
 cmake_minimum_required(VERSION 3.16)
-project(AccExample)
+project(ACCExample)
 
 # Create arguments for PREDICTION_HORIZON and CONTROL_HORIZON, with default values defined.
 # To define values from the command line, use this:
 #    cmake -DPREDICTION_HORIZON:STRING=7 -DCONTROL_HORIZON:STRING=4
 set(PREDICTION_HORIZON 7 CACHE STRING "Prediction Horizon")
-set(CONTROL_HORIZON 4 CACHE STRING "Control Horizon")
-set(TNX 100 CACHE STRING "State Dimension")
-set(TNU 100 CACHE STRING "Input Dimension")
-set(TNDU 100 CACHE STRING "Disturbance Input Dimension")
-set(TNY 100 CACHE STRING "Output Dimension")
+set(CONTROL_HORIZON    4 CACHE STRING "Control Horizon")
+set(TNX              100 CACHE STRING "State Dimension")
+set(TNU              100 CACHE STRING "Input Dimension")
+set(TNDU             100 CACHE STRING "Disturbance Input Dimension")
+set(TNY              100 CACHE STRING "Output Dimension")
 set(USE_DYNAMORIO 1 CACHE BOOL OFF)
 # set(USE_EXECUTION_DRIVEN_SCARAB 0 CACHE BOOL OFF)
 
@@ -50,6 +50,7 @@ endfunction()
 # Check that expected environmental variables are defined.
 assert_env_var(RESOURCES_DIR)
 assert_env_var(SCARAB_ROOT)
+assert_env_var(LIBMPC_DIR)
 
 # Define the base directories (set this to where the controllers folder is)
 set(RESOURCES_DIR $ENV{RESOURCES_DIR})
@@ -57,13 +58,14 @@ set(CONTROLLERS_DIR ${RESOURCES_DIR}/controllers)
 set(CONTROLLERS_INC ${CONTROLLERS_DIR}/include)
 set(CONTROLLERS_SRC ${CONTROLLERS_DIR}/src)
 # Add source files dynamically
-file(GLOB CONTROLLERS_SOURCES "${CONTROLLERS_SRC}/*.cpp")
 message("    CONTROLLERS_DIR=${CONTROLLERS_DIR}")
 message("    CONTROLLERS_INC=${CONTROLLERS_INC}")
 message("    CONTROLLERS_SRC=${CONTROLLERS_SRC}")
 message("CONTROLLERS_SOURCES=${CONTROLLERS_SOURCES}")
 
-set(SOURCES ${CONTROLLERS_SOURCES})
+set(SOURCES ${CONTROLLERS_SRC}/ACC_Controller.cpp
+            ${CONTROLLERS_SRC}/controller.cpp
+            ${CONTROLLERS_SRC}/main_controller.cpp)
 
 # Add executable.
 add_executable(${EXECUTABLE_NAME} ${SOURCES})
@@ -103,7 +105,7 @@ include_directories($ENV{SCARAB_ROOT}/utils)
 # Preprocessor definitions
 add_definitions(
     -Wno-deprecated-enum-enum-conversion
-    -DEIGEN_STACK_ALLOCATION_LIMIT=0 -O3
+    -DEIGEN_STACK_ALLOCATION_LIMIT=0
     -DPREDICTION_HORIZON=${PREDICTION_HORIZON}
     -DCONTROL_HORIZON=${CONTROL_HORIZON}
     -DTNX=${TNX}

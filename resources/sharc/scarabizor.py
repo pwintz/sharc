@@ -124,7 +124,7 @@ class ParamsData:
         self._PARAMS_lines[line_num] = new_line_text
         # print(f"Replaced line number {line_num} with {new_line_text}")
         return
-    raise ValueError(f'The key {key} was not found in the PARAM_lines {PARAM_lines}.')
+    raise ValueError(f'The key {key} was not found in the PARAM_lines {self._PARAMS_lines}.')
 
   def get_lines(self):
     return self._PARAMS_lines.copy()
@@ -541,7 +541,7 @@ class ScarabTracesToComputationTimesProcessor(TracesToComputationTimesProcessor)
     #         "computation_time": computation_time
     #         }
     runtime_str = seconds_to_duration_string(end_time - start_time)
-    print(f"Finished Scarab simulation for k={dir_index}. The (simulated) computational delay is {computation_time:.3f} seconds. The simulation took {runtime_str} to run.")
+    print(f"Finished Scarab simulation for k={k}. The (simulated) computational delay is {computation_time:.3f} seconds. The simulation took {runtime_str} to run.")
     # return data
     return float(computation_time)
 

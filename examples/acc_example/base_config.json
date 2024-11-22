@@ -5,79 +5,81 @@
   "Simulation Options": {
     "in-the-loop_delay_provider": "execution-driven scarab",
     "parallel_scarab_simulation": false, 
-    "use_fake_delays": false,
     "max_batches": 9999999,
     "max_batch_size": 9999999
   },
   "dynamics_module_name": "dynamics.dynamics",
   "dynamics_class_name": "ACCDynamics",
-  "n_time_steps": 13,
+  "n_time_steps": 6,
   "==== Initial Condition ====": "",
-  "x0": [20, -2, 10, 0, 0],
-  "u0": [0],
+  "x0": [0, 20.0, 20.0],
+  "u0": [0.0, 100.0],
   "only_update_control_at_sample_times": true,
+  "fake_delays": {
+    "enable": false,
+    "time_steps":              [ 12,  15],
+    "sample_time_multipliers": [1.2, 2.2]
+  },
   "computation_delay_model": {
-    "fake_computation_delay_times": 0.01,
     "computation_delay_slope": 0.001801,
     "computation_delay_y-intercept": 0.147
   },
   "==== Debgugging Levels ====": {
     "debug_program_flow_level": 1,
-    "debug_interfile_communication_level": 0,
+    "debug_interfile_communication_level": 2,
     "debug_optimizer_stats_level": 0,
-    "debug_dynamics_level": 0,
-    "debug_configuration_level": 0,
-    "debug_build_level": 0, 
-    "debug_shell_calls_level": 0, 
-    "debug_batching_level": 0, 
-    "debug_scarab_level": 0
+    "debug_dynamics_level":        2,
+    "debug_configuration_level":   0,
+    "debug_build_level":           0, 
+    "debug_shell_calls_level":     0, 
+    "debug_batching_level":        0, 
+    "debug_scarab_level":          0
   },
   "system_parameters": {
-    "state_dimension": 5, 
-    "input_dimension": 1,
-    "exogenous_input_dimension": 1,
-    "output_dimension": 2,
-    "sample_time": 0.5,
-    "lead_car_input": 0,
-    "tau": 0.5,
-    "yref": [10, 0],
-    "convergence_termination_tol": 0.05,
-    "x_names": ["v1", "a1", "d2", "v2", "a2"],
-    "u_names": ["u"], 
-    "y_names": ["d", "delta v"], 
-    "constraints":{
-      "xmin": [-1e9, -1e9, -1e9,   0, -1e9], 
-      "xmax": [ 1e9,  1e9,  1e9,  32,  1e9],
-      "umin": -5, 
-      "umax":  5, 
-      "ymin": [ 10,    -1e2], 
-      "ymax": [1e9,    1e2]
-    }, 
-    "controller_type": "LMPCController",
+    "state_dimension": 3, 
+    "input_dimension": 2,
+    "exogenous_input_dimension": 2,
+    "output_dimension": 1,
+    "sample_time": 0.2,
+    "x_names": ["p", "h", "v"],
+    "u_names": ["F^a", "F^b"], 
+    "y_names": ["v"], 
+    "mass":  2044,
+    "d_min": 6.0,
+    "v_des": 15 ,
+    "v_max": 20,
+    "F_accel_max": 4880,
+    "F_brake_max": 6507,
+    "beta":  339.1329,
+    "gamma": 0.77,
+    "max_brake_acceleration": 3.2,
+    "max_brake_acceleration_front": 5.0912,
+    "controller_type": "ACC_Controller",
     "mpc_options":{
       "enable_mpc_warm_start": false,
       "use_state_after_delay_prediction": false,
       "prediction_horizon": 5,
-      "control_horizon": 2,
-      "output_cost_weight": 10,
-      "input_cost_weight": 0.1
+      "control_horizon":    5,
+      "output_cost_weight": 10000.0,
+      "input_cost_weight": 0.01,
+      "delta_input_cost_weight": 1.0 
     }, 
     "osqp_options": {
-      "abs_tolerance": 1e-3,
-      "rel_tolerance": 1e-3,
+      "abs_tolerance": 1e-5,
+      "rel_tolerance": 1e-5,
       "dual_infeasibility_tolerance": 1e-3,
       "primal_infeasibility_tolerance": 1e-3,
-      "maximum_iteration": 800,
+      "maximum_iteration": 5000,
       "time_limit": 0,
       "verbose": false
     }
   },  
   "PARAMS_base_file": "PARAMS.base",
   "PARAMS_patch_values": {
-    "chip_cycle_time": null,
-    "l1_size": null,
-    "icache_size": null,
-    "dcache_size": null
+    "chip_cycle_time": 60000000,
+    "l1_size":         null,
+    "icache_size":     null,
+    "dcache_size":     null
   }
 }
 

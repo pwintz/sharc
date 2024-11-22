@@ -10,7 +10,7 @@ class MockDelayProvider(DelayProvider):
   def put_delay(self, delay):
     self.delay_queue.put(delay)
 
-  def get_delay(self, metadata):
+  def get_delay(self, k):
     if self.delay_queue.qsize() == 0:
       raise ValueError(f'Delay queue is empty!')
       

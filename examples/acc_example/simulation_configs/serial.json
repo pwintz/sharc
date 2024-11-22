@@ -13,6 +13,9 @@
       "osqp_options": {
         "maximum_iteration": 10
       }
+    }, 
+    "fake_delays": {
+      "enable": true
     }
   },
   {

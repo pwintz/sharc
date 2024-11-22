@@ -1,4 +1,4 @@
-// controller/ACC2_Controller.h
+// controller/ACC_Controller.h
 #pragma once
 
 #include "controller.h"
@@ -14,7 +14,7 @@ using namespace mpc;
   #define CONTROL_HORIZON -1
 #endif
 
-class ACC2_Controller : public Controller {
+class ACC_Controller : public Controller {
 private:
     constexpr static int prediction_horizon = PREDICTION_HORIZON;
     constexpr static int control_horizon    = CONTROL_HORIZON;
@@ -89,7 +89,7 @@ private:
 
 public:
     // Constructor that initializes dimensions and calls setup
-    ACC2_Controller(const nlohmann::json &json_data) : Controller(json_data) {
+    ACC_Controller(const nlohmann::json &json_data) : Controller(json_data) {
         assert(prediction_horizon > 0);
         assert(control_horizon > 0);
         setup(json_data);  // Call setup in the derived class constructor

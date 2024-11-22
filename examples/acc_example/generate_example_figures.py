@@ -11,8 +11,8 @@ import os
 import sharc.make_plots
 
 def main():
-  example_dir = "/dev-workspace/examples/acc2_example"
-  experiment_dir = "/dev-workspace/examples/acc2_example/latest"
+  example_dir = "/dev-workspace/examples/acc_example"
+  experiment_dir = "/dev-workspace/examples/acc_example/latest"
   experiment_incremental_results_path = os.path.join(experiment_dir, "experiment_list_data_incremental.json")
   experiment_final_results_path = os.path.join(experiment_dir, "experiment_list_data_incremental.json")
   out_dir = os.path.join(example_dir, "images")

@@ -5,28 +5,12 @@ The communication is done via pipe files contained in the simdir directory.
 Instead of calling this script directly, call run_sharc.py
 """
 import numpy as np
-from scipy.integrate import ode
-import scipy.signal
-import numpy.linalg as linalg
-import copy
-# import argparse # Parsing of input args.
-
-# Import contextmanager to allow defining commands to be used to create "with" blocks.
-from contextlib import contextmanager 
-
-import math
-import time
 import traceback # Provides pretty printing of exceptions (https://stackoverflow.com/a/1483494/6651650)
-from abc import abstractmethod, ABC
-
-# from sharc import ControllerInterface
 from sharc.controller_interface import ControllerInterface
 from sharc.utils import *
 import sharc.debug_levels as debug_levels
 from sharc.data_types import *
 from sharc.dynamics_base import Dynamics
-
-from typing import Callable, List, Set, Dict, Tuple, Union
 
 try:
   # Ensure that assertions are enabled.
@@ -38,7 +22,7 @@ except AssertionError:
 def run(sim_dir: str, config_data: dict, dynamics: Dynamics, controller_interface: ControllerInterface) -> dict:
   if not sim_dir.endswith("/"):
     sim_dir += "/"
-  print(f"Start of plant_runner.run()  in {sim_dir}")
+  print(f"Start of plant_runner.run() in {sim_dir}")
 
   n_time_steps = config_data["n_time_steps"]
   sample_time = config_data["system_parameters"]["sample_time"] # Discrete sample period.

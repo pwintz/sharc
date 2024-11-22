@@ -42,7 +42,7 @@ class Dynamics(ABC):
     def get_exogenous_input(self, t):
       """
       Define a default exogenous input function.
-      To implement this in subclasses, generate an exogeneuous input vector "w" that is a 
+      To implement this in subclasses, generate an exogenous input vector "w" that is a 
       numpy column vector. 
       """
       return np.zeros((self.w_dim, 1))
