@@ -11,8 +11,8 @@
 		"dockerfile": "${localWorkspaceFolder}/Dockerfile",
 		"args": {
 				"WORKSPACE_ROOT": "/dev-workspace"
-				// "USERNAME": "user", // This user must exist! (Created by Dockerfile).
-		},
+				// "USERNAME": "user", // This will change the name of the user created by Dockerfile).
+		}
     // "options": ["--target=mpc-examples-dev"]
 	},
 	"runArgs": [ "--net=host"],

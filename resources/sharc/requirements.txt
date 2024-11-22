@@ -2,3 +2,4 @@ python-slugify
 pandas
 numpy
 matplotlib
+ipykernel
