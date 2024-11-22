@@ -442,7 +442,7 @@ class TracesToComputationTimesProcessor(ABC):
       k_trace = int(result.group('k_trace'))
       dynamorio_trace_dirs.append(trace_dir)
       trace_dir_dict[k_trace] = trace_dir
-      print('trace_dir_dict: ', trace_dir_dict.keys())
+      # print('trace_dir_dict: ', trace_dir_dict.keys())
 
     sorted_indices = sorted(trace_dir_dict)
     return sorted_indices
