@@ -7,9 +7,11 @@
     "Simulation Options": {
       "in-the-loop_delay_provider": "onestep",
       "parallel_scarab_simulation": true, 
-      "use_fake_delays": true,
       "max_batches": 99,
       "max_batch_size": 8
+    },
+    "fake_delays": {
+      "enable": true
     }
   },
   {
@@ -19,7 +21,9 @@
     "n_time_steps": 24,
     "Simulation Options": {
       "in-the-loop_delay_provider": "execution-driven scarab",
-      "use_fake_delays": true
+    },
+    "fake_delays": {
+      "enable": true
     }
   },
   {

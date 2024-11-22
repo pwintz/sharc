@@ -159,8 +159,6 @@ In the following example, C++-style comments are included (`//....`), but these 
     "in-the-loop_delay_provider": "onestep",
     // Enable parallel simulation.
     "parallel_scarab_simulation": false, 
-    // use_fake_delays is deprecated. 
-    "use_fake_delays": false,
     // Define the maximum number of batches when running in parallel.
     // Useful for ensuring that a simulation runs within a desired amount n 
     "max_batches": 9999999,

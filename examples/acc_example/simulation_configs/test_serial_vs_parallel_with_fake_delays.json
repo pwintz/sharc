@@ -6,14 +6,16 @@
     "n_time_steps": 4,
     "Simulation Options": {
       "in-the-loop_delay_provider": "execution-driven scarab",
-      "parallel_scarab_simulation": false,
-      "use_fake_delays": true
+      "parallel_scarab_simulation": false
     },
     "system_parameters": {
       "sample_time": 0.25, 
       "osqp_options": {
         "maximum_iteration": 10
       }
+    },
+    "fake_delays": {
+      "enable": true
     }
   },
   {
@@ -23,14 +25,16 @@
     "n_time_steps": 4,
     "Simulation Options": {
       "in-the-loop_delay_provider": "onestep",
-      "parallel_scarab_simulation": true,
-      "use_fake_delays": true
+      "parallel_scarab_simulation": true
     },
     "system_parameters": {
       "sample_time": 0.25, 
       "osqp_options": {
         "maximum_iteration": 10
       }
+    },
+    "fake_delays": {
+      "enable": true
     }
   }
 ]

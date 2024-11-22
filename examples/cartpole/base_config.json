@@ -13,9 +13,13 @@
     "in-the-loop_delay_provider": "fake execution-driven scarab",
     "in-the-loop_delay_provider": "execution-driven scarab",
     "parallel_scarab_simulation": false, 
-    "use_fake_delays": true,
     "max_batches": 9999999,
     "max_batch_size": 16
+  },
+  "fake_delays": {
+    "enable": false,
+    "time_steps":              [ 12,  15],
+    "sample_time_multipliers": [1.2, 2.2]
   },
   "dynamics_module_name": "dynamics.dynamics",
   "dynamics_class_name": "CartPoleDynamics",

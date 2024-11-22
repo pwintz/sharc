@@ -425,7 +425,7 @@ int main()
   double t_delay_prev = 0;
 
   #if defined(USE_EXECUTION_DRIVEN_SCARAB)
-    if (!json_data.at("Simulation Options").at("use_fake_delays")) {
+    if (!json_data.at("fake_delays").at("enable")) {
       scarab_begin(); // Tell Scarab to stop "fast forwarding". This is needed for '--pintool_args -fast_forward_to_start_inst 1'
     }
   #endif

@@ -4,8 +4,7 @@
     "Simulation Options": {
         "simulator_mode": "parallel",
         "in-the-loop_delay_provider": "onestep",
-        "parallel_scarab_simulation": true,
-        "use_fake_delays": false
+        "parallel_scarab_simulation": true
     },
     "==== Hardware Configuration ===": "",
     "PARAMS_base_file":  "PARAMS.cortex_a76",

@@ -25,7 +25,7 @@ class CmakeControllerExecutableProvider(BaseControllerExecutableProvider):
 
     simulation_options      = build_config["Simulation Options"]
     use_parallel_simulation = simulation_options["parallel_scarab_simulation"]
-    use_fake_delays         = build_config["Simulation Options"]["use_fake_delays"]
+    use_fake_delays         = build_config["fake_delays"]["enable"]
     prediction_horizon      = build_config["system_parameters"]["mpc_options"]["prediction_horizon"]
     control_horizon         = build_config["system_parameters"]["mpc_options"]["control_horizon"]
     state_dimension         = build_config["system_parameters"]["state_dimension"]
