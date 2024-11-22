@@ -141,8 +141,8 @@ class ExperimentList:
       print('Finished running experiments from configuration in\n\t' + self.experiments_config_file_path)
     writeJson(self.complete_data_file_path, self.experiment_result_dict, label="Complete experiment list data")
     
-    # Delete the incremental data file.
-    os.remove(self.incremental_data_file_path)
+    # # Delete the incremental data file.
+    # os.remove(self.incremental_data_file_path)
 
   def get_results(self):
     """
