@@ -319,11 +319,19 @@ class MockExecutionDrivenScarabRunner(ExecutionDrivenScarabRunner):
     def __init__(self, *args, **kwargs):
       # self.number_of_steps = int(kwargs.pop('number_of_steps', 1))
       queued_delays = kwargs.pop('queued_delays')
+      # queued_delays = queued_delays.copy()
       self.delay_queue = queue.Queue()
       # Put all of the queued delays into the delay queue
-      for delay in queued_delays:
-        self.delay_queue.put(delay)
-      self.number_of_steps = self.delay_queue.qsize()
+      self.number_of_steps = len(queued_delays)
+      assert self.number_of_steps > 0
+      for k in range(self.number_of_steps):
+        self.delay_queue.put(queued_delays[k])
+
+      print('self.delay_queue: ', self.delay_queue)
+      # for k in queued_delays.keys():
+      #   delay = queued_delays[k]
+      #   self.delay_queue.put(delay)
+      # self.number_of_steps = self.delay_queue.qsize()
       # print("q_size:", self.number_of_steps)
       super().__init__(*args, **kwargs)
 
@@ -332,10 +340,11 @@ class MockExecutionDrivenScarabRunner(ExecutionDrivenScarabRunner):
       
       if self.delay_queue.qsize() == 0:
         raise ValueError(f'Delay queue is empty!')
-      delay = self.delay_queue.get()
-      delay_in_femtoseconds = int(FEMTOSECOND_PER_SECONDS*delay)
 
       for roi_ndx in range(self.number_of_steps):
+        delay = self.delay_queue.get()
+        print("Delay: " , delay)
+        delay_in_femtoseconds = int(FEMTOSECOND_PER_SECONDS*delay)
         # stat_out_roi_file_name = f'core.stat.0.out.roi.{roi_ndx}'
         stat_csv_roi_file_name = f'core.stat.0.csv.roi.{roi_ndx}'
         # stat_out_roi_file_contents = "\n".join([
@@ -406,13 +415,13 @@ class TracesToComputationTimesProcessor(ABC):
     # Create a dictionary with the keys being the values of "k" and the values be corresponding computation time.
     return dict(zip(k_of_computation, computation_times))
 
-  def _get_trace_directory_from_index(self, index):
-    trace_dir = os.path.join(self.sim_dir, f'dynamorio_trace_{index}')
+  def _get_trace_directory_from_index(self, k):
+    trace_dir = os.path.join(self.sim_dir, f'dynamorio_trace_{k}')
     assertFileExists(trace_dir)
     return trace_dir
   
   def _get_trace_directories_indices(self):
-    trace_dir_regex = re.compile(r".*dynamorio_trace_(?P<trace_index>\d+)")
+    trace_dir_regex = re.compile(r".*dynamorio_trace_(?P<k_trace>\d+)")
 
     # Note: glob does not support 'root_dir' until Python 3.10. :(
     # dynamorio_trace_dirs = glob.glob('dynamorio_trace_*', root_dir=sim_dir)
@@ -430,19 +439,17 @@ class TracesToComputationTimesProcessor(ABC):
         raise ValueError(f'Not a trace directory!')
 
       trace_dir = os.path.join(self.sim_dir, trace_dir)
-      trace_index = int(result.group('trace_index'))
+      k_trace = int(result.group('k_trace'))
       dynamorio_trace_dirs.append(trace_dir)
-      trace_dir_dict[trace_index] = trace_dir
-
-    # if len(trace_dir_dict) == 0:
-    #   raise ValueError(f"No DynamoRIO trace directories were found in {self.sim_dir}")
+      trace_dir_dict[k_trace] = trace_dir
+      print('trace_dir_dict: ', trace_dir_dict.keys())
 
     sorted_indices = sorted(trace_dir_dict)
     return sorted_indices
 
   def _get_trace_directories(self):
     indices = self._get_trace_directories_indices()
-    path_format = lambda ndx: os.path.join(self.sim_dir, f'dynamorio_trace_{ndx}')
+    path_format = lambda k: os.path.join(self.sim_dir, f'dynamorio_trace_{k}')
     trace_dirs = map(path_format, indices)
     return trace_dirs
 
@@ -497,11 +504,10 @@ class ScarabTracesToComputationTimesProcessor(TracesToComputationTimesProcessor)
     if debug_levels.debug_scarab_level > 1:
       print(f"Finished portabilization of trace in {trace_dir}.")
 
-  def get_computation_time_from_trace(self, dir_index):
-    if not isinstance(dir_index, int):
-      raise AssertionError("Assertion failed: isinstance(dir_index, int)")
+  def get_computation_time_from_trace(self, k):
+    assert isinstance(k, int), "Assertion failed: isinstance(k, int)"
     
-    trace_dir = self._get_trace_directory_from_index(dir_index)
+    trace_dir = self._get_trace_directory_from_index(k)
     
     ScarabTracesToComputationTimesProcessor.portabalize_trace(trace_dir)
 
@@ -561,11 +567,11 @@ class MockTracesToComputationTimesProcessor(TracesToComputationTimesProcessor):
         
     super().__init__(*args, **kwargs)
 
-  def get_computation_time_from_trace(self, dir_index):
+  def get_computation_time_from_trace(self, k):
     """
     Override the superclass' simulate trace to not use Scarab to get the computation times.
     """
-    trace_dir = self._get_trace_directory_from_index(dir_index)
+    trace_dir = self._get_trace_directory_from_index(k)
       
     # We don't need PARAMS.in in the trace directory for the sake of the
     # Mock delays, but it is usful to have it here to check that copying it works
@@ -574,10 +580,10 @@ class MockTracesToComputationTimesProcessor(TracesToComputationTimesProcessor):
     assertFileExists(os.path.join(trace_dir, 'PARAMS.in'))
 
     # Read the fake delay data.
-    delay = self.delay_list[dir_index]
-    if delay == None:
-      raise ValueError(f'The delay at index {dir_index} has already been read!')
-    self.delay_list[dir_index] = None
+    delay = self.delay_list[k]
+    # if delay == None:
+    #   raise ValueError(f'The delay at index {k} has already been read!')
+    # self.delay_list[k] = None
 
     # data = {
     #         "index": dir_index, 

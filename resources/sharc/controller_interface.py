@@ -19,7 +19,7 @@ class SimulatorStatus(Enum):
 class DelayProvider(ABC):
 
   @abstractmethod
-  def get_delay(self, metadata):
+  def get_delay(self, k: int, metadata: dict):
     """ 
     return t_delay, metadata 
     """
@@ -202,7 +202,7 @@ class ControllerInterface(ABC):
     self._write_w(w)
     u = self._read_u()
     metadata = self._read_metadata()
-    u_delay, delay_metadata = self.computational_delay_provider.get_delay(metadata)
+    u_delay, delay_metadata = self.computational_delay_provider.get_delay(k, metadata)
     self._write_t_delay(u_delay)
     metadata.update(delay_metadata)
 
@@ -212,9 +212,8 @@ class ControllerInterface(ABC):
       printIndented(f"metadata: {metadata}", 1)
 
     return u, u_delay, metadata
-  
 
-  
+
 class PipesControllerInterface(ControllerInterface):
 
   def __init__(self, computational_delay_provider: DelayProvider, sim_dir: str):

@@ -464,22 +464,27 @@ class Simulation:
     self.params.to_file(PARAMS_out_file)
 
     sample_time     = self.sim_config["system_parameters"]["sample_time"]
-    use_fake_delays = self.sim_config["Simulation Options"]["use_fake_delays"]
+    use_fake_delays = self.sim_config["fake_delays"]["enable"]
     if use_fake_delays:
-      # Create some fake delay data.
-      # Create a list of delays that are shorter than the sample time
-      fake_delays = [0.1*sample_time]*self.n_time_steps
+      fake_delays_time_steps              = self.sim_config["fake_delays"]["time_steps"]
+      fake_delays_sample_time_multipliers = self.sim_config["fake_delays"]["sample_time_multipliers"]
+      assert len(fake_delays_time_steps) == len(fake_delays_sample_time_multipliers)
 
-      # Update one of the queued delays to be longer than the sample time
-      ndx_start_of_long_delays = 1000 # self.n_time_steps // 2
-      for index_for_delay in range(ndx_start_of_long_delays, self.n_time_steps):
-      # if self.n_time_steps >= index_for_delay+1:
-        fake_delays[index_for_delay] = 200 # *sample_time
+      k0 = self.first_time_index
+      fake_delays = {k: 0.1*sample_time for k in range(k0, k0+self.n_time_steps)}
+      for k, multiplier in zip(fake_delays_time_steps, fake_delays_sample_time_multipliers):
+        delay = multiplier * sample_time
+        assert delay > 0
+        fake_delays[k] = delay 
+
+      print("fake_delays: ", fake_delays)
     else:
       fake_delays = None
 
     in_the_loop_delay_provider =  self.sim_config["Simulation Options"]["in-the-loop_delay_provider"]
-    computation_delay_provider = computation_delay_provider_factory(in_the_loop_delay_provider, self.simulation_dir, sample_time, fake_delays)
+    computation_delay_provider = computation_delay_provider_factory(
+                                            in_the_loop_delay_provider, self.simulation_dir, 
+                                            sample_time, use_fake_delays)
     
     controller_interface = PipesControllerInterface(computation_delay_provider, self.simulation_dir)
 
@@ -934,7 +939,7 @@ def run_experiment_parallelized(experiment_config, params_base: list):
 def getSimulationExecutor(sim_dir, 
                           sim_config, 
                           controller_interface: ControllerInterface, 
-                          fake_delays=None):
+                          fake_delays: Union[Dict[int, float], None]=None):
   """ 
   This function implements the "Factory" design pattern, where it returns objects of various classes depending on the imputs.
   """
@@ -1124,7 +1129,11 @@ class ModeledDelaysSimulationExecutor(SimulationExecutor):
 class SerialSimulationExecutor(SimulationExecutor):
   scarab_runner: scarabizor.ExecutionDrivenScarabRunner
 
-  def __init__(self, sim_dir: str, sim_config: dict, controller_interface: ControllerInterface, scarab_runner: scarabizor.ExecutionDrivenScarabRunner):
+  def __init__(self, 
+               sim_dir: str, 
+               sim_config: dict, 
+               controller_interface: ControllerInterface, 
+               scarab_runner: scarabizor.ExecutionDrivenScarabRunner):
     super().__init__(sim_dir, sim_config, controller_interface)
     self.scarab_runner = scarab_runner
 
@@ -1172,7 +1181,7 @@ class ScarabDelayProvider(DelayProvider):
     self._stats_reader         = scarabizor.ScarabStatsReader(sim_dir)
     self._scarab_params_reader = scarabizor.ScarabPARAMSReader(sim_dir)
 
-  def get_delay(self, metadata):
+  def get_delay(self, k: int, metadata: dict):
     if debug_levels.debug_interfile_communication_level >= 2:
       print('Waiting for statistics from Scarab.')
 
@@ -1191,27 +1200,28 @@ class ScarabDelayProvider(DelayProvider):
 
 class OneTimeStepDelayProvider(DelayProvider):
 
-  def __init__(self, sample_time, sim_dir, use_fake_scarab):
-    self.trace_dir_index = 0
+  def __init__(self, sample_time: float, sim_dir: str, use_fake_scarab: bool):
+    assert isinstance(use_fake_scarab, bool)
+    # self.trace_dir_index = 0
     self.sample_time     = sample_time
     self.sim_dir         = sim_dir
     self.use_fake_scarab = use_fake_scarab
     
-  def get_delay(self, metadata):
+  def get_delay(self, k: int, metadata: dict):
     # Make the delay slightly less than sample time so that floating point rounding doesn't 
     # cause it to be larger than the sample time.
     t_delay = self.sample_time * (1 - 1e-6) 
     metadata = {}
 
     if self.use_fake_scarab:
-      fake_trace_dir = os.path.join(self.sim_dir, f'dynamorio_trace_{self.trace_dir_index}')
+      fake_trace_dir = os.path.join(self.sim_dir, f'dynamorio_trace_{k}')
       # Create a fake trace directory.
       os.makedirs(fake_trace_dir)
       # Create a README file in the fake trace directory.
       with open(os.path.join(fake_trace_dir, 'README.txt'), 'w') as file:
         file.write(f'This is a fake trace directory created by {type(self)} for the purpose of faking Scarab data for faster testing.')
       # Increment the trace directory index.
-      self.trace_dir_index += 1
+      # self.trace_dir_index += 1
 
     return t_delay, metadata
 
@@ -1220,7 +1230,7 @@ class NoneDelayProvider(DelayProvider):
   def __init__(self):
     pass
 
-  def get_delay(self, metadata):
+  def get_delay(self, k: int, metadata: dict):
     t_delay = None
     metadata = {}
     return t_delay, metadata
@@ -1231,7 +1241,7 @@ class GaussianDelayProvider(DelayProvider):
     self.mean = mean
     self.std_dev = std_dev
 
-  def get_delay(self, metadata):
+  def get_delay(self, k: int, metadata: dict):
     # Generate a random number from the Gaussian distribution
     t_delay = np.random.normal(self.mean, self.std_dev)
     metadata = {}
