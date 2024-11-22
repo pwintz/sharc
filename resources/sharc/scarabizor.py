@@ -378,7 +378,7 @@ class MockExecutionDrivenScarabRunner(ExecutionDrivenScarabRunner):
         with open(os.path.join(self.sim_dir, stat_csv_roi_file_name), 'w', buffering=1) as stat_csv_roi_file:
           stat_csv_roi_file.write(stat_csv_roi_file_contents + "\n")
 
-      # Copy file PARAMS file, imitating the behavior of Scarb.
+      # Copy file PARAMS file, imitating the behavior of Scarab.
       assertFileExists(self.params_src_file)
       shutil.copyfile(self.params_src_file, self.params_in_file)
       shutil.copyfile(self.params_src_file, self.params_out_file)

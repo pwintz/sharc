@@ -10,8 +10,6 @@ from sharc.utils import run_shell_cmd
 import sharc.debug_levels as debug_levels
 from sharc.controller_delegator_base import CmakeControllerExecutableProvider
 
-
-
 class ControllerExecutableProvider(CmakeControllerExecutableProvider):
 
   def get_controller_executable(self, build_config:dict) -> str:
