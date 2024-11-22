@@ -12,17 +12,43 @@ We use the simulation at each time-step to determine the computation time of the
 
 <!-- The setup of Scarab is somewhat difficult, so this project uses Docker to provide a consistent development environment for Scarab so that it can be quickly installed and run by developers and users.  -->
 
+## Table of Contents
+1. [Overview](#overview)
+2. [Getting Started](#getting-started)
+    - [Installing Docker](#installing-docker)
+    - [Obtaining the SHARC Docker Image](#obtaining-the-sharc-docker-image)
+    - [Creating a SHARC Docker Container from an Image](#creating-a-sharc-docker-container-from-an-image)
+3. [Example: Adaptive Cruise Control](#example-adaptive-cruise-control)
+4. [Configuration Files](#configuration-files)
+5. [Testing](#testing)
+6. [Directory Structure](#directory-structure)
+7. [Troubleshooting](#troubleshooting)
+
+---
+
+## Overview
+
+SHARC simulates control feedback loops with computational delays introduced by hardware constraints. It uses the [Scarab Simulator](https://github.com/hpsresearchgroup/scarab) to model hardware performance, incorporating parameters such as processor speed, cache size, and memory latency. The tool supports both serial and parallel simulations for efficient modeling.
+
+Key Features:
+- 🖥️ Simulate control feedback loops with computational delays
+- 🏗️ Model hardware performance using Scarab Simulator
+- 🚀 Support for both serial and parallel simulations
+- 🐳 Fully Dockerized for consistent and reproducible environments
+
+---
+
 # Getting Started 
 
 SHARC is fully Dockerized, so installation only requires installing Docker, getting a Docker image, and starting a container from that image.
-The Docker container can be run three ways:
+The Docker container can be run in three ways:
 
-- Dev-containers — Useful for developement of SHARC projects or SHARC itself. Dev containers allow developers to connect to a Docker container using VS Code and automatically persist changes to source code.
+- Dev-containers — Useful for the development of SHARC projects or SHARC itself. Dev containers allow developers to connect to a Docker container using VS Code and automatically persist changes to source code.
 - Interactive Docker — Useful for manually interacting with the Docker container in environments where dev containers are not supported or configured.
 - Non-interactive Docker — Useful for automated running of simulations.
 
 <!-- 
-A document (either a webpage, a pdf, or a plain text file) explaining at a minimum:
+A document (either a webpage, a PDF, or a plain text file) explaining at a minimum:
 * What elements of the paper are included in the REP (e.g.: specific figures, tables, etc.).
 * Instructions for installing and running the software and extracting the corresponding results. Try to keep this as simple as possible through easy-to-use scripts.
 * The system requirements for running the REP (e.g.: OS, compilers, environments, etc.). The document should also include a description of the host platform used to prepare and test the docker image or virtual machine.
@@ -36,7 +62,7 @@ SHARC runs inside a Docker container, so you must install Docker by following th
 [MacOS](https://docs.docker.com/desktop/setup/install/mac-install/) (M1 chip is not supported by Scarab), or
 [Windows](https://docs.docker.com/desktop/setup/install/windows-install/).
 
-## Getting SHARC Docker Image
+## Obtaining the SHARC Docker Image
 
 To get a SHARC Docker image, you can either pull a pre-build image from Docker Hub or build your own image using the provided Dockerfile.
 While the pre-build image is generally easier, only images for the Linux operating system are available.
@@ -61,7 +87,7 @@ docker login
 
 ### Building an Image
 
-For platforms where a Docker image is not availble on Docker Hub, it is necessary to build a Docker image. 
+For platforms where a Docker image is not available on Docker Hub, it is necessary to build a Docker image. 
 To build an image, you must install [Git](https://docs.github.com/en/get-started/getting-started-with-git/set-up-git) and ensure [SSH is setup](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/generating-a-new-ssh-key-and-adding-it-to-the-ssh-agent) for authenticating with GitHub. 
 1. Clone this repository.
     1. Navigate to the folder where you want this project located.
@@ -69,12 +95,12 @@ To build an image, you must install [Git](https://docs.github.com/en/get-started
 2. Change your working directory to the newly created `sharc/` folder. Inside you should see a file named `Dockerfile`.
 3. Inside `'sharc/`, run `docker build --tag sharc:my_tag .`, where `my_tag` can changed to an identifier of your choosing. Note the "`.`" at the end of the `docker build` command, which tells Docker to build the `Dockerfile` in the current directory. 
 
-Warning: Each time you run `docker build`, it adds another Docker image to your system. For SHARC, each image is 5 GB, so you can quicly fill up your hard drive! To build without saving the image, use `docker build --rm [rest of the command]`. If you have previously built several images, you can cleanup unused ones by running `docker image prune`.
+Warning: Each time you run `docker build`, it adds another Docker image to your system. For SHARC, each image is 5 GB, so you can quickly fill up your hard drive! To build without saving the image, use `docker build --rm [rest of the command]`. If you have previously built several images, you can cleanup unused ones by running `docker image prune`.
 
 ## Creating a SHARC Docker Container from an Image
 You should now have a SHARC Docker image on your system that is either named `pwintz/sharc` (if you pulled from Docker Hub) or `sharc`, if you built locally. It will also have a tag such as `latest` or `my_tag`. 
 For simplicity, we will assume the image name and tag are `sharc:my_tag` from here on out.
-To check that your image is, in fact, on availble, run 
+To check that your image is in fact available run 
 ```bash
 docker images
 ```
@@ -84,7 +110,7 @@ As mentioned above, you can create interactive or non-interactive containers, or
 
 ### Interactive Docker Container
 When you open an interactive container, your current terminal changes to be inside the container where you can run commands and explore the container's file system. 
-Changes to the container's files will persit throughout the life of the container, but are not automatically saved on the host file system and will be lost if the container is deleted.  
+Changes to the container's files will persist throughout the life of the container, but are not automatically saved on the host file system and will be lost if the container is deleted.  
 
 To create and start a container in interactive mode from the image `sharc:my_tag`, run 
 ```
@@ -97,7 +123,7 @@ Just like building Docker images, creating many containers will quickly fill up 
 To avoid saving the container after you exit, add "`--rm`" before the image name in the `docker run` command.
 You can also delete all stopped containers by running `docker containers prune`.
 
-Files on your host machine can be made accesible within a container as a "volume" by adding 
+Files on your host machine can be made accessible within a container as a "volume" by adding 
 ```
 -v "<path_on_host>:<path_in_container>" \
 ```
@@ -111,7 +137,7 @@ To create and start a container in non-interactive mode from the image `sharc:my
 docker run --rm sharc:my_tag <command_to_run>
 ```
 (without `-it`). 
-The `--rm` argument ensures that the container is deleted after exectution. 
+The `--rm` argument ensures that the container is deleted after execution. 
 The initial working directory of the sharc images is the `examples/` folder. 
 To run the ACC example, `<command_to_run>` can be replaced by "cd acc_example && sharc --config_filename fake_delays.json", resulting in 
 ```
@@ -121,9 +147,9 @@ docker run --rm sharc:my_tag bash -c "cd acc_example && sharc --config_filename 
 To access the results of the simulation, create a volume for the container and copy the results of the simulation into the volume path.
 
 ### Development in VS Code with Dev-Containers
-1. Install Docker, and VS Code.
+1. Install Docker and VS Code.
 2. Open the `sharc` repository directory in VS Code. VS Code should prompt you to install recommended extensions, including `dev-containers`. Accept this suggestion. 
-3. Use Dev Containers to build and run the Docker file (via CTRL+SHIFT+P followed by "Dev containers: Build and Open Container"). This will change your VS Code enviroment to running within the Docker container, where Scarab and libmpc are configured.
+3. Use Dev Containers to build and run the Docker file (via CTRL+SHIFT+P followed by "Dev containers: Build and Open Container"). This will change your VS Code environment to running within the Docker container, where Scarab and libmpc are configured.
 
 <!-- ## Development Setup Using VS Code and Dev Containers development (in Linux or the Windows Linux Subsystem) -->
 <!-- 1. Install Docker -->
@@ -134,12 +160,12 @@ To access the results of the simulation, create a volume for the container and c
   <!-- Use `git submodule init` and `git submodule update` to setup the libmpc submodule. -->
 <!-- 5. Open the repository folder in VS Code and  -->
 
-## Running an Example (Adaptive Cruise Control)
-As an introductory example, the `acc_example` folder contains a simulation a vehicle controlled by an adaptive cruise control (ACC) system. 
+## Example: Adaptive Cruise Control
+As an introductory example, the `acc_example` folder contains a simulation of a vehicle controlled by an adaptive cruise control (ACC) system. 
 
 <!-- There are two options for how to run the example:
 
-1. Use Docker directly to build and image and run an interactive containerBuild and run a docker un the example in a Docker container or you can 
+1. Use Docker directly to build an image and run an interactive container to run the example in a Docker container or you can 
 1. Open a Dev Container environment that uses a Docker container for executing code but persists changes to the code allowing for easy development. -->
 
 To run the ACC example, use one of the methods above for [creating a SHARC Docker container](#creating-a-sharc-docker-container-from-an-image). 
@@ -148,33 +174,26 @@ Within the container, navigate to `examples/acc_example` and run
 ```bash
 sharc --config_file fake_delays.json
 ```
-The `fake_delays.json` file is located in `examples/acc_example/simulation_configs/`, and defines configurations for quickly running the example in serial and parallel mode without actually executing the microarchitecural simulations with Scarab. 
-Select other configuration files in ``examples/acc_example/simulation_configs/` to explore the settings available. 
+The `fake_delays.json` file is located in `examples/acc_example/simulation_configs/`, and defines configurations for quickly running the example in the serial and parallel mode without actually executing the microarchitectural simulations with Scarab. 
+Select other configuration files in `examples/acc_example/simulation_configs/` to explore the settings available. 
 For configurations that use Scarab, the time to execute the simulation can range from minutes to hours depending on the number of sample times, the number of iterations used by the MPC optimization algorithm, the prediction and control horizons, and whether parallel or serial simulation is used. 
 
 The results of the simulation are saved into `examples/acc_example/experiments/`.
 Within the appropriate experiment directory, a file named `experiment_list_data_incremental.json` will be populated incrementally during the simulation, so that you can monitor the progress of the simulation. 
 At the end of the simulation, `experiment_list_data_incremental.json` is copied to `experiment_list_data.json`. 
 
-A Jupyter notebook `make_plots.ipynb` is located in Within `acc_example/` for generating plots based on the last experiment.
+A Jupyter notebook `make_plots.ipynb` is located within `acc_example/` for generating plots based on the last experiment.
 
 <!-- - `docker run --rm -it $(docker build -q . --target=examples)` 
 - or (to show the build steps), run `docker build . --tag mpc-image --target=mpc-examples && docker run -it --rm mpc-image`.
-If you want the container to persist, delete `--rm`. When making a persistant container, you may also wish to name it using `--name mpc-container`. You may later delete the container by running `docker rm mpc-container`. To delete the image, run `docker rmi mpc-image`. -->
-
-
-# Software Tools used by this project
-* Docker -- Creates easily reproducible environments so that we can immediately spin-up new virtual machines that run Scarab.
-* Scarab -- A microarchitectural simulator of computational hardware (e.g., CPU and memory).
-* DynamoRIO (Optional - Only needed if doing trace-based simulation with Scarab.)
-* [libmpc](https://github.com/nicolapiccinelli/libmpc) (Optional - Used for examples running MPC controllers)
+If you want the container to persist, delete `--rm`. When making a persistent container, you may also wish to name it using `--name mpc-container`. You may later delete the container by running `docker rm mpc-container`. To delete the image, run `docker rmi mpc-image`. -->
 
 # Development in Dev Container
 
-The context in the dev container (i.e., the folder presented in `/dev-workspace` in the container) is the root directory of the `ros-docker` project. Changes to the files in `/dev-workspace` are synced to the local host (outside of the Docker container) where as changes made in the user's home directory are not.
+The context in the dev container (i.e., the folder presented in `/dev-workspace` in the container) is the root directory of the `ros-docker` project. Changes to the files in `/dev-workspace` are synced to the local host (outside of the Docker container) whereas changes made in the user's home directory are not.
 
 
-# Repository Directory Structure
+# Directory Structure
 
 <!-- - `.devcontainer/`: Directory containing Dev Container configuration. -->
 - `docs/`: Documentation files.
@@ -184,12 +203,12 @@ The context in the dev container (i.e., the folder presented in `/dev-workspace`
   - `dynamics/`: Python code for dynamics
   - `include/`: C++ header files
   - `sharc/`: Python `sharc` package and subpackages.
-<!-- - `sharc/`: Directory containg scripts and libraries used to execute SHARC.  The structure of `sharc/` is described below "SHARC Directory Structure". -->
-- `Dockerfile/`: File that defines the steps for building a Docker image. The Dockerfile is divided into several stages, or "targets", which can be built specifically by running `docker build . --target <target-name>`. Targets that you might want to use are listed here:
+<!-- - `sharc/`: Directory containing scripts and libraries used to execute SHARC.  The structure of `sharc/` is described below "SHARC Directory Structure". -->
+- `Dockerfile/`: File that defines the steps for building a Docker image. The Dockerfile is divided into several stages, or "targets", which can be built specifically by running `docker build. --target <target-name>`. Targets that you might want to use are listed here:
   - `scarab`: Configures Scarab (and DynamoRIO) without setting up SHARC or examples. 
   - `sharc`: Sets up SHARC and its dependencies.
   - `examples`: Sets up several SHARC examples. 
-  <!-- This is designed to be the target used for to create a Dev Container, but it could be used directly via an interactive Docker container. When using Dev Containers for developement, the project source code is persisted on the host machine and accesible in the `/dev-workspace` folder within the container. This prevents changes to code from being lost each time a new container is created.  -->
+  <!-- This is designed to be the target used to create a Dev Container, but it could be used directly via an interactive Docker container. When using Dev Containers for development, the project source code is persisted on the host machine and accessible in the `/dev-workspace` folder within the container. This prevents changes to code from being lost each time a new container is created.  -->
   <!-- - `mpc-examples`: Docker target for running a SHARC example without setting up a development environment. Changes to code within a `mpc-examples` container will be lost when the container is deleted.  -->
   By default, running `docker build .` will build the last target in the Dockerfile, which is `examples`.
 
@@ -221,12 +240,17 @@ Each SHARC project must have the following structure:
 The results of experiments are placed into the `experiments/` folder (the folder will be created if it does not exist).
 
 # Configuration Files
+SHARC uses JSON configuration files to customize simulations. Key configurations include:
+- Simulation mode (serial/parallel)
+- Dynamics and controller selection
+- Hardware parameters
+- Debugging levels
 
 The following example configuration file contains all of the values required by SHARC. Additional settings can be included to set values such as system parameters.
 In the following example, C++-style comments are used (`//....`), but these are not permitted in JSON files and should be removed.   
 ```jsonc
 {
-  // A human-readable discription of the experiment.
+  // A human-readable description of the experiment.
   "label": "base",
   "skip": false,
   "Simulation Options": {
@@ -261,7 +285,7 @@ In the following example, C++-style comments are used (`//....`), but these are 
   "only_update_control_at_sample_times": true,
   // If fake delays are enabled, then Scarab is not used to determine 
   // computational delays, instead all computations are assumed to be 
-  // fast enough except those at the time steps listed. The length of 
+  // fast enough except for those at the time steps listed. The length of 
   // the delay is set to the value in "sample_time_multipliers" multiplied 
   // by the sample time.
   "fake_delays": {
@@ -269,7 +293,7 @@ In the following example, C++-style comments are used (`//....`), but these are 
     "time_steps":              [ 12,  15],
     "sample_time_multipliers": [1.2, 2.2]
   },
-  "==== Debgugging Levels ====": {
+  "==== Debugging Levels ====": {
     "debug_program_flow_level": 1,
     "debug_interfile_communication_level": 2,
     "debug_optimizer_stats_level": 0,
@@ -316,7 +340,7 @@ Unit tests (fast tests of small pieces of the software) are located in
 To run all unit tests, change to the `tests/` directory and run `./run_all.sh`.
 
 # Update Docker Hub Images
-To update a [pwintz/sharc](https://hub.docker.com/repository/docker/pwintz/sharc/general) Docker image on Docker Hub at , use the following commands:
+To update a [pwintz/sharc](https://hub.docker.com/repository/docker/pwintz/sharc/general) Docker image on Docker Hub use the following commands:
 ```bash
 docker login
 docker build --tag sharc:latest .
@@ -326,12 +350,19 @@ docker push pwintz/sharc:latest
 
 # Troubleshooting
 
-# Problem: Docker Build Fails
+## Problem: Docker Build Fails
 * Make sure you are connected to the internet. 
 * Make sure that SSH is setup in your environment.
 * Check that you are running `docker build .` in the directory that contains the `Dockerfile`.
 * If all else fails, try building from scratch, discarding the Docker cache, by running `docker build --no-cache .` 
 
-# Problem Docker Push Fails
+## Problem Docker Push Fails
 * Make sure you log in using `docker login`. 
-* Tag the image with user name as a prefix in the form `username/tag` so that Docker knows where to direct the pushed image.
+* Tag the image with the user name as a prefix in the form `username/tag` so that Docker knows where to direct the pushed image.
+
+
+# Software Tools used by this project
+* Docker -- Creates easily reproducible environments so that we can immediately spin-up new virtual machines that run Scarab.
+* Scarab -- A microarchitectural simulator of computational hardware (e.g., CPU and memory).
+* DynamoRIO (Optional - Only needed if doing trace-based simulation with Scarab.)
+* [libmpc](https://github.com/nicolapiccinelli/libmpc) (Optional - Used for examples running MPC controllers)
