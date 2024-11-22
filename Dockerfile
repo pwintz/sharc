@@ -208,7 +208,7 @@ ENV PYTHONPATH "${PYTHONPATH}:${SCARAB_ROOT}/bin"
 # Add the Scarab "src" directory to path. 
 ENV PATH "${PATH}:$SCARAB_ROOT:$SCARAB_ROOT/src:$SCARAB_ROOT/bin"
 
-FROM scarab	as base
+FROM scarab	as sharc
 
 ARG USERNAME
 ARG RESOURCES_DIR
@@ -294,7 +294,7 @@ ENV PYTHONPATH "${PYTHONPATH}:${RESOURCES_DIR}"
 ########################
 ##### MPC EXAMPLES #####
 ########################
-FROM base	as mpc-examples-base
+FROM sharc as examples
 ARG USERNAME
 ARG WORKSPACE_ROOT
 ARG RESOURCES_DIR

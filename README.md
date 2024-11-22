@@ -14,12 +14,12 @@ We use the simulation at each time-step to determine the computation time of the
 
 # Getting Started 
 
-SHARC is fully Dockerized, so installation only requires installing Docker, getting a Docker image, and creating a container from that image.
+SHARC is fully Dockerized, so installation only requires installing Docker, getting a Docker image, and starting a container from that image.
 The Docker container can be run three ways:
 
-- Non-interactive Docker 
-- Interactive Docker
-- Dev-containers
+- Dev-containers — Useful for developement of SHARC projects or SHARC itself. Dev containers allow developers to connect to a Docker container using VS Code and automatically persist changes to source code.
+- Interactive Docker — Useful for manually interacting with the Docker container in environments where dev containers are not supported or configured.
+- Non-interactive Docker — Useful for automated running of simulations.
 
 <!-- 
 A document (either a webpage, a pdf, or a plain text file) explaining at a minimum:
@@ -107,58 +107,69 @@ The context in the dev container (i.e., the folder presented in `/dev-workspace`
 ~~The contents of the user directory `~` are generated from `ros-docker/docker_user_home` (due to a `COPY` statement in our `Dockerfile`), but changes are not synced to the copy on the local machine. Changes to files in `~` are, however, preserved if Visual Studio Code is closed and restarted because the same Docker image is used each time. If the dev container is rebuilt, however, (via CTRL+SHIFT+P followed by "Dev containers: Rebuild Container"), then changes to `~` are lost.~~
 
 
-# SHARC Directory Structure
+# Repository Directory Structure
 
-- `sharc/`: Directory containg scripts and libraries used to execute SHARC.  The structure of `sharc/` is described below "SHARC Directory Structure".
-- `examples/`: Directory containing several example projects. The structure of `examples/` is described below "Example Project Directory Structure".
-- `.devcontainer/`: Directory containing Dev Container configuration.
+<!-- - `.devcontainer/`: Directory containing Dev Container configuration. -->
+- `docs/`: Documentation files.
+- `examples/`: Directory containing several example projects. The structure of `examples/` is described in ["Project Directory Structure"](#projects-directory-structure).
+- `resources/`: Directory containing files and folders that are included in Docker images, include 
+  - `controllers/`: C++ Source code for controllers
+  - `dynamics/`: Python code for dynamics
+  - `include/`: C++ header files
+  - `sharc/`: Python `sharc` package and subpackages.
+<!-- - `sharc/`: Directory containg scripts and libraries used to execute SHARC.  The structure of `sharc/` is described below "SHARC Directory Structure". -->
 - `Dockerfile/`: File that defines the steps for building a Docker image. The Dockerfile is divided into several stages, or "targets", which can be built specifically by running `docker build . --target <target-name>`. Targets that you might want to use are listed here:
   - `scarab`: Configures Scarab (and DynamoRIO) without setting up SHARC or examples. 
-  - `mpc-examples-dev`: Sets up several SHARC examples with MPC controllers for development. This is designed to be the target used for to create a Dev Container, but it could be used directly via an interactive Docker container. When using Dev Containers for developement, the project source code is persisted on the host machine and accesible in the `/dev-workspace` folder within the container. This prevents changes to code from being lost each time a new container is created. 
-  - `mpc-examples`: Docker target for running a SHARC example without setting up a development environment. Changes to code within a `mpc-examples` container will be lost when the container is deleted. 
+  - `sharc`: Sets up SHARC and its dependencies.
+  - `examples`: Sets up several SHARC examples. 
+  <!-- This is designed to be the target used for to create a Dev Container, but it could be used directly via an interactive Docker container. When using Dev Containers for developement, the project source code is persisted on the host machine and accesible in the `/dev-workspace` folder within the container. This prevents changes to code from being lost each time a new container is created.  -->
+  <!-- - `mpc-examples`: Docker target for running a SHARC example without setting up a development environment. Changes to code within a `mpc-examples` container will be lost when the container is deleted.  -->
+  By default, running `docker build .` will build the last target in the Dockerfile, which is `examples`.
 
 
-## SHARC Directory Structure
+<!-- ## SHARC Python Package
 
-The structure of `scaraintheloop/` is still in flux, but as it currently stands, it contains the following:
+The structure of the `sharc` package is as follows:
 
-<!-- - `run_sharc.py`: Python script that executes one or more SHARC experiments.  -->
+` `sharc`: The entry point for the Sharc simulator. Handles setting up and running simulations.
 - `scarabizor.py`: Python module that provides tools for reading Scarab statistics.
 - `plant_runner.py`: Python module for executing the simulation of the plant for a given system. Handles reading and writing to files for inter-process communication. It should not be called directly.
-- `utils.py`: Python module.
+- `utils.py`: Python module. -->
 <!-- - `scripts/run_portabilize_trace.sh` and `scripts/portabilize_trace.py`: Scripts for pre-processing DynamoRIO traces. -->
 <!-- - `scripts/make_sharc_pipes.sh`: Creates pipe files in the working directory that are used to pass information between the controller and plant processes. -->
 
 ## Projects Directory Structure
 
-The `examples/` folder contains some example projects that are configured to be simulated using SHARC.
-In particular, the `examples/acc_example` folder contains an example of MPC used for adaptive cruise control (ACC) of a road vehicle.
-Each project must have the following structure:
+The `examples/` folder contains some example SHARC projects that are configured to be simulated using SHARC.
+<!-- In particular, the `examples/acc_example` folder contains an example of MPC used for adaptive cruise control (ACC) of a road vehicle. -->
+Each SHARC project must have the following structure:
 
-- `base_config.json`: A JSON file that defines the settings. Some settings are required by Scarb, but users can add additional configurations in the `base_config.json` that are used by their particular project.
-- `simulation_configs/`: A directory containing `default.json` and (optionally) other simulation configuration files. The JSON files in `simulation_configs/` cannot contain any keys (including nested keys) that are not present in `base_config.json`. When `run_sharc.py` is run in the project root (e.g., `acc_example/`), the optional argument `--config_filename` can be used to specify one of the JSON files in `simulation_configs/`, such as `run_sharc.py --config_filename example_configs.json`. Values from `example_configs.json` will be patched onto the values from `base_config.json`, using the values in `base_config.json` as "defaults" and the values in `example_configs.json` when present. Some keys are required in config JSON files, but a given project may add additional keys to define model parameters or other options. [TODO: Write a section describing the requirements for the config json files.]
-- `chip_configs/`: A directory containing PARAMS files used to specify hardward parameters, such as clock speed. In the configs json, the key-value pair `"PARAMS_base_file":  "PARAMS.base"` would specify that `chip_configs/PARAMS.base` will be used as the base for the chip parameters (modifications can be made based on other key-value pairs).
-- `scripts/controller_delegator.py`: A Python module for building the controller executable based on the needs of the particular system. In the ACC example, CMake is used with various modifications applied at compile time based on the config JSON input. Other build systems can also be used.
-- `scripts/plant_dynamics.py`: A Python module that defines the dynamics of the given plant. The dynamics are defined by implementing and returning a function `evolve_state(t0, x0, u, tf)` that takes the initial time and state `t0` and `x0`, a constant control value `u`, and a final time `tf`, and returns the state of the system at `tf`. For the ACC example, the evolution of the system is defined as a differential equation which is numerically evaluated using `scipy.integrate.ode`.
+- The controller and dynamics are defined as described in [Tutorial: Implementing Custom Dynamics and Controllers.md](docs/Tutorial:%20Implementing%20Custom%20Dynamics%20and%20Controllers.md).
+- `base_config.json`: A JSON file that defines the settings. Some settings are required by Scarab, but users can add additional configurations in the `base_config.json` that are used by their particular project.
+- `simulation_configs/`: A directory containing `default.json` and (optionally) other simulation configuration files. The JSON files in `simulation_configs/` cannot contain any keys (including nested keys) that are not present in `base_config.json`. When `sharc` is run in the project root (e.g., `examples/acc_example/`), the optional argument `--config_filename` can be used to specify one of the JSON files in `simulation_configs/`, such as `run_sharc.py --config_filename example_configs.json`. Values from `example_configs.json` will be patched onto the values from `base_config.json`, using the values in `base_config.json` as "defaults" and the values in `example_configs.json` when present. Some keys are required in config JSON files, but a given project may add additional keys to define model parameters or other options. [TODO: Write a section describing the requirements for the config json files.]
+- `chip_configs/`: A directory containing PARAMS files used to specify hardware parameters, such as clock speed. In the configuration JSON files, the key-value pair `"PARAMS_base_file":  "PARAMS.base"` would specify to use `chip_configs/PARAMS.base` as the base for the chip parameters (modifications can be made based on other key-value pairs).
+- `controller_delegator.py`: A Python module for building the controller executable based on the needs of the particular system. In the ACC example, CMake is used with various modifications applied at compile time based on the config JSON input. Other build systems can also be used.
+<!-- - `scripts/plant_dynamics.py`: A Python module that defines the dynamics of the given plant. The dynamics are defined by implementing and returning a function `evolve_state(t0, x0, u, tf)` that takes the initial time and state `t0` and `x0`, a constant control value `u`, and a final time `tf`, and returns the state of the system at `tf`. For the ACC example, the evolution of the system is defined as a differential equation which is numerically evaluated using `scipy.integrate.ode`. -->
 
-The results of experiments are placed into the `experiments/` folder (creating it if it does not exist).
+The results of experiments are placed into the `experiments/` folder (the folder will be created if it does not exist).
 
 # Configuration Files
 
 The following example configuration file contains all of the values required by SHARC. Additional settings can be included to set values such as system parameters.
-In the following example, C++-style comments are included (`//....`), but these are not permitted in JSON files and should be removed.   
+In the following example, C++-style comments are used (`//....`), but these are not permitted in JSON files and should be removed.   
 ```jsonc
 {
   // A human-readable discription of the experiment.
   "label": "base",
-  // Setting skip to true causes an experiment in an experiment list to be skipped.
   "skip": false,
   "Simulation Options": {
-    // The "in-the-loop_delay_provider" value determines what is used to determine delays. 
-    // This should be left as "onestep".
-    "in-the-loop_delay_provider": "onestep",
-    // Enable parallel simulation.
+    // Select serial or parallel simulation.
     "parallel_scarab_simulation": false, 
+    // The "in-the-loop_delay_provider" value determines what is 
+    // used to determine delays. 
+    // This should be set to "onestep" when using the parallel mode
+    // and "execution-driven scarab" when using serial mode.
+    "in-the-loop_delay_provider": "onestep",
     // Define the maximum number of batches when running in parallel.
     // Useful for ensuring that a simulation runs within a desired amount n 
     "max_batches": 9999999,
@@ -171,7 +182,8 @@ In the following example, C++-style comments are included (`//....`), but these 
   },
   // Select the module where the dynamics are loaded from.
   "dynamics_module_name": "dynamics.dynamics",
-  // Select the name of the dynamics class, which must be located in the dynamics module.
+  // Select the name of the dynamics class, which must be located 
+  // in the dynamics module.
   "dynamics_class_name": "ACCDynamics",
   // Set the maximum number of time steps to run the simulation.
   "n_time_steps": 6,
@@ -180,17 +192,15 @@ In the following example, C++-style comments are included (`//....`), but these 
   // Initial control
   "u0": [0.0, 100.0],
   "only_update_control_at_sample_times": true,
-  // If fake delays are enabled, then Scarab is not used, instead all computations are assumed to be fast enough except at the 
-  // time steps listed. The length of the delay is set to the value in "sample_time_multipliers" multiplied by the sample time.
+  // If fake delays are enabled, then Scarab is not used to determine 
+  // computational delays, instead all computations are assumed to be 
+  // fast enough except those at the time steps listed. The length of 
+  // the delay is set to the value in "sample_time_multipliers" multiplied 
+  // by the sample time.
   "fake_delays": {
     "enable": false,
     "time_steps":              [ 12,  15],
     "sample_time_multipliers": [1.2, 2.2]
-  },
-  // 
-  "computation_delay_model": {
-    "computation_delay_slope": 0.001801,
-    "computation_delay_y-intercept": 0.147
   },
   "==== Debgugging Levels ====": {
     "debug_program_flow_level": 1,
@@ -230,11 +240,31 @@ In the following example, C++-style comments are included (`//....`), but these 
 }
 ```
 
-
-# Building Docker Images
-
-To build new Docker images, run 
+# Testing
+SHARC comes with a suite of automated testing to check its correctness. 
+Unit tests (fast tests of small pieces of the software) are located in 
 ```
-docker build .
+<sharc_root>/tests
 ```
-in the root directory of `sharc` repository. 
+To run all unit tests, change to the `tests/` directory and run `./run_all.sh`.
+
+# Update Docker Hub Images
+To update a [pwintz/sharc](https://hub.docker.com/repository/docker/pwintz/sharc/general) Docker image on Docker Hub at , use the following commands:
+```bash
+docker login
+docker build --tag sharc:latest .
+docker tag sharc:latest pwintz/sharc:latest
+docker push pwintz/sharc:latest
+```
+
+# Troubleshooting
+
+# Problem: Docker Build Fails
+* Make sure you are connected to the internet. 
+* Make sure that SSH is setup in your environment.
+* Check that you are running `docker build .` in the directory that contains the `Dockerfile`.
+* If all else fails, try building from scratch, discarding the Docker cache, by running `docker build --no-cache .` 
+
+# Problem Docker Push Fails
+* Make sure you log in using `docker login`. 
+* Tag the image with user name as a prefix in the form `username/tag` so that Docker knows where to direct the pushed image.
