@@ -29,70 +29,139 @@ A document (either a webpage, a pdf, or a plain text file) explaining at a minim
 * The software and any accompanying data. This should be made available with a link that should remain accessible throughout the review process. Please prepare either a:
   * Docker Image (preferred). 
 -->
+## Installing Docker
+
+SHARC runs inside a Docker container, so you must install Docker by following the instructions for 
+[Linux](https://docs.docker.com/engine/install/),
+[MacOS](https://docs.docker.com/desktop/setup/install/mac-install/) (M1 chip is not supported by Scarab), or
+[Windows](https://docs.docker.com/desktop/setup/install/windows-install/).
 
 ## Getting SHARC Docker Image
+
+To get a SHARC Docker image, you can either pull a pre-build image from Docker Hub or build your own image using the provided Dockerfile.
+While the pre-build image is generally easier, only images for the Linux operating system are available.
+If your OS or architecture is not available, then follow the instructions for building an image.
 
 ### Pre-built Image
 
 For a limited number of OS and host architectures, a Docker image is provided on Docker Hub. 
-To access these images, run 
-```
-docker pull [TODO]
+To download the latest SHARC Docker image, run 
+```bash
+docker pull pwintz/sharc:latest
 ``` 
+
+Troubleshooting: If you get an error that says, `Error response from daemon: manifest for pwintz/sharc:latest not found: manifest unknown: manifest unknown`, then
+
+* check for typos 
+* check your selected tag exists [here](https://hub.docker.com/repository/docker/pwintz/sharc/general)
+* try logging in to Docker Hub via the command line:
+```bash
+docker login
+```
 
 ### Building an Image
 
-
-## Running Pre-build SHARC Docker Image 
-
-1. Install Git and ensure SSH is setup. 
-1. Install Docker by following the installations instructions for 
-[Linux](https://docs.docker.com/engine/install/),
-[MacOS](https://docs.docker.com/desktop/setup/install/mac-install/) (M1 chip is not supported), or
-[Windows](https://docs.docker.com/desktop/setup/install/windows-install/).
-2. Run `docker pull pwintz/sharc:latest` to download the SHARC Docker image from Docker Hub.
-4. Set an experiment 
-3. Run ```docker docker run --rm -it \
-  -v "$(pwd)/resources:/home/dcuser/resources" \
-  -v "$(pwd)/examples:/examples" \
-  sharc:latest \
-  bash -c "cd /examples/cartpole && sharc --config_filename ${CONFIG_FILE}" ```
-
-## Building Docker Image and Running
 For platforms where a Docker image is not availble on Docker Hub, it is necessary to build a Docker image. 
-
-
-## Development in VS Code with Dev-Containers
-1. Install Docker, VS Code, and the Dev-Containers VS Code extension.
+To build an image, you must install [Git](https://docs.github.com/en/get-started/getting-started-with-git/set-up-git) and ensure [SSH is setup](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/generating-a-new-ssh-key-and-adding-it-to-the-ssh-agent) for authenticating with GitHub. 
 1. Clone this repository.
     1. Navigate to the folder where you want this project located.
-    1. Run `git clone <repository>`, where `<repository>` is a HTTP or SSH reference to this repository.
-    1. Within the root of the cloned repository, run `git submodule update --init --recursive` to initialize Git submodules (`scarab` and `libmpc`). 
-      ~~Then(?), use `git submodule init` and `git submodule update` to setup the libmpc submodule.~~ (Is this redundant or still necessary?)
-1. ~~Currently, it is necessary to manually download the pin file into the `pins/` directory.'~~ (Is this still necessary?)
+    1. Run `git clone git@github.com:pwintz/sharc.git`.
+2. Change your working directory to the newly created `sharc/` folder. Inside you should see a file named `Dockerfile`.
+3. Inside `'sharc/`, run `docker build --tag sharc:my_tag .`, where `my_tag` can changed to an identifier of your choosing. Note the "`.`" at the end of the `docker build` command, which tells Docker to build the `Dockerfile` in the current directory. 
+
+Warning: Each time you run `docker build`, it adds another Docker image to your system. For SHARC, each image is 5 GB, so you can quicly fill up your hard drive! To build without saving the image, use `docker build --rm [rest of the command]`. If you have previously built several images, you can cleanup unused ones by running `docker image prune`.
+
+## Creating a SHARC Docker Container from an Image
+You should now have a SHARC Docker image on your system that is either named `pwintz/sharc` (if you pulled from Docker Hub) or `sharc`, if you built locally. It will also have a tag such as `latest` or `my_tag`. 
+For simplicity, we will assume the image name and tag are `sharc:my_tag` from here on out.
+To check that your image is, in fact, on availble, run 
+```bash
+docker images
+```
+Now that you have an image, you need to create a Docker container—that is, a virtual environment initialized using the system state contained in the Docker image.
+
+As mentioned above, you can create interactive or non-interactive containers, or open a container using a dev-container. 
+
+### Interactive Docker Container
+When you open an interactive container, your current terminal changes to be inside the container where you can run commands and explore the container's file system. 
+Changes to the container's files will persit throughout the life of the container, but are not automatically saved on the host file system and will be lost if the container is deleted.  
+
+To create and start a container in interactive mode from the image `sharc:my_tag`, run 
+```
+docker run -it sharc:my_tag
+```
+To leave the container, run `exit`. 
+
+Each time you run `docker run`, it creates a new container.
+Just like building Docker images, creating many containers will quickly fill up your hard drive.
+To avoid saving the container after you exit, add "`--rm`" before the image name in the `docker run` command.
+You can also delete all stopped containers by running `docker containers prune`.
+
+Files on your host machine can be made accesible within a container as a "volume" by adding 
+```
+-v "<path_on_host>:<path_in_container>" \
+```
+to the `docker run` command. 
+Changes made to a volume inside a container are persisted on the host machine after the container is closed and deleted.
+
+### Non-interactive Docker Container
+
+To create and start a container in non-interactive mode from the image `sharc:my_tag`, run 
+```
+docker run --rm sharc:my_tag <command_to_run>
+```
+(without `-it`). 
+The `--rm` argument ensures that the container is deleted after exectution. 
+The initial working directory of the sharc images is the `examples/` folder. 
+To run the ACC example, `<command_to_run>` can be replaced by "cd acc_example && sharc --config_filename fake_delays.json", resulting in 
+```
+docker run --rm sharc:my_tag bash -c "cd acc_example && sharc --config_filename fake_delays.json"
+```
+
+To access the results of the simulation, create a volume for the container and copy the results of the simulation into the volume path.
+
+### Development in VS Code with Dev-Containers
+1. Install Docker, and VS Code.
+2. Open the `sharc` repository directory in VS Code. VS Code should prompt you to install recommended extensions, including `dev-containers`. Accept this suggestion. 
+3. Use Dev Containers to build and run the Docker file (via CTRL+SHIFT+P followed by "Dev containers: Build and Open Container"). This will change your VS Code enviroment to running within the Docker container, where Scarab and libmpc are configured.
+
+<!-- ## Development Setup Using VS Code and Dev Containers development (in Linux or the Windows Linux Subsystem) -->
+<!-- 1. Install Docker -->
+<!-- 2. Install Visual Studio Code -->
+<!-- 1.  Install recommended extensions, most notably the Dev Containers extension and (if running on a Windows machine) the WSL extensions. -->
+<!-- 3. Clone this repository. -->
+  <!-- 3.1 Run `git submodule update --init --recursive` to initialize Git submodules (`scarab` and `libmpc`) -->
+  <!-- Use `git submodule init` and `git submodule update` to setup the libmpc submodule. -->
+<!-- 5. Open the repository folder in VS Code and  -->
 
 ## Running an Example (Adaptive Cruise Control)
 As an introductory example, the `acc_example` folder contains a simulation a vehicle controlled by an adaptive cruise control (ACC) system. 
 
-There are two options for how to run the example:
+<!-- There are two options for how to run the example:
 
 1. Use Docker directly to build and image and run an interactive containerBuild and run a docker un the example in a Docker container or you can 
-1. Open a Dev Container environment that uses a Docker container for executing code but persists changes to the code allowing for easy development.
+1. Open a Dev Container environment that uses a Docker container for executing code but persists changes to the code allowing for easy development. -->
 
-To build the ACC example as a temporary Docker image and open it in the terminal:
+To run the ACC example, use one of the methods above for [creating a SHARC Docker container](#creating-a-sharc-docker-container-from-an-image). 
+<!-- To build the ACC example as a temporary Docker image and open it in the terminal: -->
+Within the container, navigate to `examples/acc_example` and run 
+```bash
+sharc --config_file fake_delays.json
+```
+The `fake_delays.json` file is located in `examples/acc_example/simulation_configs/`, and defines configurations for quickly running the example in serial and parallel mode without actually executing the microarchitecural simulations with Scarab. 
+Select other configuration files in ``examples/acc_example/simulation_configs/` to explore the settings available. 
+For configurations that use Scarab, the time to execute the simulation can range from minutes to hours depending on the number of sample times, the number of iterations used by the MPC optimization algorithm, the prediction and control horizons, and whether parallel or serial simulation is used. 
 
-- `docker run --rm -it $(docker build -q . --target=mpc-examples-base)` 
-- or (to show the build steps), run `docker build . --tag mpc-image --target=mpc-examples && docker run -it --rm mpc-image`. If you want the container to persist, delete `--rm`. When making a persistant container, you may also wish to name it using `--name mpc-container`. You may later delete the container by running `docker rm mpc-container`. To delete the image, run `docker rmi mpc-image`.
+The results of the simulation are saved into `examples/acc_example/experiments/`.
+Within the appropriate experiment directory, a file named `experiment_list_data_incremental.json` will be populated incrementally during the simulation, so that you can monitor the progress of the simulation. 
+At the end of the simulation, `experiment_list_data_incremental.json` is copied to `experiment_list_data.json`. 
 
-## Development Setup Using VS Code and Dev Containers development (in Linux or the Windows Linux Subsystem)
-1. Install Docker
-2. Install Visual Studio Code
-    1.  Install recommended extensions, most notably the Dev Containers extension and (if running on a Windows machine) the WSL extensions.
-3. Clone this repository.
-  3.1 Run `git submodule update --init --recursive` to initialize Git submodules (`scarab` and `libmpc`)
-  Use `git submodule init` and `git submodule update` to setup the libmpc submodule.
-4. Currently, it is necessary to manually download the pin file into the `pins/` directory.'
-5. Open the repository folder in VS Code and use Dev Containers to build and run the Docker file (via CTRL+SHIFT+P followed by "Dev containers: Build and Open Container"). This will change your VS Code enviroment to running within the Docker container, where Scarab and LibMPC are configured.
+A Jupyter notebook `make_plots.ipynb` is located in Within `acc_example/` for generating plots based on the last experiment.
+
+<!-- - `docker run --rm -it $(docker build -q . --target=examples)` 
+- or (to show the build steps), run `docker build . --tag mpc-image --target=mpc-examples && docker run -it --rm mpc-image`.
+If you want the container to persist, delete `--rm`. When making a persistant container, you may also wish to name it using `--name mpc-container`. You may later delete the container by running `docker rm mpc-container`. To delete the image, run `docker rmi mpc-image`. -->
+
 
 # Software Tools used by this project
 * Docker -- Creates easily reproducible environments so that we can immediately spin-up new virtual machines that run Scarab.
@@ -103,8 +172,6 @@ To build the ACC example as a temporary Docker image and open it in the terminal
 # Development in Dev Container
 
 The context in the dev container (i.e., the folder presented in `/dev-workspace` in the container) is the root directory of the `ros-docker` project. Changes to the files in `/dev-workspace` are synced to the local host (outside of the Docker container) where as changes made in the user's home directory are not.
-
-~~The contents of the user directory `~` are generated from `ros-docker/docker_user_home` (due to a `COPY` statement in our `Dockerfile`), but changes are not synced to the copy on the local machine. Changes to files in `~` are, however, preserved if Visual Studio Code is closed and restarted because the same Docker image is used each time. If the dev container is rebuilt, however, (via CTRL+SHIFT+P followed by "Dev containers: Rebuild Container"), then changes to `~` are lost.~~
 
 
 # Repository Directory Structure

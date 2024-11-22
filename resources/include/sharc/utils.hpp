@@ -20,7 +20,7 @@ const Eigen::IOFormat fmt(3,    // precision
 
 template<int n>
 void printVector(std::string description, cvec<n>& vec_to_print){
-  std::cout << description << ":" << std::endl << vec_to_print.transpose().format(fmt) << std::endl;
+  std::cout << description << ":" << std::endl << vec_to_print.transpose().format(fmt) << " (Size: " << vec_to_print.size() << ")" << std::endl;
 }
 
 template<int rows, int cols>

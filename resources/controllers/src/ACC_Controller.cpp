@@ -112,13 +112,13 @@ void ACC_Controller::calculateControl(int k, double t, const xVec &x, const wVec
       w_series(0, col) = std::max(0.0, v_front_underestimate - col * sample_time * max_brake_acceleration_front);
       w_series(1, col) = 1.0; 
     }
-    PRINT("w (predicted):\n" << w_series)
+    // PRINT("w (predicted):\n" << w_series)
     lmpc.setExogenousInputs(w_series);
 
     // Call LMPC control calculation here
     lmpc_step_result = lmpc.optimize(state, control);
     control = lmpc_step_result.cmd;
-    PRINT("Result of calculateControl(): " << control)
+    // PRINT("Result of calculateControl(): " << control)
 
     latest_metadata.clear();
     latest_metadata["iterations"]       = lmpc_step_result.num_iterations;
@@ -167,11 +167,6 @@ void ACC_Controller::calculateControl(int k, double t, const xVec &x, const wVec
     yVec y_err = y - yRef;
     printVector("y", y);
     printVector("y_err", y_err);
-
-    // double v = x[2];
-    // double friction_linearized = beta - gamma * std::pow(v0, 2); 
-    // double drag_linearized = -2*gamma*v0/mass * v;
-    // double accelerator_force = 
 }
 
 void ACC_Controller::updateStateSpaceMatrices(double v0) {
@@ -195,8 +190,6 @@ void ACC_Controller::updateStateSpaceMatrices(double v0) {
     //         ^           ^   
     // u:     T^a         T^b    
 
-    printMat("Ac (continuous)", Ac);
-    printMat("Bc (continuous)", Bc);
 
     // State to output matrix
     C <<   0, 0, 1;
@@ -206,9 +199,14 @@ void ACC_Controller::updateStateSpaceMatrices(double v0) {
     // Constant force from friction: k = β + γv²
     double k = beta - gamma * std::pow(v0, 2); 
     assert(k > 0);
-    PRINT("-2*gamma*v0/mass: " << -2*gamma*v0/mass)
-    PRINT("               k: " << k)
-    PRINT("         -k/mass: " << -k/mass)
+
+    if (global_debug_levels.debug_dynamics_level >= 1){ 
+      printMat("Ac (continuous)", Ac);
+      printMat("Bc (continuous)", Bc);
+      PRINT("-2*gamma*v0/mass: " << -2*gamma*v0/mass)
+      PRINT("               k: " << k)
+      PRINT("         -k/mass: " << -k/mass)
+    }
 
     // Set input disturbance matrix.
     Bc_disturbance << 0,       0, 
@@ -227,7 +225,9 @@ void ACC_Controller::updateStateSpaceMatrices(double v0) {
 }
 
 void ACC_Controller::setOptimizerParameters(const nlohmann::json &json_data) {
-    PRINT_WITH_FILE_LOCATION("Start of ACC_Controller::setOptimizerParameters")
+    if (global_debug_levels.debug_program_flow_level >= 1) {
+      PRINT_WITH_FILE_LOCATION("Start of ACC_Controller::setOptimizerParameters")
+    }
     LParameters params;
     params.alpha = 1.6;
     params.rho   = 1e-6;
@@ -246,7 +246,9 @@ void ACC_Controller::setOptimizerParameters(const nlohmann::json &json_data) {
 }
 
 void ACC_Controller::setWeights(const nlohmann::json &json_data) {
-    PRINT_WITH_FILE_LOCATION("Start of ACC_Controller::setWeights()")
+    if (global_debug_levels.debug_program_flow_level >= 1) {
+      PRINT_WITH_FILE_LOCATION("Start of ACC_Controller::setWeights()")
+    }
     if (output_cost_weight < 0) {
         throw std::invalid_argument("The output weight was negative.");
     }
@@ -288,16 +290,20 @@ void ACC_Controller::setConstraints() {
 
   ymax << v_max; // velocity
 
+  printVector("xmin", xmin);
   printVector("xmax", xmax);
+  printVector("umin", umin);
   printVector("umax", umax);
+  printVector("ymin", ymin);
   printVector("ymax", ymax);
 
-  bool are_x_bounds_okay = lmpc.setStateBounds(xmin, xmax, {-1, -1});
-  bool are_u_bounds_okay = lmpc.setInputBounds(umin, umax, {-1, -1});
+  bool are_x_bounds_okay = lmpc.setStateBounds( xmin, xmax, {-1, -1});
+  bool are_u_bounds_okay = lmpc.setInputBounds( umin, umax, {-1, -1});
   bool are_y_bounds_okay = lmpc.setOutputBounds(ymin, ymax, {-1, -1});
   assert(are_x_bounds_okay);
   assert(are_u_bounds_okay);
   assert(are_y_bounds_okay);
+  PRINT("Bounds are OK.")
 
   // Initially, set a terminal constraint that assume the front vehicle is not moving, 
   // until we have a sensor measurement to the contrary.
