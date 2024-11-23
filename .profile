@@ -5,7 +5,7 @@
 # * Print the working directory relative to HOME
 # * Line break so that command can use full width of window.
 # PS1='\[\033]0;Love the unloved:$PWD\007\]' # set window title
-PS1="\[\`if [[ \$? = "0" ]]; then echo \e[32m; else echo \e[31m; fi\`\h (dev container)\e[0m"
+PS1="\[\`if [[ \$? = "0" ]]; then echo \e[32m; else echo \e[31m; fi\`\h\e[0m"
 PS1="$PS1:\w"                             # ":<current directory>"
 PS1="$PS1"'\n\$ '                         # new line and "$"
 
