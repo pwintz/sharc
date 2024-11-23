@@ -177,25 +177,32 @@ RUN update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 1
 #### Setup Scarab ####
 ######################
 
-# Copy scarab from the local directory into the image. 
+# # Copy scarab from the local directory into the image. 
 # You must initialize the Git Submodule before this happens!
-COPY scarab $SCARAB_ROOT
+# COPY scarab $SCARAB_ROOT
+# 
+# # Remove the .git file, which indicates that the scarab/ folder is a submodule. 
+# # Then, reinitialize the directory as a git repo. 
+# # Not sure why this is needed, but without it building Scarab fails.
+# RUN rm $SCARAB_ROOT/.git && cd $SCARAB_ROOT && git init
+
+# Download Scarab from GitHub, using the commit with hash "3541854b9e6c0a0ab400246e12b4d4485b5a6e8f" (The full hash must be used---Docker does not support truncated hashes). 
+# There is nothing special about this commit, and it should be occasionally update it. 
+# We use a fixed commit to ensure that any changes to Scarab don't unexpectedly break SHARC.
+ADD https://github.com/Litz-Lab/scarab.git#3541854b9e6c0a0ab400246e12b4d4485b5a6e8f $SCARAB_ROOT
+
+# Then, reinitialize the directory as a git repo. 
+# Not sure why this is needed, but without it building Scarab fails.
+RUN cd $SCARAB_ROOT && git init
 
 # Check that all of Scarab's Git submodules are correctly initialized.
 RUN test -e $SCARAB_ROOT/src/deps/mbuild && \
     test -e $SCARAB_ROOT/src/deps/xed && \
     test -e $SCARAB_ROOT/src/deps/dynamorio
 
-# # Copy PIN file from previous stage.
-# COPY --from=PIN $PIN_ROOT $PIN_ROOT
-
 # Check that the $PIN_ROOT directory has the contents we expect.
 RUN test -e $PIN_ROOT/source
 
-# Remove the .git file, which indicates that the scarab/ folder is a submodule. 
-# Then, reinitialize the directory as a git repo. 
-# Not sure why this is needed, but without it building Scarab fails.
-RUN rm $SCARAB_ROOT/.git && cd $SCARAB_ROOT && git init
 
 # Install Scarab's Python dependencies
 RUN pip3 install -r $SCARAB_ROOT/bin/requirements.txt
@@ -208,6 +215,10 @@ ENV PYTHONPATH "${PYTHONPATH}:${SCARAB_ROOT}/bin"
 # Add the Scarab "src" directory to path. 
 ENV PATH "${PATH}:$SCARAB_ROOT:$SCARAB_ROOT/src:$SCARAB_ROOT/bin"
 
+
+###############################
+############ SHARC ############
+###############################
 FROM scarab	as sharc
 
 ARG USERNAME
@@ -320,6 +331,8 @@ ARG LIBMPC_DIR
 ENV LIBMPC_DIR $LIBMPC_DIR 
 ADD https://github.com/pwintz/libmpc.git $LIBMPC_DIR
 RUN $LIBMPC_DIR/configure.sh
+RUN test -e $LIBMPC_DIR \
+    && which cmake
 RUN mkdir $LIBMPC_DIR/build && cd $LIBMPC_DIR/build && cmake .. && cmake --install .
 
 # Copy the example folders.
