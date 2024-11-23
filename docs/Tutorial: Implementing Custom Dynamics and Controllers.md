@@ -82,6 +82,6 @@ REGISTER_CONTROLLER("CustomController", CustomController)
 You can use the registered controller by calling it in `config.json` file by modifying:
 ```json
   "system_parameters": {
-    "controller_type": "CustomController",
+    "controller_type": "CustomController"
     }
 ```
