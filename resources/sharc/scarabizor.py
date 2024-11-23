@@ -327,7 +327,7 @@ class MockExecutionDrivenScarabRunner(ExecutionDrivenScarabRunner):
       for k in range(self.number_of_steps):
         self.delay_queue.put(queued_delays[k])
 
-      print('self.delay_queue: ', self.delay_queue)
+      # print('self.delay_queue: ', self.delay_queue)
       # for k in queued_delays.keys():
       #   delay = queued_delays[k]
       #   self.delay_queue.put(delay)
@@ -343,7 +343,7 @@ class MockExecutionDrivenScarabRunner(ExecutionDrivenScarabRunner):
 
       for roi_ndx in range(self.number_of_steps):
         delay = self.delay_queue.get()
-        print("Delay: " , delay)
+        # print("Delay: " , delay)
         delay_in_femtoseconds = int(FEMTOSECOND_PER_SECONDS*delay)
         # stat_out_roi_file_name = f'core.stat.0.out.roi.{roi_ndx}'
         stat_csv_roi_file_name = f'core.stat.0.csv.roi.{roi_ndx}'

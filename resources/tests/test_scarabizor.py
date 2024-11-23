@@ -14,7 +14,8 @@ PARAMS_data_in = """# Here is a comment
 --chip_cycle_time               100000000
 """
 
-TESTS_FOLDER = '/dev-workspace/tests'
+RESOURCES_DIR = os.getenv("RESOURCES_DIR")
+TESTS_FOLDER = os.path.join(RESOURCES_DIR, 'tests')
 
 class Test_ParamsData(unittest.TestCase):
 
