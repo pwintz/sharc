@@ -67,12 +67,30 @@ Get SHARC up and running in two simple steps:
    ```
 
 2. **Run the Setup Script**  
-   Execute the [`sharc_setup_and_run.sh`](https://github.com/pwintz/sharc/blob/quick-start/sharc_setup_and_run.sh) script. This script pulls the SHARC Docker image, binds the necessary directories, and runs the Adaptive Cruise Control (ACC) example:
-   ```bash
-   ./sharc_setup_and_run.sh
-   ```
+   Execute the `setup_sharc.sh` 
+   <!-- [`setup_sharc.sh`](https://github.com/pwintz/sharc/blob/quick-start/sharc_setup_and_run.sh)  -->
+   script. 
+   This script offers you a choice to either pull a SHARC Docker image from Docker Hub or build a Docker image locally.
+   After an image is availble, the script starts a container and runs a suite of (quick) automated tests.
+   Once the tests finish, you will have an option to enter a termporary interactive SHARC container where you can explore the file system. 
+   (Any changes made inside this container are lost when you exit.)  
+   
+3. **Run Adaptive Cruise Control (ACC) Example**
+  
+  Once a SHARC Docker image is available, examples can be run using a collection of scripts in the `repeatability_evaluation/` folder. 
+  For a quick initial example, run the following command on the host machine (not in a Docker container):
+  ```
+  cd repeatability_evaluation/ && run_acc_example_with_fake_delays.sh
+  ```
+  The the results of the simulation will be available in `repeatability_evaluation/acc_example_experiments/`. 
+  
+  The `fake_data` configuration does not use the Scarab microarchitectural simulator to determine computation times, instead arbitrary delays are used to allow for quick testing. 
+  Run run the ACC example using the Scarab simulator, run 
+  ```
+  cd repeatability_evaluation/ && run_acc_example_parallel_vs_serial.sh
+  ```
 
-If everything works fine, you should see the results of the experiment in the `examples/acc_example/experiments` folder. For further customization and examples, check the detailed documentation in the README.
+<!-- If everything works fine, you should see the results of the experiment in the `examples/acc_example/experiments` folder. For further customization and examples, check the detailed documentation in the README. -->
 
 # Getting Started 
 
