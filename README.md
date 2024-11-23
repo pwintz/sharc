@@ -14,19 +14,20 @@ We use the simulation at each time-step to determine the computation time of the
 
 ## Table of Contents
 1. [Overview](#overview)
-2. [Getting Started](#getting-started)
-    - [Installing Docker](#installing-docker)
+2. [Requirements](#requirements)
+3. [🚀 Quick Start](#quick-start)
+4. [Getting Started](#getting-started)
     - [Obtaining the SHARC Docker Image](#obtaining-the-sharc-docker-image)
     - [Creating a SHARC Docker Container from an Image](#creating-a-sharc-docker-container-from-an-image)
-3. [Example: Adaptive Cruise Control](#example-adaptive-cruise-control)
-4. [Configuration Files](#configuration-files)
-5. [Testing](#testing)
-6. [Directory Structure](#directory-structure)
-7. [Troubleshooting](#troubleshooting)
+5. [Example: Adaptive Cruise Control](#example-adaptive-cruise-control)
+6. [Configuration Files](#configuration-files)
+7. [Testing](#testing)
+8. [Directory Structure](#directory-structure)
+9. [Troubleshooting](#troubleshooting)
 
 ---
 
-## Overview
+# Overview
 
 SHARC simulates control feedback loops with computational delays introduced by hardware constraints. It uses the [Scarab Simulator](https://github.com/hpsresearchgroup/scarab) to model hardware performance, incorporating parameters such as processor speed, cache size, and memory latency. The tool supports both serial and parallel simulations for efficient modeling.
 
@@ -37,8 +38,25 @@ Key Features:
 - 🐳 Fully Dockerized for consistent and reproducible environments
 
 ---
+# Requirements
 
-# 🚀 Quick Start
+Before you begin, ensure your system meets the following requirements:
+
+- **Supported Architecture**  
+  The SCARAB simulator is currently **incompatible with ARM architectures**.
+  
+- **Docker**  
+  SHARC operates within a Docker container. Install Docker by following the appropriate instructions for your platform:  
+  - [Linux](https://docs.docker.com/engine/install/)  
+  - [MacOS](https://docs.docker.com/desktop/setup/install/mac-install/)  
+  - [Windows](https://docs.docker.com/desktop/setup/install/windows-install/)  
+
+- **Git**  
+  Install [Git](https://docs.github.com/en/get-started/getting-started-with-git/set-up-git) and ensure SSH is set up if you plan to build the Docker image yourself. Follow these steps to [generate and configure an SSH key](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/generating-a-new-ssh-key-and-adding-it-to-the-ssh-agent).
+
+---
+
+# <a id="quick-start"></a>🚀 Quick Start
 
 Get SHARC up and running in two simple steps:
 
@@ -48,10 +66,10 @@ Get SHARC up and running in two simple steps:
    git clone git@github.com:pwintz/sharc.git && cd sharc
    ```
 
-2. **Make the Setup Script Executable and Run It**  
-   Change the permissions of the [`sharc_setup_and_run.sh`](https://github.com/pwintz/sharc/blob/quick-start/sharc_setup_and_run.sh) script to make it executable, then execute it. This script pulls the SHARC Docker image, binds the necessary directories, and runs the Adaptive Cruise Control (ACC) example:
+2. **Run the Setup Script**  
+   Execute the [`sharc_setup_and_run.sh`](https://github.com/pwintz/sharc/blob/quick-start/sharc_setup_and_run.sh) script. This script pulls the SHARC Docker image, binds the necessary directories, and runs the Adaptive Cruise Control (ACC) example:
    ```bash
-   chmod +x sharc_setup_and_run.sh && ./sharc_setup_and_run.sh
+   ./sharc_setup_and_run.sh
    ```
 
 If everything works fine, you should see the results of the experiment in the `examples/acc_example/experiments` folder. For further customization and examples, check the detailed documentation in the README.
@@ -73,12 +91,6 @@ A document (either a webpage, a PDF, or a plain text file) explaining at a minim
 * The software and any accompanying data. This should be made available with a link that should remain accessible throughout the review process. Please prepare either a:
   * Docker Image (preferred). 
 -->
-## Installing Docker
-
-SHARC runs inside a Docker container, so you must install Docker by following the instructions for 
-[Linux](https://docs.docker.com/engine/install/),
-[MacOS](https://docs.docker.com/desktop/setup/install/mac-install/) (M1 chip is not supported by Scarab), or
-[Windows](https://docs.docker.com/desktop/setup/install/windows-install/).
 
 ## Obtaining the SHARC Docker Image
 
@@ -110,6 +122,7 @@ To build an image, you must install [Git](https://docs.github.com/en/get-started
 1. Clone this repository.
     1. Navigate to the folder where you want this project located.
     1. Run `git clone git@github.com:pwintz/sharc.git`.
+    1. Run `git submodule update --init --recursive`.
 2. Change your working directory to the newly created `sharc/` folder. Inside you should see a file named `Dockerfile`.
 3. Inside `'sharc/`, run `docker build --tag sharc:my_tag .`, where `my_tag` can changed to an identifier of your choosing. Note the "`.`" at the end of the `docker build` command, which tells Docker to build the `Dockerfile` in the current directory. 
 
