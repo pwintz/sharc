@@ -156,7 +156,7 @@ You can also delete all stopped containers by running `docker containers prune`.
 
 Files on your host machine can be made accessible within a container as a "volume" by adding 
 ```
--v "<path_on_host>:<path_in_container>" \
+-v "<path_on_host>:<path_in_container>"
 ```
 to the `docker run` command. 
 Changes made to a volume inside a container are persisted on the host machine after the container is closed and deleted.
