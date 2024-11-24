@@ -1,9 +1,9 @@
 [
   {
     "label": "Parallel Fake",
-    "skip": false,
+    "skip": true,
     "only_update_control_at_sample_times": true,
-    "n_time_steps": 24,
+    "n_time_steps": 64,
     "Simulation Options": {
       "in-the-loop_delay_provider": "onestep",
       "parallel_scarab_simulation": true, 
@@ -11,40 +11,60 @@
       "max_batch_size": 8
     },
     "fake_delays": {
-      "enable": true
+      "enable": true,
+      "time_steps":              [ 17,   23,  29],
+      "sample_time_multipliers": [5.2,  5.6, 5.7]
+    },
+    "system_parameters": {
+      "mpc_options":{
+        "enable_mpc_warm_start": false,
+        "use_state_after_delay_prediction": false,
+        "prediction_horizon": 5,
+        "control_horizon":    5,
+        "output_cost_weight": 10000.0,
+        "input_cost_weight": 0.01,
+        "delta_input_cost_weight": 1.0 
+      }
     }
   },
   {
     "label": "Serial Fake",
-    "skip": false,
+    "skip": true,
     "only_update_control_at_sample_times": true,
-    "n_time_steps": 24,
+    "n_time_steps": 64,
     "Simulation Options": {
       "in-the-loop_delay_provider": "execution-driven scarab"
     },
     "fake_delays": {
-      "enable": true
+      "enable": true,
+      "time_steps":              [ 12,  15],
+      "sample_time_multipliers": [1.2, 2.2]
     }
   },
   {
     "label": "Parallel Scarab",
     "skip": false,
     "only_update_control_at_sample_times": true,
-    "n_time_steps": 24,
+    "n_time_steps": 64,
     "Simulation Options": {
       "in-the-loop_delay_provider": "onestep",
       "parallel_scarab_simulation": true, 
-      "max_batches": 99,
-      "max_batch_size": 8
+      "max_batches": 99
+    },
+    "PARAMS_patch_values": {
+      "chip_cycle_time": 60000000
     }
   },
   {
     "label": "Serial Scarab",
     "skip": false,
     "only_update_control_at_sample_times": true,
-    "n_time_steps": 24,
+    "n_time_steps": 64,
     "Simulation Options": {
       "in-the-loop_delay_provider": "execution-driven scarab"
+    },
+    "PARAMS_patch_values": {
+      "chip_cycle_time": 60000000
     }
   }
 ]

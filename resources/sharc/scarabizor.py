@@ -507,17 +507,21 @@ class ScarabTracesToComputationTimesProcessor(TracesToComputationTimesProcessor)
   def get_computation_time_from_trace(self, k):
     assert isinstance(k, int), "Assertion failed: isinstance(k, int)"
     
+
     trace_dir = self._get_trace_directory_from_index(k)
     
     ScarabTracesToComputationTimesProcessor.portabalize_trace(trace_dir)
 
     log_path   = os.path.join(trace_dir, 'scarab.log')
     
+    print(f"Starting Scarab simulation for k={k}. Logs: {log_path}.")
+
     # Copy PARAMS.in file
     shutil.copyfile(os.path.join(trace_dir, '..', 'PARAMS.generated'), os.path.join(trace_dir, 'PARAMS.in'))
     assertFileExists(os.path.join(trace_dir, 'PARAMS.in'))
     assertFileExists(os.path.join(trace_dir, 'bin'))
     assertFileExists(os.path.join(trace_dir, 'trace'))
+
     scarab_cmd = ["scarab", # Requires that the Scarab build folder is in PATH
                     "--fdip_enable", "0", 
                     "--frontend", "memtrace", 
