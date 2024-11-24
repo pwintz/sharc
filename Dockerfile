@@ -11,6 +11,8 @@ ARG WORKSPACE_ROOT=/home/$USERNAME
 # For development, this directory should persist after a container is closed.
 ARG RESOURCES_DIR=$WORKSPACE_ROOT/resources
 
+ARG EXAMPLES_DIR=$WORKSPACE_ROOT/examples
+
 ARG PIN_NAME=pin-3.15-98253-gb56e429b1-gcc-linux
 ARG PIN_ROOT=/$PIN_NAME
 ARG SCARAB_ROOT=/scarab
@@ -30,6 +32,7 @@ ARG RESOURCES_DIR
 
 # Environment Variables
 ENV RESOURCES_DIR $RESOURCES_DIR
+ENV EXAMPLES_DIR $EXAMPLES_DIR
 ENV CONTROLLERS_DIR "${RESOURCES_DIR}/controllers"
 ENV DYNAMICS_DIR "${RESOURCES_DIR}/dynamics"
 
@@ -331,12 +334,10 @@ ARG LIBMPC_DIR
 ENV LIBMPC_DIR $LIBMPC_DIR 
 ADD https://github.com/pwintz/libmpc.git $LIBMPC_DIR
 RUN $LIBMPC_DIR/configure.sh
-RUN test -e $LIBMPC_DIR \
-    && which cmake
 RUN mkdir $LIBMPC_DIR/build && cd $LIBMPC_DIR/build && cmake .. && cmake --install .
 
 # Copy the example folders.
-COPY --chown=$USERNAME examples $WORKSPACE_ROOT/examples
+COPY --chown=$USERNAME examples $EXAMPLES_DIR
 
 # Check that all of the expected directories exist.
 ARG PIN_ROOT
@@ -348,10 +349,10 @@ RUN test -e $PIN_ROOT/source \
     && test -e $SCARAB_ROOT      \
     && test -e $DYNAMORIO_HOME   \
     && test -e $LIBMPC_DIR/build \
-    && test -e $WORKSPACE_ROOT/examples/acc_example
+    && test -e $EXAMPLES_DIR/acc_example
 
 USER $USERNAME
-WORKDIR ${WORKSPACE_ROOT}/examples
+WORKDIR $EXAMPLES_DIR
 
 # ###################################
 # ## DevContainer for mpc-examples ##
@@ -367,7 +368,7 @@ WORKDIR ${WORKSPACE_ROOT}/examples
 # 
 # 
 # # For convenience, set the working to the ACC example. 
-# WORKDIR ${WORKSPACE_ROOT}/examples/acc_example
+# WORKDIR $EXAMPLES_DIR/acc_example
 # 
 # #################################################
 # ## Stand-alone mpc-examples (no dev container) ##
@@ -384,4 +385,4 @@ WORKDIR ${WORKSPACE_ROOT}/examples
 # # ENV CONTROLLERS_DIR $RESOURCES_DIR/controllers
 # # ENV DYNAMICS_DIR $RESOURCES_DIR/dynamics
 # # Set the working directory
-# WORKDIR ${WORKSPACE_ROOT}/examples/acc_example
+# WORKDIR $EXAMPLES_DIR/acc_example
