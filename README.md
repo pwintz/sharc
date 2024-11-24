@@ -1,5 +1,9 @@
 # Simulator for Hardware Architecture and Real-time Control (SHARC) 
 
+
+![SHARC](https://github.com/user-attachments/assets/93d6d0fc-bfcf-4780-91d3-e4b2941cb94f)
+
+
 In cyber-physical systems (CPSs), there is a tight coupling between computation, communication, and control. 
 Due to the complexity of these systems, advanced design procedures that account for these tight interconnections are paramount to ensure the safe and reliable operation of control algorithms under computational constraints. 
 The Simulator for Hardware Architecture and Real-time (SHARC) is a tool to assist in the co-design of control algorithms and the computational hardware on which they are run. 
