@@ -6,7 +6,7 @@ The Simulator for Hardware Architecture and Real-time (SHARC) is a tool to assis
 SHARC simulates a user-specified control algorithm on a user-specified microarchitecture, evaluating how computational constraints affect the performance of the control algorithm and the safety of the physical system.
 
 The [Scarab Simulator](https://github.com/hpsresearchgroup/scarab) is used to simulate the computational hardware. 
-Scarab is a microarchitectural simulator, which can simulate the execution of a computer program on different processor and memory hardware than the one the simulation runs on.   
+Scarab is a microarchitecture simulator, which can simulate the execution of a computer program on different processor and memory hardware than the one the simulation runs on.   
 This project uses Scarab to simulate the execution of control feedback in various computational configurations (processor speed, cache size, etc.).
 We use the simulation at each time-step to determine the computation time of the controller, which is used in-the-loop to simulate the trajectory of a closed-loop control system that includes the effects of computational delays.
 
@@ -38,7 +38,7 @@ Key Features:
 - 🐳 Fully Dockerized for consistent and reproducible environments
 
 ---
-# Requirements
+# <a id="requirements"></a> Requirements
 
 Before you begin, ensure your system meets the following requirements:
 
@@ -56,6 +56,52 @@ Before you begin, ensure your system meets the following requirements:
 
 ---
 
+
+# Repeatability Evaluation Package
+
+To install the SHARC simulator and repeat the experiments in the submitted manuscript, do the following steps:
+
+1. **Check Requirements**  
+  Check that your system satisfies SHARC's [requirements](#requirements), listed above. 
+
+1. **Clone the Repository**  
+   Clone the SHARC repository:  
+   ```bash
+   git clone git@github.com:pwintz/sharc.git && cd sharc
+   ```
+
+2. **Run Setup Script**  
+  Execute the `setup_sharc.sh` script in the root of the `sharc` directory: <!-- [`setup_sharc.sh`](https://github.com/pwintz/sharc/blob/quick-start/sharc_setup_and_run.sh)    script.  -->
+   ```
+   ./setup_sharc.sh
+   ```
+   This script offers you a choice to either pull a SHARC Docker image from Docker Hub or build a Docker image locally.
+   After an image is available, the script starts a container and runs a suite of (quick) automated tests.
+   Once the tests finish, you will have an option to enter a temporary interactive SHARC container where you can explore the file system. 
+   (Any changes made inside this container are lost when you exit.)  
+   
+3. **Run Adaptive Cruise Control (ACC) Example**  
+   Once a SHARC Docker image is available, examples can be run using a collection of scripts in the `repeatability_evaluation/` folder. 
+   For a quick initial example, run the following command on the host machine (not in a Docker container): <pre>
+   cd repeatability_evaluation/ 
+   ./run_acc_example_with_fake_delays.sh
+   </pre>
+   The results of the simulation will appear `repeatability_evaluation/acc_example_experiments/` on the host machine. 
+   The `fake_data` configuration is useful for testing, but does not use the Scarab microarchitecture simulator to determine computation times, resulting in a much faster test. 
+   To run the ACC example using the Scarab simulator, execute the following command (This can take several hours, depending on your system): <pre>
+   cd repeatability_evaluation/  # Unless already in folder.
+   ./run_acc_example_parallel_vs_serial.sh
+   </pre>
+   After the simulation finishes, the `repeatability_evaluation/acc_example_experiments/` folder will contain an image matching Figure 5 in the submitted manuscript.
+
+4. **Run Cart Pole Example**  
+  The Cart Pole example uses nonlinear MPC, which results in long computation times, requiring over 24 hours to complete. 
+  To start the simulation, run
+  ```
+  ./run_example_in_container.sh cartpole default.json
+  ```
+  while in the `repeatability_evaluation` folder. 
+
 # <a id="quick-start"></a>🚀 Quick Start
 
 Get SHARC up and running in two simple steps:
@@ -67,30 +113,11 @@ Get SHARC up and running in two simple steps:
    ```
 
 2. **Run the Setup Script**  
-   Execute the `setup_sharc.sh` 
-   <!-- [`setup_sharc.sh`](https://github.com/pwintz/sharc/blob/quick-start/sharc_setup_and_run.sh)  -->
-   script. 
-   This script offers you a choice to either pull a SHARC Docker image from Docker Hub or build a Docker image locally.
-   After an image is availble, the script starts a container and runs a suite of (quick) automated tests.
-   Once the tests finish, you will have an option to enter a termporary interactive SHARC container where you can explore the file system. 
+   Execute the `setup_sharc.sh` script. <!-- [`setup_sharc.sh`](https://github.com/pwintz/sharc/blob/quick-start/sharc_setup_and_run.sh)    script.  -->This script offers you a choice to either pull a SHARC Docker image from Docker Hub or build a Docker image locally.
+   After an image is available, the script starts a container and runs a suite of (quick) automated tests.
+   Once the tests finish, you will have an option to enter a temporary interactive SHARC container where you can explore the file system. 
    (Any changes made inside this container are lost when you exit.)  
    
-3. **Run Adaptive Cruise Control (ACC) Example**
-  
-  Once a SHARC Docker image is available, examples can be run using a collection of scripts in the `repeatability_evaluation/` folder. 
-  For a quick initial example, run the following command on the host machine (not in a Docker container):
-  ```
-  cd repeatability_evaluation/ && run_acc_example_with_fake_delays.sh
-  ```
-  The the results of the simulation will be available in `repeatability_evaluation/acc_example_experiments/`. 
-  
-  The `fake_data` configuration does not use the Scarab microarchitectural simulator to determine computation times, instead arbitrary delays are used to allow for quick testing. 
-  Run run the ACC example using the Scarab simulator, run 
-  ```
-  cd repeatability_evaluation/ && run_acc_example_parallel_vs_serial.sh
-  ```
-
-<!-- If everything works fine, you should see the results of the experiment in the `examples/acc_example/experiments` folder. For further customization and examples, check the detailed documentation in the README. -->
 
 # Getting Started 
 
@@ -406,12 +433,12 @@ docker push pwintz/sharc:latest
 * If all else fails, try building from scratch, discarding the Docker cache, by running `docker build --no-cache .` 
 
 ## Problem Docker Push Fails
-* Make sure you log in using `docker login`. 
+* Log-in using `docker login` before pushing. 
 * Tag the image with the user name as a prefix in the form `username/tag` so that Docker knows where to direct the pushed image.
 
 
 # Software Tools used by this project
-* Docker -- Creates easily reproducible environments so that we can immediately spin-up new virtual machines that run Scarab.
-* Scarab -- A microarchitectural simulator of computational hardware (e.g., CPU and memory).
-* DynamoRIO (Optional - Only needed if doing trace-based simulation with Scarab.)
+* [Docker](https://www.docker.com/) -- Creates easily reproducible environments so that we can immediately spin-up new virtual machines that run Scarab.
+* [Scarab](https://github.com/Litz-Lab/scarab) -- A microarchitectural simulator of computational hardware (e.g., CPU and memory).
+* [DynamoRIO](https://dynamorio.org/) (Optional - Only needed if doing trace-based simulation with Scarab.)
 * [libmpc](https://github.com/nicolapiccinelli/libmpc) (Optional - Used for examples running MPC controllers)
