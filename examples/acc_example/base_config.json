@@ -70,7 +70,6 @@
       "dual_infeasibility_tolerance": 1e-3,
       "primal_infeasibility_tolerance": 1e-3,
       "maximum_iteration": 5000,
-      "time_limit": 0,
       "verbose": false
     }
   },  
