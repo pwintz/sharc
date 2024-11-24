@@ -29,6 +29,7 @@ FROM ubuntu:20.04 AS apt-base
 ARG USERNAME
 ARG TIME_ZONE
 ARG RESOURCES_DIR
+ARG EXAMPLES_DIR
 
 # Environment Variables
 ENV RESOURCES_DIR $RESOURCES_DIR
@@ -312,6 +313,7 @@ FROM sharc as examples
 ARG USERNAME
 ARG WORKSPACE_ROOT
 ARG RESOURCES_DIR
+ARG EXAMPLES_DIR
 
 RUN apt-get install --assume-yes --quiet=2 --no-install-recommends \
     # CMake build toolchain
@@ -361,6 +363,7 @@ WORKDIR $EXAMPLES_DIR
 # ARG USERNAME
 # ARG WORKSPACE_ROOT
 # ARG RESOURCES_DIR
+# ARG EXAMPLES_DIR
 # 
 # # # Create a Simlink from the 
 # # RUN ln -s /dev-workspace/resources $RESOURCES_DIR
@@ -376,6 +379,7 @@ WORKDIR $EXAMPLES_DIR
 # FROM mpc-examples-base as mpc-examples
 # ARG RESOURCES_DIR
 # ARG WORKSPACE_ROOT
+# ARG EXAMPLES_DIR
 # 
 # # At this point, we have already created the resources directory, so we cannot copy the whole thing, but we want the local contents to be added to the existing remove directory. 
 # # COPY --chown=$USERNAME resources/controllers $RESOURCES_DIR/controllers
