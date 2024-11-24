@@ -236,7 +236,9 @@ void ACC_Controller::setOptimizerParameters(const nlohmann::json &json_data) {
     params.eps_abs           = json_data.at("system_parameters").at("osqp_options").at("abs_tolerance");
     params.eps_prim_inf      = json_data.at("system_parameters").at("osqp_options").at("primal_infeasibility_tolerance");
     params.eps_dual_inf      = json_data.at("system_parameters").at("osqp_options").at("dual_infeasibility_tolerance");
-    params.time_limit        = json_data.at("system_parameters").at("osqp_options").at("time_limit");
+    // We disable the OSQP time limit when running with Scarab because the OCQP time limit counts wall time, not the simulated time, producing incorrect results. 
+    // params.time_limit        = json_data.at("system_parameters").at("osqp_options").at("time_limit");
+    params.time_limit        = 0;
     params.maximum_iteration = json_data.at("system_parameters").at("osqp_options").at("maximum_iteration");
     params.verbose           = json_data.at("system_parameters").at("osqp_options").at("verbose");
     params.enable_warm_start = json_data.at("system_parameters").at("mpc_options").at("enable_mpc_warm_start");
