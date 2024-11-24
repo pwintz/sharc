@@ -23,13 +23,13 @@
 
 ### Fetch Stage
 --fetch_off_path_ops            1
---fetch_across_cache_lines      1
+#--fetch_across_cache_lines      1
 
 # Will break the packet upon a taken branch.
---fetch_break_on_taken          1
+#--fetch_break_on_taken          1
 
 # Number of bubble cycles to wait after taken branch.
---fetch_taken_bubble_cycles     0
+#--fetch_taken_bubble_cycles     0
 
 
 #### ICache
@@ -100,7 +100,7 @@
 --op_mov_delay                  1
 --op_cmov_delay                 2
 --op_lda_delay                  1
---op_imem_delay                 3
+#--op_imem_delay                 3
 --op_iadd_delay                 1
 --op_imul_delay                 2
 --op_idiv_delay               -10
