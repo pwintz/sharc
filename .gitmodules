@@ -1,6 +1,3 @@
 [submodule "libmpc"]
 	path = libmpc
 	url = git@github.com:pwintz/libmpc.git
-[submodule "scarab"]
-	path = scarab
-	url = git@github.com:Litz-Lab/scarab.git

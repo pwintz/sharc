@@ -11,6 +11,8 @@ ARG WORKSPACE_ROOT=/home/$USERNAME
 # For development, this directory should persist after a container is closed.
 ARG RESOURCES_DIR=$WORKSPACE_ROOT/resources
 
+ARG EXAMPLES_DIR=$WORKSPACE_ROOT/examples
+
 ARG PIN_NAME=pin-3.15-98253-gb56e429b1-gcc-linux
 ARG PIN_ROOT=/$PIN_NAME
 ARG SCARAB_ROOT=/scarab
@@ -30,6 +32,7 @@ ARG RESOURCES_DIR
 
 # Environment Variables
 ENV RESOURCES_DIR $RESOURCES_DIR
+ENV EXAMPLES_DIR $EXAMPLES_DIR
 ENV CONTROLLERS_DIR "${RESOURCES_DIR}/controllers"
 ENV DYNAMICS_DIR "${RESOURCES_DIR}/dynamics"
 
@@ -177,25 +180,32 @@ RUN update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 1
 #### Setup Scarab ####
 ######################
 
-# Copy scarab from the local directory into the image. 
+# # Copy scarab from the local directory into the image. 
 # You must initialize the Git Submodule before this happens!
-COPY scarab $SCARAB_ROOT
+# COPY scarab $SCARAB_ROOT
+# 
+# # Remove the .git file, which indicates that the scarab/ folder is a submodule. 
+# # Then, reinitialize the directory as a git repo. 
+# # Not sure why this is needed, but without it building Scarab fails.
+# RUN rm $SCARAB_ROOT/.git && cd $SCARAB_ROOT && git init
+
+# Download Scarab from GitHub, using the commit with hash "3541854b9e6c0a0ab400246e12b4d4485b5a6e8f" (The full hash must be used---Docker does not support truncated hashes). 
+# There is nothing special about this commit, and it should be occasionally update it. 
+# We use a fixed commit to ensure that any changes to Scarab don't unexpectedly break SHARC.
+ADD https://github.com/Litz-Lab/scarab.git#3541854b9e6c0a0ab400246e12b4d4485b5a6e8f $SCARAB_ROOT
+
+# Then, reinitialize the directory as a git repo. 
+# Not sure why this is needed, but without it building Scarab fails.
+RUN cd $SCARAB_ROOT && git init
 
 # Check that all of Scarab's Git submodules are correctly initialized.
 RUN test -e $SCARAB_ROOT/src/deps/mbuild && \
     test -e $SCARAB_ROOT/src/deps/xed && \
     test -e $SCARAB_ROOT/src/deps/dynamorio
 
-# # Copy PIN file from previous stage.
-# COPY --from=PIN $PIN_ROOT $PIN_ROOT
-
 # Check that the $PIN_ROOT directory has the contents we expect.
 RUN test -e $PIN_ROOT/source
 
-# Remove the .git file, which indicates that the scarab/ folder is a submodule. 
-# Then, reinitialize the directory as a git repo. 
-# Not sure why this is needed, but without it building Scarab fails.
-RUN rm $SCARAB_ROOT/.git && cd $SCARAB_ROOT && git init
 
 # Install Scarab's Python dependencies
 RUN pip3 install -r $SCARAB_ROOT/bin/requirements.txt
@@ -208,6 +218,10 @@ ENV PYTHONPATH "${PYTHONPATH}:${SCARAB_ROOT}/bin"
 # Add the Scarab "src" directory to path. 
 ENV PATH "${PATH}:$SCARAB_ROOT:$SCARAB_ROOT/src:$SCARAB_ROOT/bin"
 
+
+###############################
+############ SHARC ############
+###############################
 FROM scarab	as sharc
 
 ARG USERNAME
@@ -323,7 +337,7 @@ RUN $LIBMPC_DIR/configure.sh
 RUN mkdir $LIBMPC_DIR/build && cd $LIBMPC_DIR/build && cmake .. && cmake --install .
 
 # Copy the example folders.
-COPY --chown=$USERNAME examples $WORKSPACE_ROOT/examples
+COPY --chown=$USERNAME examples $EXAMPLES_DIR
 
 # Check that all of the expected directories exist.
 ARG PIN_ROOT
@@ -335,10 +349,10 @@ RUN test -e $PIN_ROOT/source \
     && test -e $SCARAB_ROOT      \
     && test -e $DYNAMORIO_HOME   \
     && test -e $LIBMPC_DIR/build \
-    && test -e $WORKSPACE_ROOT/examples/acc_example
+    && test -e $EXAMPLES_DIR/acc_example
 
 USER $USERNAME
-WORKDIR ${WORKSPACE_ROOT}/examples
+WORKDIR $EXAMPLES_DIR
 
 # ###################################
 # ## DevContainer for mpc-examples ##
@@ -354,7 +368,7 @@ WORKDIR ${WORKSPACE_ROOT}/examples
 # 
 # 
 # # For convenience, set the working to the ACC example. 
-# WORKDIR ${WORKSPACE_ROOT}/examples/acc_example
+# WORKDIR $EXAMPLES_DIR/acc_example
 # 
 # #################################################
 # ## Stand-alone mpc-examples (no dev container) ##
@@ -371,4 +385,4 @@ WORKDIR ${WORKSPACE_ROOT}/examples
 # # ENV CONTROLLERS_DIR $RESOURCES_DIR/controllers
 # # ENV DYNAMICS_DIR $RESOURCES_DIR/dynamics
 # # Set the working directory
-# WORKDIR ${WORKSPACE_ROOT}/examples/acc_example
+# WORKDIR $EXAMPLES_DIR/acc_example
