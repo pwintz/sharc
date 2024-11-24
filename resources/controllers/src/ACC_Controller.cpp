@@ -339,7 +339,8 @@ void ACC_Controller::updateTerminalConstraint(double v_front_underestimate) {
   uVec uc = uVec::Zero();
   // Set the scalar constraint as a terminal constraint (using the slice "{prediction_horizon-1, prediction_horizon}")
   // means this contraint is only applied at the last step in the prediction horizon.
-  lmpc.setScalarConstraint(constraint_min, inf, xc, uc, {prediction_horizon-1, prediction_horizon});
+  bool is_okay = lmpc.setScalarConstraint(constraint_min, inf, xc, uc, {prediction_horizon-1, prediction_horizon});
+  assert(is_okay);
 }
 
 void ACC_Controller::setReferences(const nlohmann::json &json_data) {
