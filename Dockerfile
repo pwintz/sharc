@@ -193,9 +193,9 @@ RUN update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 1
 # Download Scarab from GitHub, using the commit with hash "3541854b9e6c0a0ab400246e12b4d4485b5a6e8f" (The full hash must be used---Docker does not support truncated hashes). 
 # There is nothing special about this commit, and it should be occasionally update it. 
 # We use a fixed commit to ensure that any changes to Scarab don't unexpectedly break SHARC.
-ADD https://github.com/Litz-Lab/scarab.git#3541854b9e6c0a0ab400246e12b4d4485b5a6e8f $SCARAB_ROOT
+ADD https://github.com/Litz-Lab/scarab.git#3b38da01acf86ce35bc1785c97d638e29eab0647 $SCARAB_ROOT
 
-# Then, reinitialize the directory as a git repo. 
+# Then, initialize the directory as a git repo.
 # Not sure why this is needed, but without it building Scarab fails.
 RUN cd $SCARAB_ROOT && git init
 
