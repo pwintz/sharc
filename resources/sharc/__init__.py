@@ -58,7 +58,7 @@ class ExperimentList:
     self.label = slugify(remove_suffix(config_filename, ".json"))
     self.base_config["experiment_list_label"] = self.label
 
-    self.experiment_list_dir        = os.path.join(self.experiments_dir, self.label + "--" + time.strftime("%Y-%m-%d--%H-%M-%S"))
+    self.experiment_list_dir        = os.path.join(self.experiments_dir, time.strftime("%Y-%m-%d--%H-%M-%S") + "--" + self.label)
     self.incremental_data_file_path = os.path.join(self.experiment_list_dir, "experiment_list_data_incremental.json")
     self.complete_data_file_path    = os.path.join(self.experiment_list_dir, "experiment_list_data.json")
 
