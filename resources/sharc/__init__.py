@@ -980,6 +980,7 @@ class SimulationExecutor(ABC):
     assert controller_interface is not None
     self.controller_interface = controller_interface
     self.sim_config = sim_config
+    self.controller_executable = None
 
   def set_logs(self, controller_log, plant_log):
     self.controller_log = controller_log
@@ -1012,7 +1013,7 @@ class SimulationExecutor(ABC):
       self.run_controller()
     except Exception as err:
       # TODO: When the controller fails, we need to notify the plant_runner to stop running.
-      raise Exception(f'Running the controller \n\t{type(self.controller_executable)}\nusing {type(self)} failed! \nSee logs: {self.controller_log.name}') from err
+      raise Exception(f'Running the controller \n\t{self.controller_executable}\nusing {type(self)} failed! \nSee logs: {self.controller_log.name}') from err
     print('SimulationExecutor._run_controller() finished.') 
 
   def _run_plant(self):

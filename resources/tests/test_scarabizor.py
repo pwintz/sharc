@@ -61,7 +61,7 @@ class TestMockExecutionDrivenScarabRunner(unittest.TestCase):
   @patch('shutil.copyfile')
   @patch('builtins.open', new_callable=mock_open)
   def test_run_one_step(self, mock_file, mock_copyfile):
-    queued_delays=[0.1]
+    queued_delays={0: 0.1}
     runner = MockExecutionDrivenScarabRunner(queued_delays=queued_delays)
     runner.run('echo') # As close as we can get to a no-op
 
@@ -94,7 +94,7 @@ class TestMockExecutionDrivenScarabRunner(unittest.TestCase):
   @patch('shutil.copyfile')
   @patch('builtins.open', new_callable=mock_open)
   def test_run_five_steps(self, mock_file, mock_copyfile):
-    queued_delays = [0.1, 0.1, 0.1, 0.1, 0.1]
+    queued_delays = {0: 0.1, 1: 0.1, 2: 0.1, 3: 0.1, 4: 0.1}
     runner = MockExecutionDrivenScarabRunner(queued_delays=queued_delays)
     runner.run('echo') # As close as we can get to a no-op
 
