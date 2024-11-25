@@ -1,0 +1,5 @@
+*_experiments
+
+# Give the current experiment directories explicitly so that the IDE displays them correctly.
+acc_example_experiments
+cartpole_example_experiments
