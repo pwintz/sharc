@@ -17,3 +17,8 @@
 # Temporary excludes. The following files are present on my (Paul's) system and shouldn't be included, but also won't generally be present so this section can later be deleted.
 examples/acc_example/data_out_backups
 examples/acc_example/saved_data_out_files
+
+# Skip copying experiments folders. 
+examples/*/experiments
+examples/*/latest
+examples/*/saved_experiments
