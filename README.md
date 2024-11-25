@@ -440,6 +440,14 @@ docker push pwintz/sharc:latest
 * Log-in using `docker login` before pushing. 
 * Tag the image with the user name as a prefix in the form `username/tag` so that Docker knows where to direct the pushed image.
 
+## Runnning a Serial SHARC Simulation Fails
+When running serial simulations in Docker, the following error occurs in certain circmstances:
+```
+setarch: failed to set personality to x86_64: Operation not permitted
+```
+The reason this error occurs is because the Docker container does not allow this operations, by default. 
+To fix the problem, use the `--privileged` flag when starting the Docker container. 
+
 
 # Software Tools used by this project
 * [Docker](https://www.docker.com/) -- Creates easily reproducible environments so that we can immediately spin-up new virtual machines that run Scarab.
