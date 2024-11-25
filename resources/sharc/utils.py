@@ -551,7 +551,6 @@ def run_shell_cmd(cmd: Union[str, List[str]], log=None, working_dir=None):
     elif debug_levels.debug_shell_calls_level >= 1:
       cmd_print_string = os.path.basename(working_dir) + "/" + cmd_print_string
 
-
   # Print the command and if a log is given, then write the command there too.
   if debug_levels.debug_shell_calls_level >= 1:
     # Write the command string to the log, if provided.

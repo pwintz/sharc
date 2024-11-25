@@ -74,9 +74,22 @@ if docker image inspect $IMAGE_NAME > /dev/null 2>&1; then
         echo
         echo "To stop the container, run "
         echo "   docker container kill $(docker ps -a -q  --filter ancestor=$IMAGE_NAME)"
-        exit 1
+        
+        read -p "Do you want to stop the running container and delete the image? [y/n]: " killchoice
+        if [[ $killchoice == "y" || $killchoice == "Y" ]]; then
+          docker container kill $(docker ps -a -q  --filter ancestor=$IMAGE_NAME)
+          docker image rm $IMAGE_NAME
+          if [ $? -eq 0 ]; then 
+            echo "The container has be stopped and the image deleted. Run ./setup_sharc.sh again to setup SHARC."
+            exit 0
+          else
+            echo "Something went wrong. The image was not deleted."
+          fi
+        fi
       fi
   fi
+  echo "Error: Unexpected case"
+  exit 1
 else
   # If the image doesn't exist, ask the user if they want to pull it 
   # from Docker Hub or build it.
