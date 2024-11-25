@@ -318,13 +318,13 @@ class ExecutionDrivenScarabRunner:
 class MockExecutionDrivenScarabRunner(ExecutionDrivenScarabRunner):
     def __init__(self, *args, **kwargs):
       # self.number_of_steps = int(kwargs.pop('number_of_steps', 1))
-      queued_delays = kwargs.pop('queued_delays')
+      queued_delays: dict = kwargs.pop('queued_delays')
       # queued_delays = queued_delays.copy()
       self.delay_queue = queue.Queue()
       # Put all of the queued delays into the delay queue
       self.number_of_steps = len(queued_delays)
       assert self.number_of_steps > 0
-      for k in range(self.number_of_steps):
+      for k in sorted(queued_delays.keys()): # range(self.number_of_steps):
         self.delay_queue.put(queued_delays[k])
 
       # print('self.delay_queue: ', self.delay_queue)
