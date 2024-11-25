@@ -64,8 +64,18 @@ if docker image inspect $IMAGE_NAME > /dev/null 2>&1; then
 
   if [[ $choice == "y" || $choice == "Y" ]]; then
       docker image rm $IMAGE_NAME
-      echo "The image has be removed. Run this script again to complete setup."
-      exit 0
+      if [ $? -eq 0 ]; then 
+        echo "The image has be removed. Run this script again to complete setup."
+        exit 0
+      else
+        echo "Removing the image failed. There might be a running container using the image. Here is a list of all containers using the image:"
+        echo 
+        docker container ls --all --filter=ancestor=$IMAGE_NAME
+        echo
+        echo "To stop the container, run "
+        echo "   docker container kill $(docker ps -a -q  --filter ancestor=$IMAGE_NAME)"
+        exit 1
+      fi
   fi
 else
   # If the image doesn't exist, ask the user if they want to pull it 
