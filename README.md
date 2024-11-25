@@ -4,8 +4,8 @@
 ![SHARC](https://github.com/user-attachments/assets/93d6d0fc-bfcf-4780-91d3-e4b2941cb94f)
 
 
-In cyber-physical systems (CPSs), there is a tight coupling between computation, communication, and control. 
-Due to the complexity of these systems, advanced design procedures that account for these tight interconnections are paramount to ensure the safe and reliable operation of control algorithms under computational constraints. 
+In cyber-physical systems (CPSs), computation, communication, and control are tightly coupled. 
+Due to the complexity of these systems, advanced design procedures that account for these tight interconnections are vital to ensure safe and reliable operation of control algorithms under computational constraints. 
 The Simulator for Hardware Architecture and Real-time (SHARC) is a tool to assist in the co-design of control algorithms and the computational hardware on which they are run. 
 SHARC simulates a user-specified control algorithm on a user-specified microarchitecture, evaluating how computational constraints affect the performance of the control algorithm and the safety of the physical system.
 
@@ -19,6 +19,7 @@ We use the simulation at each time-step to determine the computation time of the
 ## Table of Contents
 1. [Overview](#overview)
 2. [Requirements](#requirements)
+3. [Repeatability Evaluation Package](#rep)
 3. [🚀 Quick Start](#quick-start)
 4. [Getting Started](#getting-started)
     - [Obtaining the SHARC Docker Image](#obtaining-the-sharc-docker-image)
@@ -61,7 +62,7 @@ Before you begin, ensure your system meets the following requirements:
 ---
 
 
-# Repeatability Evaluation Package
+# <a id="rep"></a> Repeatability Evaluation Package
 
 To install the SHARC simulator and repeat the experiments in the submitted manuscript, do the following steps:
 
