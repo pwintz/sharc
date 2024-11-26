@@ -93,18 +93,18 @@ To install the SHARC simulator and repeat the experiments in the submitted manus
    </pre>
    The results of the simulation will appear `repeatability_evaluation/acc_example_experiments/` on the host machine. 
    The `fake_data` configuration is useful for testing, but does not use the Scarab microarchitecture simulator to determine computation times, resulting in a much faster test. 
-   To run the ACC example using the Scarab simulator, execute the following command (This can take several hours, depending on your system): <pre>
+   To run the ACC example using the Scarab simulator and generate Figure 5, execute the following command (This can take several hours, depending on your system): <pre>
    cd repeatability_evaluation/  # Unless already in folder.
-   ./run_acc_example_parallel_vs_serial.sh
+   ./run_acc_example_to_generate_figure_5.sh
    </pre>
    After the simulation finishes, the `repeatability_evaluation/acc_example_experiments/` folder will contain an image matching Figure 5 in the submitted manuscript.
 
 4. **Run Cart Pole Example**  
   The Cart Pole example uses nonlinear MPC, which results in long computation times, requiring over 24 hours to complete. 
-  To start the simulation, run
-  ```
+  To start the simulation, run  
+  <pre>
   ./run_example_in_container.sh cartpole default.json
-  ```
+  </pre> 
   while in the `repeatability_evaluation` folder. 
 
 # <a id="quick-start"></a>🚀 Quick Start
