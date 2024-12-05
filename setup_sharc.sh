@@ -32,7 +32,7 @@ pull_docker_image() {
   if [ $? -eq 0 ]; then
     echo "Docker image '$IMAGE_NAME' pulled successfully."
   else
-    echo "Failed to pull Docker image '$IMAGE_NAME'."
+    echo "Failed to pull Docker image '$IMAGE_NAME'. Try building the Docker image instead."
     exit 1
   fi
 }
@@ -49,7 +49,7 @@ build_docker_image() {
       echo "Docker image '$IMAGE_NAME' built successfully."
     else
       echo "Failed to build Docker image '$IMAGE_NAME'."
-      echo "This script must be run from the root folder of the sharc project."
+      echo "This script must be run from the root folder of the SHARC project."
       exit 1
     fi
 }
