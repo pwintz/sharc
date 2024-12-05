@@ -36,6 +36,7 @@ docker run --rm --privileged \
         && sudo chown dcuser:dcuser /home/dcuser/examples/${EXAMPLE_NAME}/experiments \
         && sharc --config_filename ${CONFIG_FILE} --failfast \
         && ./generate_example_figures.py \
-        || echo \"Something went wrong. Entering container...\"; bash" 
+        || echo \"Something went wrong. Entering container...\"
+        || bash" 
 
 echo "Experiments finished. See results in $(pwd)/${EXAMPLE_NAME}_experiments."
