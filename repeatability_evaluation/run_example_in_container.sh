@@ -30,10 +30,12 @@ echo "Experiment results will be available on the host machine in $(pwd)/${EXAMP
   #           -v: Mount a volume so that the results of experiments persist on the host machine.
 docker run --rm --privileged \
   -it \
-  -v "$(pwd)/${EXAMPLE_NAME}_experiments:/home/dcuser/examples/${EXAMPLE_NAME}/experiments" \
+  --mount type=bind,source=$(pwd)/${EXAMPLE_NAME}_experiments,target=/home/dcuser/examples/${EXAMPLE_NAME}/experiments \
   sharc:latest \
   bash -c "cd /home/dcuser/examples/${EXAMPLE_NAME} \
+        && sudo chown dcuser:dcuser /home/dcuser/examples/${EXAMPLE_NAME}/experiments \
         && sharc --config_filename ${CONFIG_FILE} --failfast \
-        && ./generate_example_figures.py && bash" 
+        && ./generate_example_figures.py \
+        || echo \"Something went wrong. Entering container...\"; bash" 
 
 echo "Experiments finished. See results in $(pwd)/${EXAMPLE_NAME}_experiments."
