@@ -1,10 +1,19 @@
+
+# Don't share private key!
+id_rsa
+
+# Ignore all the experiments folders
+**/experiments/
+
+# Ignore any file labeled as "_temp"
+**/*_temp.*
+
 install/
 log/
 build/
 
 # Ignore "trash/" folder where I move old files.
 trash 
-
 
 # Created by https://www.toptal.com/developers/gitignore/api/cmake
 # Edit at https://www.toptal.com/developers/gitignore?templates=cmake
@@ -297,9 +306,3 @@ poetry.toml
 pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python
-
-# Don't share private key!
-id_rsa
-
-# all the experiments folders
-**/experiments/

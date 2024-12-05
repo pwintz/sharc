@@ -49,7 +49,7 @@ build_docker_image() {
       echo "Docker image '$IMAGE_NAME' built successfully."
     else
       echo "Failed to build Docker image '$IMAGE_NAME'."
-      echo "This script must be run from the repeatability_evaluation/ folder."
+      echo "This script must be run from the root folder of the sharc project."
       exit 1
     fi
 }
@@ -106,7 +106,10 @@ else
 fi
 
 echo "2. Running Tests..."
-./repeatability_evaluation/run_tests.sh
+./repeatability_evaluation/run_short_tests.sh
+
+# echo "Running long test..."
+# ./repeatability_evaluation/run_example_in_container.sh acc_example smoke_test.json
 
 echo "Setup complete."
 echo ""
