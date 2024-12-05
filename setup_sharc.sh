@@ -87,9 +87,10 @@ if docker image inspect $IMAGE_NAME > /dev/null 2>&1; then
           fi
         fi
       fi
+  else
+    echo "SHARC was not configured because it already exists on the system."
+    exit 1
   fi
-  echo "Error: Unexpected case"
-  exit 1
 else
   # If the image doesn't exist, ask the user if they want to pull it 
   # from Docker Hub or build it.

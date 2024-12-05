@@ -57,13 +57,18 @@ build_docker_image() {
     fi
 }
 
-if [ -z "$(git status --porcelain)" ]; then 
-  # Working directory clean -> Build the image (regardless of whether it already exists.)
-  build_docker_image
-else 
-  echo "The Git directory has uncommitted changes. Commit or stash them before building."
-  exit 1
+if [ "$(git status --porcelain)" ]; then 
+  read -p "The Git directory has uncommitted changes. Do you want to continue? " choice
+  if [[ $choice == "y" || $choice == "Y" ]]; then
+    # OK
+    echo "Continuing..."
+  else
+    exit 1
+  fi
 fi
+
+# Working directory clean -> Build the image (regardless of whether it already exists.)
+build_docker_image
 
 echo "Running Tests..."
 time ./repeatability_evaluation/run_long_tests.sh
@@ -71,7 +76,7 @@ time ./repeatability_evaluation/run_long_tests.sh
 echo ""
 echo "All tests passed!"
 
-read -p "Are you ready to push the image to DockerHub?" choice
+read -p "Are you ready to push the image to DockerHub? " choice
 if [[ $choice == "y" || $choice == "Y" ]]; then
     echo "Running container...."
     push_docker_image
