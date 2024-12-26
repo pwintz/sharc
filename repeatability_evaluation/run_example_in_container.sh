@@ -5,6 +5,7 @@ set -Eeuo pipefail
 
 EXAMPLE_NAME=$1
 CONFIG_FILE=$2
+DOCKER_IMAGE=sharc:latest
 
 # Make the experiments folder in the host environment if it does not already exist.
 mkdir  -p $(pwd)/${EXAMPLE_NAME}_experiments
@@ -31,12 +32,12 @@ echo "Experiment results will be available on the host machine in $(pwd)/${EXAMP
 docker run --rm --privileged \
   -it \
   --mount type=bind,source=$(pwd)/${EXAMPLE_NAME}_experiments,target=/home/dcuser/examples/${EXAMPLE_NAME}/experiments \
-  sharc:latest \
+  $DOCKER_IMAGE \
   bash -c "cd /home/dcuser/examples/${EXAMPLE_NAME} \
         && sudo chown dcuser:dcuser /home/dcuser/examples/${EXAMPLE_NAME}/experiments \
         && sharc --config_filename ${CONFIG_FILE} --failfast \
         && ./generate_example_figures.py \
-        || echo \"Something went wrong. Entering container...\"
+        || echo \"Something went wrong. Entering container...\" \
         || bash" 
 
 echo "Experiments finished. See results in $(pwd)/${EXAMPLE_NAME}_experiments."
