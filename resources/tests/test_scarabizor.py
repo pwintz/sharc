@@ -52,7 +52,7 @@ class TestScarabPARAMSReader(unittest.TestCase):
     
   def test_read_params_file(self):
     scarab_params_reader = ScarabPARAMSReader()
-    params_lines = scarab_params_reader.read_params_file(TESTS_FOLDER + '/PARAMS.out')
+    params_lines = scarab_params_reader.read_params_file(TESTS_FOLDER + '/PARAMS.in')
     self.assertTrue(len(params_lines) > 100)
 
 
