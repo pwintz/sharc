@@ -32,10 +32,13 @@ ARG RESOURCES_DIR
 ARG EXAMPLES_DIR
 
 # Environment Variables
-ENV RESOURCES_DIR $RESOURCES_DIR
-ENV EXAMPLES_DIR $EXAMPLES_DIR
-ENV CONTROLLERS_DIR "${RESOURCES_DIR}/controllers"
-ENV DYNAMICS_DIR "${RESOURCES_DIR}/dynamics"
+ENV RESOURCES_DIR=$RESOURCES_DIR
+ENV EXAMPLES_DIR=$EXAMPLES_DIR
+ENV CONTROLLERS_DIR="${RESOURCES_DIR}/controllers"
+ENV DYNAMICS_DIR="${RESOURCES_DIR}/dynamics"
+
+# Initialize PYTHONPATH
+ENV PYTHONPATH=""
 
 # Set the timezone to avoid getting stuck on a prompt when installing packages with apt-get.
 RUN ln -fs /usr/share/zoneinfo/$TIME_ZONE /etc/localtime 
@@ -86,7 +89,7 @@ ENV XDG_RUNTIME_DIR=/home/$USERNAME/.xdg_runtime_dir
 ############
 # SIMPOINT #
 ############
-FROM apt-base as simpoint
+FROM apt-base AS simpoint
 ARG USERNAME
 
 WORKDIR /home/$USERNAME/
@@ -105,13 +108,13 @@ RUN patch --directory=SimPoint.3.2 --strip=1 < SimPoint.3.2/simpoint_modern_gcc.
 ################################
 ############ SCARAB ############
 ################################
-FROM apt-base	as scarab
+FROM apt-base	AS scarab
 ARG PIN_NAME
 ARG PIN_ROOT
 
-ENV SCARAB_ENABLE_PT_MEMTRACE 1
-ENV LD_LIBRARY_PATH $PIN_ROOT/extras/xed-intel64/lib
-ENV LD_LIBRARY_PATH $PIN_ROOT/intel64/runtime/pincrt:$LD_LIBRARY_PATH
+ENV SCARAB_ENABLE_PT_MEMTRACE=1
+ENV LD_LIBRARY_PATH=$PIN_ROOT/extras/xed-intel64/lib
+ENV LD_LIBRARY_PATH=$PIN_ROOT/intel64/runtime/pincrt:$LD_LIBRARY_PATH
 ENV SCARAB_ROOT=/scarab
 # The root of the Scarab repository, as used by scarab_paths.py (found in scarab/bin/scarab_globals).
 ENV SIMDIR=$SCARAB_ROOT
@@ -215,29 +218,29 @@ RUN pip3 install -r $SCARAB_ROOT/bin/requirements.txt
 RUN cd $SCARAB_ROOT/src && make
 
 # Add Scarab bin folder to Python path so we can import scarab_globals from Python.
-ENV PYTHONPATH "${PYTHONPATH}:${SCARAB_ROOT}/bin"
+ENV PYTHONPATH="${PYTHONPATH}:${SCARAB_ROOT}/bin"
 # Add the Scarab "src" directory to path. 
-ENV PATH "${PATH}:$SCARAB_ROOT:$SCARAB_ROOT/src:$SCARAB_ROOT/bin"
+ENV PATH="${PATH}:$SCARAB_ROOT:$SCARAB_ROOT/src:$SCARAB_ROOT/bin"
 
 
 ###############################
 ############ SHARC ############
 ###############################
-FROM scarab	as sharc
+FROM scarab	AS sharc
 
 ARG USERNAME
 ARG RESOURCES_DIR
 
 ARG PIN_ROOT
-ENV PIN_ROOT $PIN_ROOT
+ENV PIN_ROOT=$PIN_ROOT
 
 ARG SCARAB_ROOT
 ENV SCARAB_ROOT=$SCARAB_ROOT
 # The root of the Scarab repository, as used by scarab_paths.py (found in scarab/bin/scarab_globals).
 ENV SIMDIR=$SCARAB_ROOT
-ENV SCARAB_ENABLE_PT_MEMTRACE 1
-ENV LD_LIBRARY_PATH $PIN_ROOT/extras/xed-intel64/lib
-ENV LD_LIBRARY_PATH $PIN_ROOT/intel64/runtime/pincrt:$LD_LIBRARY_PATH
+ENV SCARAB_ENABLE_PT_MEMTRACE=1
+ENV LD_LIBRARY_PATH=$PIN_ROOT/extras/xed-intel64/lib
+ENV LD_LIBRARY_PATH=$PIN_ROOT/intel64/runtime/pincrt:$LD_LIBRARY_PATH
 
 # Copy PIN file.
 RUN test -e $PIN_ROOT/source
@@ -282,7 +285,7 @@ RUN pip3 install -r sharc-requirements.txt && rm sharc-requirements.txt
 
 # Set environment variables for the setup
 ARG DYNAMORIO_HOME
-ENV DYNAMORIO_HOME $DYNAMORIO_HOME 
+ENV DYNAMORIO_HOME=$DYNAMORIO_HOME 
 ARG DYNAMORIO_VERSION
 ENV SCARAB_ENABLE_PT_MEMTRACE=1
 ENV SCARAB_ENABLE_MEMTRACE=1 
@@ -303,13 +306,13 @@ RUN tar --extract --gzip --verbose --strip-components=1 -f $DYNAMORIO_VERSION.ta
 COPY --chown=$USERNAME resources $RESOURCES_DIR
 
 ### Setup the PATH and PYTHONPATH ###  
-ENV PATH "${PATH}:${RESOURCES_DIR}/sharc:${RESOURCES_DIR}/sharc/scripts"
-ENV PYTHONPATH "${PYTHONPATH}:${RESOURCES_DIR}"
+ENV PATH="${PATH}:${RESOURCES_DIR}/sharc:${RESOURCES_DIR}/sharc/scripts"
+ENV PYTHONPATH="${PYTHONPATH}:${RESOURCES_DIR}"
 
 ########################
 ##### MPC EXAMPLES #####
 ########################
-FROM sharc as examples
+FROM sharc AS examples
 ARG USERNAME
 ARG WORKSPACE_ROOT
 ARG RESOURCES_DIR
@@ -333,7 +336,7 @@ RUN pip3 install -r acc-requirements.txt && rm acc-requirements.txt
 # libMPC++
 ##############################
 ARG LIBMPC_DIR 
-ENV LIBMPC_DIR $LIBMPC_DIR 
+ENV LIBMPC_DIR=$LIBMPC_DIR 
 ADD https://github.com/pwintz/libmpc.git $LIBMPC_DIR
 RUN $LIBMPC_DIR/configure.sh
 RUN mkdir $LIBMPC_DIR/build && cd $LIBMPC_DIR/build && cmake .. && cmake --install .
@@ -359,7 +362,7 @@ WORKDIR $EXAMPLES_DIR
 # ###################################
 # ## DevContainer for mpc-examples ##
 # ###################################
-# FROM mpc-examples-base as mpc-examples-dev
+# FROM mpc-examples-base AS mpc-examples-dev
 # ARG USERNAME
 # ARG WORKSPACE_ROOT
 # ARG RESOURCES_DIR
@@ -376,7 +379,7 @@ WORKDIR $EXAMPLES_DIR
 # #################################################
 # ## Stand-alone mpc-examples (no dev container) ##
 # #################################################
-# FROM mpc-examples-base as mpc-examples
+# FROM mpc-examples-base AS mpc-examples
 # ARG RESOURCES_DIR
 # ARG WORKSPACE_ROOT
 # ARG EXAMPLES_DIR
@@ -386,7 +389,7 @@ WORKDIR $EXAMPLES_DIR
 # # COPY --chown=$USERNAME resources/dynamics $RESOURCES_DIR/dynamics
 # # COPY --chown=$USERNAME resources/include $RESOURCES_DIR/include
 # # COPY --chown=$USERNAME resources/sharc $RESOURCES_DIR/sharc
-# # ENV CONTROLLERS_DIR $RESOURCES_DIR/controllers
-# # ENV DYNAMICS_DIR $RESOURCES_DIR/dynamics
+# # ENV CONTROLLERS_DIR=$RESOURCES_DIR/controllers
+# # ENV DYNAMICS_DIR=$RESOURCES_DIR/dynamics
 # # Set the working directory
 # WORKDIR $EXAMPLES_DIR/acc_example
