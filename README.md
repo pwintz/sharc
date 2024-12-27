@@ -18,17 +18,21 @@ We use the simulation at each time-step to determine the computation time of the
 
 ## Table of Contents
 1. [Overview](#overview)
-2. [Requirements](#requirements)
-3. [Repeatability Evaluation Package](#rep)
-3. [🚀 Quick Start](#quick-start)
-4. [Getting Started](#getting-started)
+1. [Requirements](#requirements)
+1. [Repeatability Evaluation Package](#rep)
+1. [🚀 Quick Start](#quick-start)
+1. [Getting Started](#getting-started)
     - [Obtaining the SHARC Docker Image](#obtaining-the-sharc-docker-image)
     - [Creating a SHARC Docker Container from an Image](#creating-a-sharc-docker-container-from-an-image)
-5. [Example: Adaptive Cruise Control](#example-adaptive-cruise-control)
-6. [Configuration Files](#configuration-files)
-7. [Testing](#testing)
-8. [Directory Structure](#directory-structure)
-9. [Troubleshooting](#troubleshooting)
+    - [Running an Example: Adaptive Cruise Control](#running-an-example-adaptive-cruise-control)
+    - [Creating a SHARC Project](#creating-a-sharc-project)
+1. [Development in Dev Container](#development-in-dev-container)
+1. [SHARC Implementation Details](#sharc-implementation-details)
+    - [Directory Structure](#directory-structure)
+    - [SHARC Python Package Structure](#sharc-python-package-structure)
+1. [Configuration Files](#configuration-files)
+1. [Testing](#testing)
+1. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -80,14 +84,28 @@ To install the SHARC simulator and repeat the experiments in the submitted manus
    ```
    ./setup_sharc.sh
    ```
-   This script offers you a choice to either pull a SHARC Docker image from Docker Hub or build a Docker image locally.
+   This script offers you a choice to either 
+   * pull a SHARC Docker image from Docker Hub or 
+   * build a Docker image locally.
+
    After an image is available, the script starts a container and runs a suite of (quick) automated tests.
    Once the tests finish, you will have an option to enter a temporary interactive SHARC container where you can explore the file system. 
-   (Any changes made inside this container are lost when you exit.)  
+   **(Any changes made inside this container are lost when you exit.)**  
    
-3. **Run Adaptive Cruise Control (ACC) Example**  
-   Once a SHARC Docker image is available, examples can be run using a collection of scripts in the `repeatability_evaluation/` folder. 
-   For a quick initial example, run the following command on the host machine (not in a Docker container): <pre>
+1. **Run Long Tests**<br>
+   Once you have a SHARC Docker image, you can run various examples and tests via a collection of scripts in the `repeatability_evaluation/` folder. 
+   To run these scripts, you must be in `repeatability_evaluation/` on the host machine (not in a Docker container).
+   The following command executes an integration test of SHARC: <pre>
+    cd repeatability_evaluation/  # Unless already in folder.
+    ./run_long_tests.sh # Can take 5-10 minutes
+    </pre>
+
+    The `run_long_tests.sh` script runs SHARC using several relatively quick test scenarions---including serial and parallel execution using the Scarab simulator---over a small number of time steps. 
+    This is in contrast to `run_short_tests.sh`, which only runs quick unit tests of individual units of code.
+   During setup, the `./run_short_tests.sh` was already run automatically, so you can ignore it. 
+
+1. **Run Adaptive Cruise Control (ACC) Example**  
+   For a quick initial example, run the following command : <pre>
    cd repeatability_evaluation/ 
    ./run_acc_example_with_fake_delays.sh
    </pre>
@@ -99,10 +117,9 @@ To install the SHARC simulator and repeat the experiments in the submitted manus
    </pre>
    After the simulation finishes, the `repeatability_evaluation/acc_example_experiments/` folder will contain an image matching Figure 5 in the submitted manuscript.
 
-4. **Run Cart Pole Example**  
+1. **Run Cart Pole Example**  
   The Cart Pole example uses nonlinear MPC, which results in long computation times, requiring over 24 hours to complete. 
-  To start the simulation, run  
-  <pre>
+  To start the simulation, run  <pre>
   ./run_example_in_container.sh cartpole default.json
   </pre> 
   while in the `repeatability_evaluation` folder. 
@@ -241,7 +258,7 @@ To access the results of the simulation, create a volume for the container and c
   <!-- Use `git submodule init` and `git submodule update` to setup the libmpc submodule. -->
 <!-- 5. Open the repository folder in VS Code and  -->
 
-## Example: Adaptive Cruise Control
+## Running an Example: Adaptive Cruise Control
 As an introductory example, the `acc_example` folder contains a simulation of a vehicle controlled by an adaptive cruise control (ACC) system. 
 
 <!-- There are two options for how to run the example:
@@ -269,43 +286,8 @@ A Jupyter notebook `make_plots.ipynb` is located within `acc_example/` for gener
 - or (to show the build steps), run `docker build . --tag mpc-image --target=mpc-examples && docker run -it --rm mpc-image`.
 If you want the container to persist, delete `--rm`. When making a persistent container, you may also wish to name it using `--name mpc-container`. You may later delete the container by running `docker rm mpc-container`. To delete the image, run `docker rmi mpc-image`. -->
 
-# Development in Dev Container
 
-The context in the dev container (i.e., the folder presented in `/dev-workspace` in the container) is the root directory of the `ros-docker` project. Changes to the files in `/dev-workspace` are synced to the local host (outside of the Docker container) whereas changes made in the user's home directory are not.
-
-
-# Directory Structure
-
-<!-- - `.devcontainer/`: Directory containing Dev Container configuration. -->
-- `docs/`: Documentation files.
-- `examples/`: Directory containing several example projects. The structure of `examples/` is described in ["Project Directory Structure"](#projects-directory-structure).
-- `resources/`: Directory containing files and folders that are included in Docker images, include 
-  - `controllers/`: C++ Source code for controllers
-  - `dynamics/`: Python code for dynamics
-  - `include/`: C++ header files
-  - `sharc/`: Python `sharc` package and subpackages.
-<!-- - `sharc/`: Directory containing scripts and libraries used to execute SHARC.  The structure of `sharc/` is described below "SHARC Directory Structure". -->
-- `Dockerfile/`: File that defines the steps for building a Docker image. The Dockerfile is divided into several stages, or "targets", which can be built specifically by running `docker build. --target <target-name>`. Targets that you might want to use are listed here:
-  - `scarab`: Configures Scarab (and DynamoRIO) without setting up SHARC or examples. 
-  - `sharc`: Sets up SHARC and its dependencies.
-  - `examples`: Sets up several SHARC examples. 
-  <!-- This is designed to be the target used to create a Dev Container, but it could be used directly via an interactive Docker container. When using Dev Containers for development, the project source code is persisted on the host machine and accessible in the `/dev-workspace` folder within the container. This prevents changes to code from being lost each time a new container is created.  -->
-  <!-- - `mpc-examples`: Docker target for running a SHARC example without setting up a development environment. Changes to code within a `mpc-examples` container will be lost when the container is deleted.  -->
-  By default, running `docker build .` will build the last target in the Dockerfile, which is `examples`.
-
-
-<!-- ## SHARC Python Package
-
-The structure of the `sharc` package is as follows:
-
-` `sharc`: The entry point for the Sharc simulator. Handles setting up and running simulations.
-- `scarabizor.py`: Python module that provides tools for reading Scarab statistics.
-- `plant_runner.py`: Python module for executing the simulation of the plant for a given system. Handles reading and writing to files for inter-process communication. It should not be called directly.
-- `utils.py`: Python module. -->
-<!-- - `scripts/run_portabilize_trace.sh` and `scripts/portabilize_trace.py`: Scripts for pre-processing DynamoRIO traces. -->
-<!-- - `scripts/make_sharc_pipes.sh`: Creates pipe files in the working directory that are used to pass information between the controller and plant processes. -->
-
-## Projects Directory Structure
+## Creating a SHARC Project
 
 The `examples/` folder contains some example SHARC projects that are configured to be simulated using SHARC.
 <!-- In particular, the `examples/acc_example` folder contains an example of MPC used for adaptive cruise control (ACC) of a road vehicle. -->
@@ -319,6 +301,65 @@ Each SHARC project must have the following structure:
 <!-- - `scripts/plant_dynamics.py`: A Python module that defines the dynamics of the given plant. The dynamics are defined by implementing and returning a function `evolve_state(t0, x0, u, tf)` that takes the initial time and state `t0` and `x0`, a constant control value `u`, and a final time `tf`, and returns the state of the system at `tf`. For the ACC example, the evolution of the system is defined as a differential equation which is numerically evaluated using `scipy.integrate.ode`. -->
 
 The results of experiments are placed into the `experiments/` folder (the folder will be created if it does not exist).
+
+
+# Development in Dev Container
+
+The context in the dev container (i.e., the folder presented in `/dev-workspace` in the container) is the root directory of the `ros-docker` project. Changes to the files in `/dev-workspace` are synced to the local host (outside of the Docker container) whereas changes made in the user's home directory are not.
+
+# SHARC Implementation Details
+
+## Directory Structure
+
+<!-- - `.devcontainer/`: Directory containing Dev Container configuration. -->
+- `resources/`: A directory containing files and folders that are included in Docker images, include 
+  - `sharc/`: Python `sharc` package and subpackages (See [SHARC Python Package Structure](#sharc-python-package-structure))
+  - `dynamics/`: Python code for dynamics
+  - `controllers/`: C++ Source code for controllers
+  - `include/`: C++ header files
+  - `tests/`: Unit tests
+<!-- - `sharc/`: Directory containing scripts and libraries used to execute SHARC.  The structure of `sharc/` is described below "SHARC Directory Structure". -->
+- `Dockerfile`: A file that defines the steps for building a Docker image. The Dockerfile is divided into several stages, or "targets", which can be built specifically by running `docker build. --target <target-name>`. Targets that you might want to use are listed here:
+  - `scarab`: Configures Scarab (and DynamoRIO) without setting up SHARC or examples. 
+  - `sharc`: Sets up SHARC and its dependencies.
+  - `examples`: Sets up several SHARC examples. 
+  <!-- This is designed to be the target used to create a Dev Container, but it could be used directly via an interactive Docker container. When using Dev Containers for development, the project source code is persisted on the host machine and accessible in the `/dev-workspace` folder within the container. This prevents changes to code from being lost each time a new container is created.  -->
+  <!-- - `mpc-examples`: Docker target for running a SHARC example without setting up a development environment. Changes to code within a `mpc-examples` container will be lost when the container is deleted.  -->
+  By default, running `docker build .` will build the last target in the Dockerfile, which is `examples`.
+- `docs/`: A directory containing documentation files.
+- `examples/`: A directory containing several example projects. The structure of each example project is described in ["Project Directory Structure"](#project-directory-structure).
+
+
+<!-- ## SHARC Python Package
+
+The structure of the `sharc` package is as follows:
+
+` `sharc`: The entry point for the Sharc simulator. Handles setting up and running simulations.
+- `scarabizor.py`: Python module that provides tools for reading Scarab statistics.
+- `plant_runner.py`: Python module for executing the simulation of the plant for a given system. Handles reading and writing to files for inter-process communication. It should not be called directly.
+- `utils.py`: Python module. -->
+<!-- - `scripts/run_portabilize_trace.sh` and `scripts/portabilize_trace.py`: Scripts for pre-processing DynamoRIO traces. -->
+<!-- - `scripts/make_sharc_pipes.sh`: Creates pipe files in the working directory that are used to pass information between the controller and plant processes. -->
+
+## SHARC Python Package Structure
+
+The following lists the most important components of the `sharc` Python package that a user may need to know:
+
+* `requirements.txt`: List of Pip package requirements
+* `__init__.py`: The core of the SHARC package. Handles setting up and running simulations.
+* `__main__.py`: Allows `sharc` to be called as a script.
+* `plant_runner.py`: Generates a time series by calling the controller interface and plant dynamics to generate a simulation of the closed-loop system. 
+* `scarabizor.py`: Defines several classes to simplify calling Scarab and reading the statistics generated by Scarab.
+* `data_types.py`: Defines `ComputationData` and `TimeStepSeries` classes. The `ComputationData` stores a single (simulated) "computation event", i.e., information about when a computation starts and ends, and the computed control value. The `TimeStepSeries` class is used to store all the data of a simulation, with the values of the time, state, control, computation events, etc., at each time step.
+* `controller_delegator_base.py`: Defines an abstract `BaseControllerExecutableProvider` class and a concrete implementation `CmakeControllerExecutableProvider` that are used to provide the controller executable to SHARC, from a user's project. In particular, a user would implement a `BaseControllerExecutableProvider` that builds the executable file based on the particular simulation, dynamics, and controller parameters provided by the user.
+* `controller_interface.py`: Provides an `ControllerInterface` class that acts as an interface between the simulation of the controller executable, and the SHARC simulation. In "production", the `PipesControllerInterface` subclass will always be used, but in testing other subclasses are used to simplify tests.
+* `debug_levels.py`: Defines various debugging levels that can be set in the `base_config.json` of projects. 
+* `dynamics_base.py`: Defines abstract `Dynamics` and `OdeDynamics` classes that are subclassed by users to implement their system's dynamics.  
+<!-- * `make_plots.py`:  -->
+<!-- * `README.md` -->
+<!-- * `setup.py`:  -->
+<!-- * `testing.py` -->
+<!-- * `utils.py` -->
 
 # Configuration Files
 SHARC uses JSON configuration files to customize simulations. Key configurations include:
@@ -418,7 +459,10 @@ Unit tests (fast tests of small pieces of the software) are located in
 ```
 <sharc_root>/tests
 ```
-To run all unit tests, change to the `tests/` directory and run `./run_all.sh`.
+To run all unit tests, change to the `tests/` directory in a SHARC Docker container and execute 
+```
+./run_all.sh
+```
 
 # Update Docker Hub Images
 To update a [pwintz/sharc](https://hub.docker.com/repository/docker/pwintz/sharc/general) Docker image on Docker Hub use the following commands:
@@ -437,21 +481,21 @@ docker push pwintz/sharc:latest
 * Check that you are running `docker build .` in the directory that contains the `Dockerfile`.
 * If all else fails, try building from scratch, discarding the Docker cache, by running `docker build --no-cache .` 
 
-## Problem Docker Push Fails
+## Problem: Docker Push Fails
 * Log-in using `docker login` before pushing. 
 * Tag the image with the user name as a prefix in the form `username/tag` so that Docker knows where to direct the pushed image.
 
-## Runnning a Serial SHARC Simulation Fails
+## Problem: Runnning a Serial SHARC Simulation Fails
 When running serial simulations in Docker, the following error occurs in certain circmstances:
 ```
 setarch: failed to set personality to x86_64: Operation not permitted
 ```
-The reason this error occurs is because the Docker container does not allow this operations, by default. 
+The reason this error occurs is because the Docker container does not allow some operations, by default. 
 To fix the problem, use the `--privileged` flag when starting the Docker container. 
 
 
 # Software Tools used by this project
-* [Docker](https://www.docker.com/) -- Creates easily reproducible environments so that we can immediately spin-up new virtual machines that run Scarab.
-* [Scarab](https://github.com/Litz-Lab/scarab) -- A microarchitectural simulator of computational hardware (e.g., CPU and memory).
-* [DynamoRIO](https://dynamorio.org/) (Optional - Only needed if doing trace-based simulation with Scarab.)
-* [libmpc](https://github.com/nicolapiccinelli/libmpc) (Optional - Used for examples running MPC controllers)
+* [Docker](https://www.docker.com/) – Creates easily reproducible environments so that we can immediately spin-up new virtual machines that run Scarab.
+* [Scarab](https://github.com/Litz-Lab/scarab) – A microarchitectural simulator of computational hardware (e.g., CPU and memory).
+* [DynamoRIO](https://dynamorio.org/) – Optional - Only needed if doing trace-based simulation with Scarab.
+* [libmpc](https://github.com/nicolapiccinelli/libmpc) – Optional - Used for examples running MPC controllers
