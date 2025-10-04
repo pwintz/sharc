@@ -20,9 +20,6 @@
 #
 # Timestamp is added to log filename and printed in output
 
-# Create logs directory if it doesn't exist
-mkdir -p logs
-
 # Create timestamp for this job
 TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
 

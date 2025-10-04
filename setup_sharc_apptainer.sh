@@ -38,6 +38,9 @@ echo "Pulling Docker image and converting to Apptainer format..."
 echo "This may take several minutes..."
 apptainer pull "$IMAGE_NAME" docker://"$DOCKER_IMAGE"
 
+# Create logs directory if it doesn't exist
+mkdir -p logs
+
 if [ $? -eq 0 ]; then
     echo ""
     echo "✓ Setup complete!"
