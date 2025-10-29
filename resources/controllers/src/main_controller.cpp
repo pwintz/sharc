@@ -566,6 +566,9 @@ int main()
 
     u = controller->getLatestControl();
     metadata_json = controller->getLatestMetadata();
+    if (metadata_json.is_null()) {
+        metadata_json = json::object();  // empty {}
+    }
     PRINT_WITH_FILE_LOCATION("Metadata: " << metadata_json)
     
     // OptSequence has three properties: state, input, and output. 

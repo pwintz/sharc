@@ -9,7 +9,7 @@ set -e  # Exit on error
 
 # Configuration
 IMAGE="sharc_latest.sif"
-EXAMPLE=${1:-"acc_example"}
+EXAMPLE=${1:-"Rocket_example"}
 CONFIG=${2:-"default.json"}
 
 # Check if image exists

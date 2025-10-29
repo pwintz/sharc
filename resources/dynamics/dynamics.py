@@ -2,6 +2,38 @@ import math
 import numpy as np
 from sharc.dynamics_base import OdeDynamics
 
+class RocketDynamics(OdeDynamics):
+    
+    def __init__(self, config):
+        super().__init__(config)
+
+    def setup_system(self):
+        self.g     = self.config["system_parameters"]["g"]
+        self.mass  = self.config["system_parameters"]["mass"]
+        self.n     = 2   # number of states
+        self.m_in  = 1   # number of inputs
+
+    def system_derivative(self, t, x, u, w):
+        """
+        Simple vertical rocket model:
+        x = [h, v]
+        u = [F]
+        """
+        # Extract states and input
+        h = float(x[0])
+        v = float(x[1])
+        F = float(u[0])
+
+        # Dynamics
+        dhdt = v
+        dvdt = (F / self.mass) - self.g
+
+        dxdt = np.array([[dhdt], [dvdt]])
+
+        assert dxdt.shape == (self.n, 1), f"Expected {(self.n, 1)}, got {dxdt.shape}"
+        return dxdt
+
+    
 class LTIDynamics(OdeDynamics):
     
     def __init__(self, config):

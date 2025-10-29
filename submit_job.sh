@@ -36,7 +36,7 @@ fi
 IMAGE="sharc_latest.sif"
 
 # Example to run (acc_example or cartpole)
-EXAMPLE="acc_example"
+EXAMPLE="Rocket_example"
 
 # Configuration files array (edit as needed)
 CONFIG_FILES=(
