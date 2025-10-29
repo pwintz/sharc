@@ -28,6 +28,8 @@ private:
     double output_cost_weight;
     int pred_hor;
 
+    Result<Tnu> lmpc_step_result;
+
     mpc::cvec<Tnu> prev_u;
 
 
