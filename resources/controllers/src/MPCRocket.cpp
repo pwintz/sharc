@@ -7,6 +7,7 @@ void MPCRocket::setup(const nlohmann::json &json_data){
     // Load the parameters
     g = json_data.at("system_parameters").at("g");
     mass = json_data.at("system_parameters").at("mass");
+    double refheight = json_data.at("controller_parameters").at("target_height");
     auto jx0 = json_data.at("x0");
     for(int i = 0; i < Tnx; ++i){
         x0(i) = jx0.at(i).get<double>();
@@ -22,12 +23,10 @@ void MPCRocket::setup(const nlohmann::json &json_data){
     setUpMatricies(json_data);
 
     // Zero disturbances initially (shape: Nx x Ndu, Ny x Ndu)
-    lmpc.setDisturbances(mpc::mat<Tnx, Tndu>::Zero(),
-                         mpc::mat<Tny, Tndu>::Zero());
+    lmpc.setDisturbances(Bd_disturbance,Cd_disturbance);
 
     // Weights
-    mpc::cvec<Tnu> InputW;
-    mpc::cvec<Tny> OutputW;
+
     double outputWeight = json_data.at("system_parameters").at("mpc_options").at("output_cost_weight");
     double inputWeight = json_data.at("system_parameters").at("mpc_options").at("input_cost_weight");
 
@@ -35,26 +34,33 @@ void MPCRocket::setup(const nlohmann::json &json_data){
         throw std::invalid_argument("The output weight was negative.");
     }
 
-    OutputW     = yVec::Ones() * outputWeight;
-    InputW      = uVec::Ones() * inputWeight;
-    uVec DeltaInputW = uVec::Zero();
+    mpc::cvec<Tny> OutputW = mpc::cvec<Tny>::Ones() * outputWeight;
+    mpc::cvec<Tnu> InputW  = mpc::cvec<Tnu>::Ones() * inputWeight;
+    mpc::cvec<Tnu> DeltaUWeight = mpc::cvec<Tnu>::Constant(0.1);
 
-    lmpc.setObjectiveWeights(OutputW, InputW, DeltaInputW, {0, prediction_horizon});
-
-    // Horizon slice (use mpc::HorizonSlice or braced if your helper provides it)
     mpc::HorizonSlice slice(0, pred_hor);
 
+    lmpc.setObjectiveWeights(OutputW, InputW, DeltaUWeight, slice);
+
+    // Horizon slice (use mpc::HorizonSlice or braced if your helper provides it)
+
+
+    mpc::cvec<Tnx> xmin, xmax;
 
     // Constraints: define xmin/xmax vectors (sizes must match Tnx)
-    mpc::cvec<Tnx> xmin, xmax;
-    xmin << 0, 0; // <-- resize/initialize correctly for Tnx; adjust if Tnx > 2
-    xmax <<  2000,  10000;
+    xmin = mpc::cvec<Tnx>::Constant(-mpc::inf);
+    xmax = mpc::cvec<Tnx>::Constant( mpc::inf);
+    // example override for physical bounds (change to your real bounds)
+    xmin(0) = 0.0;            // altitude >= 0
+    xmin(1) = -mpc::inf;      // velocity unbounded below (example)
+    xmax(0) = 2000.0;         // altitude upper bound
+    xmax(1) = 10000.0;        // velocity upper bound (example)
 
     // if you need infinities, use mpc::inf or set large numbers consistent with library
     // Example (if more states exist, initialize accordingly)
     // xmin(2) = -mpc::inf; xmax(2) = mpc::inf; etc.
 
-    mpc::cvec<Tny> ymin = mpc::cvec<Tny>::Zero();
+    mpc::cvec<Tny> ymin = mpc::cvec<Tny>::Constant(-mpc::inf);
     mpc::cvec<Tny> ymax = mpc::cvec<Tny>::Constant(mpc::inf);
 
     mpc::cvec<Tnu> umin = mpc::cvec<Tnu>::Zero();
@@ -64,48 +70,18 @@ void MPCRocket::setup(const nlohmann::json &json_data){
     lmpc.setInputBounds(umin, umax, slice);
     lmpc.setOutputBounds(ymin, ymax, slice);
 
-    // References
-    mpc::cvec<Tny> yRef = mpc::cvec<Tny>::Zero();
-    // set desired output(s)
-    // if Tny==1:
-    double offset = mass * g;
-    mpc::cvec<Tnu> uRef = mpc::cvec<Tnu>::Constant(offset);
-    
-    
-    yRef(0) = 150.0;
 
+    // References
+    double offset = mass * g;                  // ~19.62 N
+    mpc::cvec<Tnu> uRef = mpc::cvec<Tnu>::Constant(offset);
+    mpc::cvec<Tny> yRef = mpc::cvec<Tny>::Zero();
+    yRef(0) = refheight;                           // meters
     lmpc.setReferences(yRef, uRef, uRef, slice);
 
-    // initialize prev_u for warm-starts
-    prev_u = u0;
-}
+    // Warm start with absolute last control
+    prev_u = u0;                      
 
-// Build A, B, Bd, C and set them on lmpc (not a separate controller object)
-void MPCRocket::setUpMatricies(const nlohmann::json &json_data){
-    // Continuous/discrete model (adapt to your system dimensions)
-    mpc::mat<Tnx, Tnx> Ad;
-    Ad << 0, 1,
-          0, 0;
-
-    mpc::mat<Tnx, Tnu> Bd;
-    Bd << 0,
-          1.0 / mass;
-
-    Bd_disturbance.setZero();        // makes all columns zero
-    Bd_disturbance(0, 0) = 0.0;      // first disturbance channel contribution to state 0
-    Bd_disturbance(1, 0) = -g;
-    
-    mpc::mat<Tny, Tnx> Cd;
-    Cd.setIdentity();
-
-    Cd_disturbance = mat<Tny, Tndu>::Zero() ; // Output disturbance matrix
-
-    
-    // Set the state-space model in LMPC
-    lmpc.setStateSpaceModel(Ad, Bd, Cd);
-    lmpc.setDisturbances(Bd_disturbance, mat<Tny, Tndu>::Zero());
-
-    LParameters params;
+    mpc::LParameters params;
 
     params.alpha = 1.6;
     params.rho = 1e-6;
@@ -123,24 +99,58 @@ void MPCRocket::setUpMatricies(const nlohmann::json &json_data){
 
 }
 
+
+// Build A, B, Bd, C and set them on lmpc (not a separate controller object)
+void MPCRocket::setUpMatricies(const nlohmann::json &json_data){
+    double dt = json_data.at("system_parameters").at("sample_time");
+    
+    mpc::mat<Tnx, Tnx> Ad;
+    Ad << 1.0, dt,
+    0.0, 1.0;
+
+    mpc::mat<Tnx, Tnu> Bd;
+    double b0 = (dt*dt) / (2.0 * mass);
+    double b1 = dt / mass;
+    Bd << b0,
+        b1;
+
+    // Output: height only
+    mpc::mat<Tny, Tnx> Cd;
+    Cd.setZero();
+    Cd(0,0) = 1.0;
+
+    // No explicit disturbance model (simplest, consistent with uRef = m*g)
+    lmpc.setStateSpaceModel(Ad, Bd, Cd);
+    //lmpc.setDisturbances(Bd_disturbance, mat<Tny, Tndu>::Zero());
+
+    
+
+}
+
 void MPCRocket::calculateControl(int k, double t, const xVec &x, const wVec &w){
-    prev_u = control;
 
     // Convert x to mpc state vector
     state = x;
 
     // Call LMPC optimizer exactly as in your working example
-    lmpc_step_result = lmpc.optimize(state, control);
+    lmpc_step_result = lmpc.optimize(state, prev_u);
     control = lmpc_step_result.cmd;
 
     // store metadata if you want similar to working example
     // mpc::OptSequence optimal_sequence = lmpc.getOptimalSequence();
+
+    prev_u = control;
 
     // warm start next time
     mpc::OptSequence optimal_sequence = lmpc.getOptimalSequence();
     auto opt_state_seq  = optimal_sequence.state;
     auto opt_output_seq = optimal_sequence.output ;
     auto opt_input_seq  = optimal_sequence.input;
+
+    double u_aug_arr[Tnu + Tndu];
+    for(int i=0;i<Tnu;++i) u_aug_arr[i] = static_cast<double>(control(i));
+    for(int j=0;j<Tndu;++j) u_aug_arr[Tnu + j] = 0.0; // no commanded disturbance
+
     
 }
 

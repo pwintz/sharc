@@ -1,6 +1,49 @@
 import math
 import numpy as np
 from sharc.dynamics_base import OdeDynamics
+class CarDynamics(OdeDynamics):
+    def __init__(self, config):
+        super().__init__(config)
+    
+    def setup_system(self):
+        self.n       = 4    # number of states
+        self.m_in    = 2    # number of inputs
+        self.lr      = self.config["system_parameters"]["lr"]
+        self.lf      = self.config["system_parameters"]["lf"]
+
+    def system_derivative(self, t, x, u, w):
+        """
+        Simple model of a car
+        x = [x,y,v,psi]
+        u = [a, b]
+        a = aceleration in car direction
+        b = slip angle, angle between velocity and heading
+        """
+
+        #get the states and input
+        xpos = float(x[0])
+        ypos = float(x[1])
+        v = float(x[2])
+        psi = float(x[3])
+
+        a = float(u[0])
+        b = float(u[1])
+
+        #dynamics
+        dxposdt = v * math.cos(psi + b)
+
+        dyposdt = v * math.sin(psi + b)
+
+        dvdt = a
+
+        dpsidt = (v/self.lr) * sin(b)
+
+        dxdt = np.array([[dxposdt], [dyposdt], [dvdt], [dpsidt]])
+
+        assert dxdt.shape == (self.n, 1), f"Expected {(self.n, 1)}, got {dxdt.shape}"
+        return dxdt
+
+
 
 class RocketDynamics(OdeDynamics):
     

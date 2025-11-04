@@ -32,6 +32,7 @@ private:
 
     mpc::cvec<Tnu> prev_u;
 
+    
 
     LMPC<Tnx, Tnu, Tndu, Tny, prediction_horizon, control_horizon> lmpc;
 

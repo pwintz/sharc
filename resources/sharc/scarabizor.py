@@ -291,9 +291,9 @@ class ExecutionDrivenScarabRunner:
         f'--param', self.params_src_file,
         f'--pintool_args',
         # Skip over anything before the start instruction.
-        f'-fast_forward_to_start_inst 1',
+        f'-fast_forward_to_start_inst 1',SS
         f'--scarab_args',
-        f'--inst_limit {self.instruction_limit}' # Instruction limit
+        f'--inst_limit {self.instruction_limit}', # Instruction limit
         f'--heartbeat_interval {self.heartbeat_interval}', 
         # '--num_heartbeats 1'
         # '--power_intf_on 1']
