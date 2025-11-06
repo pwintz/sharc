@@ -374,6 +374,8 @@ int main()
   std::string controller_type = json_data.at("system_parameters").at("controller_type");
   Controller* controller = Controller::createController(controller_type, json_data);
 
+
+  std::cout << "Controller type: " << controller_type << std::endl;
   // I/O Setup
 
   // Open the pipes to Python. Each time we open one of these streams, 
@@ -567,6 +569,11 @@ int main()
     u = controller->getLatestControl();
     metadata_json = controller->getLatestMetadata();
     PRINT_WITH_FILE_LOCATION("Metadata: " << metadata_json)
+
+    if (!metadata_json.is_object()) {
+      metadata_json = nlohmann::json::object({{"value", metadata_json}});
+    }
+  
     
     // OptSequence has three properties: state, input, and output. 
     // Each predicted time step is stored in one row.

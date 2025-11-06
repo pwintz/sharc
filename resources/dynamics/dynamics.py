@@ -142,3 +142,72 @@ class CartPoleDynamics(OdeDynamics):
         dxdt = dxdt.reshape(4,1)
         assert dxdt.shape == x.shape, (dxdt.shape, x.shape)
         return dxdt
+
+class RLCSeriesDynamics(OdeDynamics):
+    def __init__(self, config):
+        super().__init__(config)
+
+    def setup_system(self):
+
+        print("1")
+
+        sp = self.config["system_parameters"]
+        R = float(sp["R"])
+        L = float(sp["L"])
+        C = float(sp["C"])
+
+        # State-space matrices for series RLC
+        self.A = np.array([[0.0,   1.0 / C],
+                           [-1.0 / L, -R / L]], dtype=float)
+        self.B = np.array([[0.0],
+                           [1.0 / L]], dtype=float)
+
+        self.B_dist = np.zeros((2, 1), dtype=float)
+
+        # Always output both states: y = x
+        self.C = np.eye(2, dtype=float)
+        self.D = np.zeros((2, 1), dtype=float)
+
+        # Dimensions used by OdeDynamics / framework
+        self.n = 2              # states: vC, iL
+        self.m = 1              # input: u
+        self.p = 2              # outputs: vC, iL
+        self.w_dim = 1          # <-- no exogenous input (important!)
+
+        # Aliases some code paths may expect
+        self.x_dim = self.n
+        self.u_dim = self.m
+        self.y_dim = self.p
+
+        print("2")
+
+
+    def system_derivative(self, t, x, u, w=None):
+        x = np.asarray(x, dtype=float).reshape(self.n, 1)
+        u = np.asarray(u, dtype=float).reshape(self.m, 1)
+
+        print(x)
+
+        dxdt = self.A @ x + self.B @ u
+        if w is not None:
+            w = np.asarray(w, dtype=float).reshape(1, 1)
+            dxdt += self.B_dist @ w
+
+        assert dxdt.shape == (self.n, 1), f"Expected {(self.n,1)}, got {dxdt.shape}"
+
+        return dxdt
+
+    def compute_output(self, x, u):
+
+        print("5")
+        x = np.asarray(x, dtype=float).reshape(self.n, 1)
+        u = np.asarray(u, dtype=float).reshape(self.m, 1)
+        y = self.C @ x + self.D @ u
+        assert y.shape == (self.p, 1)
+        print("6")
+        return y
+
+    # Optional, but safe to include even with w_dim=0
+    def get_exogenous_input(self, t_start):
+        # Framework will call this; with w_dim=0 we return an empty (0,1) array
+        return np.zeros((1,1))
