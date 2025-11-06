@@ -461,7 +461,21 @@ class Simulation:
     writeJson(os.path.join(self.simulation_dir, "config.json"), self.sim_config)
 
     PARAMS_out_file = os.path.join(self.simulation_dir, 'PARAMS.generated')
+
+    # Write the PARAMS file normally
     self.params.to_file(PARAMS_out_file)
+
+    # --- FIX MALFORMED PARAMS LINES ---
+    # Some base PARAMS templates have flags glued together (e.g., "--icache_size 32768--icache_assoc 4").
+    # This patch splits any "--" that appear right after a number onto a new line.
+    with open(PARAMS_out_file, 'r+') as f:
+        text = f.read()
+        fixed_text = re.sub(r'([0-9])--', r'\1\n--', text)
+        f.seek(0)
+        f.write(fixed_text)
+        f.truncate()
+    # ----------------------------------
+
 
     sample_time     = self.sim_config["system_parameters"]["sample_time"]
     use_fake_delays = self.sim_config["fake_delays"]["enable"]

@@ -18,6 +18,7 @@ from scarab_globals import scarab_paths
 import sharc.debug_levels as debug_levels
 
 
+
 # params_in_dir = 'docker_user_home'
 log_dir_regex = re.compile(r"\nLog directory is (.*?)\n")
 trace_file_regex = re.compile(r"\nCreated thread trace file (.*?)\n")
@@ -32,6 +33,8 @@ MICROSECONDS_PER_FEMTOSECOND = 10**(6-15)
 MICROSECONDS_PER_SECOND = 10**(-15)
 FEMTOSECOND_PER_SECONDS = 10**15
     
+
+
 def run(cmd, args=[], cwd='.'):
     verbose = False
     # If a single string is given for "args", convert it to a list.
@@ -285,19 +288,19 @@ class ExecutionDrivenScarabRunner:
     # error messages, so we check it here to ensure it is there.
     assertFileExists(self.params_src_file)
     scarab_cmd_argv = [
-        sys.executable, # The Python executable
-        scarab_paths.bin_dir + '/scarab_launch.py',
-        f'--program', cmd,
-        f'--param', self.params_src_file,
-        f'--pintool_args',
-        # Skip over anything before the start instruction.
-        f'-fast_forward_to_start_inst 1',SS
-        f'--scarab_args',
-        f'--inst_limit {self.instruction_limit}', # Instruction limit
-        f'--heartbeat_interval {self.heartbeat_interval}', 
-        # '--num_heartbeats 1'
-        # '--power_intf_on 1']
-      ]
+    sys.executable,  # The Python executable
+    scarab_paths.bin_dir + '/scarab_launch.py',
+    f'--program', cmd,
+    f'--param', self.params_src_file,
+    f'--pintool_args',
+    '-fast_forward_to_start_inst 1',
+    f'--scarab_args',
+    f'--inst_limit {self.instruction_limit} --heartbeat_interval {self.heartbeat_interval}', 
+    # '--num_heartbeats 1',
+    # '--power_intf_on 1',
+    ]
+
+
     run_shell_cmd(scarab_cmd_argv, working_dir=self.sim_dir, log=self.controller_log)
     # There is a bug in Scarab that causes it to sometimes crash when run in the terminal and the terminal is resized. To avoid this bug, we run it in a different thread, which appears to fix the problem.
     

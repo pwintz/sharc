@@ -19,15 +19,24 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
 
     # Read experiment data
-    experiment_results = readJson(incremental_path)
+    experiment_results = {}
+    if os.path.exists(incremental_path):
+        experiment_results = readJson(incremental_path)
+    if not experiment_results and os.path.exists(final_path):
+        print("⚠️ Incremental results empty, using final results file.")
+        experiment_results = readJson(final_path)
+    if not experiment_results:
+        raise RuntimeError(f"No experiment data found in:\n  {incremental_path}\n  or\n  {final_path}")
+
     results = [(val["experiment config"]["label"], val) for val in experiment_results.values()]
+    if not results:
+        raise RuntimeError("Experiment results list is empty — make sure your experiment ran to completion.")
 
     # Plot results
     plt = plot_experiment_list(results)
     image_save_path = os.path.join(out_dir, 'car_plots.png')
     plt.savefig(image_save_path)
     print(f"✅ Saved figure to: {image_save_path}")
-
 
 # --------------------------------------------------------------------------
 # Utility functions

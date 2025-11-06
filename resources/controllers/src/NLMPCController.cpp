@@ -66,6 +66,8 @@ void NLMPCController::setup(const nlohmann::json &json_data){
                                     std::vector<double> w = json_data.at("system_parameters").at("mpc_options").at("state_cost_weights").get<std::vector<double>>();
                                     Eigen::VectorXd state_cost_weights = Eigen::Map<Eigen::VectorXd, Eigen::Unaligned>(w.data(), w.size()); // create a weight vector
                                     return (x * state_cost_weights.asDiagonal()).array().square().sum() + u.array().square().sum() * input_cost_weight; });
+
+                                    
 }
 
 void NLMPCController::calculateControl(int k, double t, const xVec &x, const wVec &w){

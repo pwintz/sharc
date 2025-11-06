@@ -29,6 +29,9 @@ private:
     constexpr static int ineq_c = 0;
     constexpr static int eq_c = 0;
 
+    uVec umin_, umax_;
+    xVec xmin_, xmax_;
+
     // constants
     double lr, lf;   
     double sample_time;

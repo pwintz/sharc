@@ -35,9 +35,15 @@ echo "===================="
 echo ""
 
 # Run simulation
+# apptainer exec \
+#     --bind "$(pwd)/resources:/home/dcuser/resources" \
+#     --bind "$(pwd)/examples:/examples" \
+#     "$IMAGE" \
+#     bash -c "cd /examples/$EXAMPLE && sharc --config_filename $CONFIG"
+
 apptainer exec \
-    --bind "$(pwd)/resources:/home/dcuser/resources" \
-    --bind "$(pwd)/examples:/examples" \
+    --bind "/global/scratch/users/tbrady1/sharc/examples:/examples" \
+    --bind "/global/scratch/users/tbrady1/sharc/resources:/home/dcuser/resources" \
     "$IMAGE" \
     bash -c "cd /examples/$EXAMPLE && sharc --config_filename $CONFIG"
 

@@ -2,86 +2,96 @@
     "label": "base",
     "skip": false,
     "Simulation Options": {
-      "parallel_scarab_simulation": false, 
- 
-      "in-the-loop_delay_provider": "onestep",
- 
+      "parallel_scarab_simulation": false,
+      "write_incremental_every_step": true,
+      "in-the-loop_delay_provider": "none",
       "max_batches": 9999999,
+      "max_batch_size": 9999999,
+      "frontend": "exec_driven"
 
-      "max_batch_size": 9999999
     },
     "dynamics_module_name": "dynamics.dynamics",
- 
     "dynamics_class_name": "CarDynamics",
     "n_time_steps": 40,
     "x0": [0, 3, 0, 0],
-    "u0": [0,0],
+    "u0": [0, 0],
     "only_update_control_at_sample_times": true,
-
     "fake_delays": {
       "enable": false,
-      "time_steps":              [ 12,  15],
+      "time_steps": [12, 15],
       "sample_time_multipliers": [1.2, 2.2]
     },
     "==== Debgugging Levels ====": {
       "debug_program_flow_level": 1,
       "debug_interfile_communication_level": 2,
       "debug_optimizer_stats_level": 0,
-      "debug_dynamics_level":        2,
-      "debug_configuration_level":   0,
-      "debug_build_level":           0, 
-      "debug_shell_calls_level":     0, 
-      "debug_batching_level":        0, 
-      "debug_scarab_level":          0
+      "debug_dynamics_level": 2,
+      "debug_configuration_level": 0,
+      "debug_build_level": 0,
+      "debug_shell_calls_level": 0,
+      "debug_batching_level": 0,
+      "debug_scarab_level": 0
     },
     "==== Model Parameters ====": "",
-      "system_parameters": {
-      "state_dimension": 4, 
+    "system_parameters": {
+      "state_dimension": 4,
       "input_dimension": 2,
       "exogenous_input_dimension": 2,
-      "output_dimension": 1,
+      "output_dimension": 2,
       "sample_time": 0.5,
-      "x_names": ["x", "y", "v", "psi"],
-      "u_names": ["a", "b"], 
-      "y_names": [], 
+      "x_names": [
+        "x",
+        "y",
+        "v",
+        "psi"
+      ],
+      "u_names": [
+        "a",
+        "b"
+      ],
+      "y_names": [
+        "x",
+        "y"
+      ],
       "controller_type": "MPCCar",
       "lr": 1.738,
       "lf": 1.738,
       "osqp_options": {
-        "rel_tolerance": 1e-4,
-        "abs_tolerance": 1e-4,
-        "primal_infeasibility_tolerance": 1e-5,
-        "dual_infeasibility_tolerance": 1e-5,
+        "rel_tolerance": 0.0001,
+        "abs_tolerance": 0.0001,
+        "primal_infeasibility_tolerance": 0.001,
+        "dual_infeasibility_tolerance": 0.001,
         "time_limit": 0.5,
-        "maximum_iteration": 4000,
+        "maximum_iteration": 8000,
         "verbose": false
-       },
-       "constraints": {
-        "xmin": [-10, -50],
-        "xmax": [ 10,  50],
-        "ymin": [-10],
-        "ymax": [ 10],
-        "umin": [-100],
-        "umax": [ 100]
+      },
+      "constraints": {
+        "xmin": [-200, -100, 0, -3.14],
+        "xmax": [200, 100, 20, 3.14],
+        "umin": [-3, -0.5],
+        "umax": [3, 0.5]
         },
-      "mpc_options":{
+      "mpc_options": {
         "enable_mpc_warm_start": false,
         "use_state_after_delay_prediction": false,
         "prediction_horizon": 20,
         "control_horizon": 4,
-        "output_cost_weight": [1,1],
+        "output_cost_weight": [1, 1],
         "state_cost_weights": [1, 1, 1, 1],
-        "input_cost_weight":   1
+        "input_cost_weight": 1,
+        "warm_start": true,
+        "acceptable_statuses": ["SOLVED","MAX_ITERATION","SOLVED_INACCURATE"]
+  
       }
     },
     "controller_parameters": {
-    "terminal_state": [0,0,0,-1.570796325]
-  },
+      "terminal_state": [0, 0, 0, -1.570796325]
+    },
     "==== Hardware Configuration ===": "",
-    "PARAMS_base_file":  "PARAMS.base",
+    "PARAMS_base_file": "PARAMS.base",
     "PARAMS_patch_values": {
-        "chip_cycle_time": 60000,
-        "l1_size": 32768,
-        "icache_size": 32768,
-        "dcache_size": 32768
+      "chip_cycle_time": 60000,
+      "l1_size": 32768,
+      "icache_size": 32768,
+      "dcache_size": 32768
     }}
