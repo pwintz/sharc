@@ -13,6 +13,8 @@ FROM carlasim/carla:0.9.16
 #───────────────────────────────────────────────────────────────────────────────
 ARG USERNAME=admin
 ARG TIME_ZONE=America/Los_Angeles
+ARG USER_ID=1000
+ARG GROUP_ID=1000
 
 # Directory structure
 ARG WORKSPACE_ROOT=/home/workspace
@@ -131,7 +133,9 @@ RUN add-apt-repository ppa:ubuntu-toolchain-r/test -y && \
 #───────────────────────────────────────────────────────────────────────────────
 #  Create Admin User (full sudo access)
 #───────────────────────────────────────────────────────────────────────────────
-RUN useradd -m -d /home/$USERNAME -s /bin/bash -G adm,sudo $USERNAME && \
+RUN groupadd -g $GROUP_ID $USERNAME || true && \
+    useradd -l -u $USER_ID -g $GROUP_ID -m -d /home/$USERNAME -s /bin/bash -G adm,sudo $USERNAME || \
+    useradd -l -m -d /home/$USERNAME -s /bin/bash -G adm,sudo $USERNAME && \
     echo "$USERNAME:$USERNAME" | chpasswd && \
     echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers && \
     touch /home/$USERNAME/.sudo_as_admin_successful
@@ -149,6 +153,7 @@ RUN mkdir -p /home/$USERNAME/.xdg_runtime_dir && \
     # Create symlink: /home/workspace/carla_0.9.16 -> /workspace (where CARLA is installed)
     ln -s /workspace $WORKSPACE_ROOT/carla_0.9.16 && \
     chown -R $USERNAME:$USERNAME /home/$USERNAME && \
+    chown -R $USERNAME:$USERNAME /workspace && \
     chown -R $USERNAME:$USERNAME $WORKSPACE_ROOT && \
     chown -R $USERNAME:$USERNAME $TOOLS_DIR
 
@@ -182,6 +187,7 @@ ENV PATH="$CONDA_DIR/envs/carla/bin:$PATH"
 
 # Configure conda for all users
 RUN conda init bash && \
+    sudo -u $USERNAME $CONDA_DIR/bin/conda init bash && \
     echo "conda activate carla" >> /home/$USERNAME/.bashrc && \
     echo "conda activate carla" >> /root/.bashrc
 
@@ -342,6 +348,7 @@ ENV PATH="$CONDA_DIR/envs/carla/bin:$PATH:${RESOURCES_DIR}/sharc:${RESOURCES_DIR
 #  Set Ownership & Verify Installation
 #───────────────────────────────────────────────────────────────────────────────
 RUN chown -R $USERNAME:$USERNAME /home/$USERNAME && \
+    chown -R $USERNAME:$USERNAME /workspace && \
     chown -R $USERNAME:$USERNAME $TOOLS_DIR
 
 # Verify all components

@@ -24,18 +24,19 @@ A combined Docker environment with CARLA 0.9.16 simulator and SHARC tools.
 newgrp docker
 
 # 1. Build the image (one time)
-docker build -f Dockerfile.carla-sharc -t carla-sharc .
+# Use your host's UID/GID for full file access
+docker build \
+    --build-arg USER_ID=$(id -u) \
+    --build-arg GROUP_ID=$(id -g) \
+    -f Dockerfile -t carla-sharc .
 
 # 2. Run the container
 ./run_carla_sharc.sh
 
 # 3. Inside container: start CARLA server
-/home/workspace/carla_0.9.16/CarlaUE4.sh -prefernvidia
+/home/workspace/carla_0.9.16/CarlaUE4.sh -prefernvidia &
 
-# 4. In another terminal: run examples
-# 4.0. Activate docker group again in new terminal (to avoid sudo)
-newgrp docker
-docker exec -it carla-sharc bash
+# 4. Run examples
 python /home/workspace/carla_0.9.16/PythonAPI/examples/automatic_control.py
 ```
 
