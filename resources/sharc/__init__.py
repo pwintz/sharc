@@ -1058,41 +1058,45 @@ class SimulationExecutor(ABC):
 
   def run_simulation(self) -> TimeStepSeries:
     """ Run everything needed to simulate the plant and dynamics, in parallel."""
-    # Run the controller in parallel, on a separate thread.
-    N_TASKS = 1
-    with ThreadPoolExecutor(max_workers=N_TASKS) as executor:
-      # Start a separate thread to run the controller.
-      
-      if debug_levels.debug_program_flow_level >= 2:
-        print(f"Start of SimulationExecutor.run_simulation()...")
-      controller_task = executor.submit(self._run_controller)
-      
-      if debug_levels.debug_program_flow_level >= 1:
-        controller_task.add_done_callback(lambda _: print("controller_task finished."))
+    saved_stdout = sys.stdout
+    try:
+      # Run the controller in parallel, on a separate thread.
+      N_TASKS = 1
+      with ThreadPoolExecutor(max_workers=N_TASKS) as executor:
+        # Start a separate thread to run the controller.
+        
+        if debug_levels.debug_program_flow_level >= 2:
+          print(f"Start of SimulationExecutor.run_simulation()...")
+        controller_task = executor.submit(self._run_controller)
+        
+        if debug_levels.debug_program_flow_level >= 1:
+          controller_task.add_done_callback(lambda _: print("controller_task finished."))
 
-      # Start running the plant in the current thread.
-      print("Starting the plant...")
-      try:
-        simulation_data = self._run_plant()
-      except Exception as err:
-        print(f'Failed to run plant: {err}\n{traceback.format_exc()}')
-        raise err
-      print('Plant finished')
+        # Start running the plant in the current thread.
+        print("Starting the plant...")
+        try:
+          simulation_data = self._run_plant()
+        except Exception as err:
+          print(f'Failed to run plant: {err}\n{traceback.format_exc()}')
+          raise err
+        print('Plant finished')
 
-      # Wait for the controller thread to complete its task.
-      for future in concurrent.futures.as_completed([controller_task]):
-        if future.exception():
-          err = future.exception()
+        # Wait for the controller thread to complete its task.
+        for future in concurrent.futures.as_completed([controller_task]):
+          if future.exception():
+            err = future.exception()
 
-          # Create a list of the causes of the exception.
-          err_repr_list = []
-          while err:
-            err_repr_list = [repr(err)] + err_repr_list
-            err = err.__cause__
-          
-          raise Exception('The controller task failed:\n\t' + "\n\t".join(err_repr_list)) from future.exception()
-        else:
-          print("Controller task was successful.")
+            # Create a list of the causes of the exception.
+            err_repr_list = []
+            while err:
+              err_repr_list = [repr(err)] + err_repr_list
+              err = err.__cause__
+            
+            raise Exception('The controller task failed:\n\t' + "\n\t".join(err_repr_list)) from future.exception()
+          else:
+            print("Controller task was successful.")
+    finally:
+      sys.stdout = saved_stdout
 
     assert simulation_data, f"simulation_data={simulation_data} must not be None"
     
