@@ -4,13 +4,38 @@
 
 void MPCCar::setup(const nlohmann::json &json_data){
     // Load system parameters
-    this->lr = json_data.at("system_parameters").at("lr");
-    this->lf = json_data.at("system_parameters").at("lf");
-    this->sample_time = json_data.at("system_parameters").at("sample_time");
-    this->input_cost_weight = json_data.at("system_parameters")
-                                  .at("mpc_options")
-                                  .at("input_cost_weight");
-                                  
+    this->debug_level_ = json_data.at("==== Debgugging Levels ====")
+    .at("debug_program_flow_level")
+    .get<int>();
+    this->lr = json_data.at("system_parameters").at("lr").get<double>();
+    this->lf = json_data.at("system_parameters").at("lf").get<double>();
+    this->sample_time = json_data.at("system_parameters").at("sample_time").get<double>();
+                                
+    // Weights for the cost function                              
+    auto jx = json_data.at("controller_parameters").at("terminal_state");
+    for(int i = 0; i < Tnx; ++i){
+        x_ref(i) = jx.at(i).get<double>();
+    }
+    //Initiallizations
+    Eigen::Vector4d Q;
+    Eigen::Vector4d Qf;
+    Eigen::Vector2d Rdiag;     // a, beta
+    Eigen::Vector2d Rd; // Δa, Δbeta   
+    Eigen::Vector2d u_ref; u_ref << 0.0, 0.0;        
+    auto jc = json_data.at("controller_parameters");
+    auto jQ  = jc.at("Q");
+    auto jQf = jc.at("Qf");
+    auto jR  = jc.at("Rdiag");
+    auto jRd = jc.at("Rd");
+
+    for (int i=0; i<4; ++i) {
+        Q(i)  = jQ.at(i).get<double>();
+        Qf(i) = jQf.at(i).get<double>();
+    }
+    for (int i=0; i<2; ++i) {
+        Rdiag(i) = jR.at(i).get<double>();
+        Rd(i)    = jRd.at(i).get<double>();
+    }                    
 
 
 
@@ -20,111 +45,91 @@ void MPCCar::setup(const nlohmann::json &json_data){
     // nlmpc.setLoggerLevel(mpc::Logger::log_level::DEEP);
     nlmpc.setDiscretizationSamplingTime(this->sample_time);
 
-
     // Dynamics differential equation
-    // nlmpc.setStateSpaceFunction(
-    //     [this](mpc::cvec<Tnx>& x_dot,
-    //            const mpc::cvec<Tnx>& x,
-    //            const mpc::cvec<Tnu>& u,
-    //            const unsigned int&) {
-    //         assert(u.size() == Tnu && "Control vector u has wrong dimension");
-    
-    //         if (!x.allFinite() || !u.allFinite()) {
-    //             std::cerr << "[ERROR] NaN or Inf in dynamics input!" << std::endl;
-    //             x_dot.setZero();
-    //             return;
-    //         }
-    
-    //         x_dot.setZero();
-    //         double X = x(0), Y = x(1), v = x(2), psi = x(3);
-    //         double a = u(0), beta = u(1);
-    
-    //         x_dot(0) = v * std::cos(psi + beta);
-    //         x_dot(1) = v * std::sin(psi + beta);
-    //         x_dot(2) = a;
-    //         x_dot(3) = (v / this->lr) * std::sin(beta);
-    //     });
     nlmpc.setStateSpaceFunction(
-        [this](mpc::cvec<Tnx>& x_next,
-                   const mpc::cvec<Tnx>& x,
-                   const mpc::cvec<Tnu>& u,
-                   const unsigned int&) {
+        [this](mpc::cvec<Tnx>& dx,
+               const mpc::cvec<Tnx>& x,
+               const mpc::cvec<Tnu>& u,
+               const unsigned int&) {
             assert(u.size() == Tnu && "Control vector u has wrong dimension");
     
             if (!x.allFinite() || !u.allFinite()) {
-                std::cerr << "[ERROR] NaN or Inf in dynamics input!" << std::endl;
-                x_next.setZero();
+                std::cerr << "[ERROR] NaN or Inf in dynamics input!\n";
+                dx.setZero();
                 return;
             }
-            double Ts = this-> sample_time;
     
-            // Extract states
-            double X   = x(0);
-            double Y   = x(1);
-            double v   = x(2);
-            double psi = x(3);
+            const double v   = x(2);
+            const double psi = x(3);
+            const double a    = u(0);
+            const double beta = u(1);
     
-            // Inputs
-            double a    = u(0);
-            double beta = u(1);
-    
-            // Continuous dynamics (x_dot)
-            double x_dot_0 = v * std::cos(psi + beta);
-            double x_dot_1 = v * std::sin(psi + beta);
-            double x_dot_2 = a;
-            double x_dot_3 = (v / this->lr) * std::sin(beta);
-    
-            // Euler discretization: x_{k+1} = x_k + Ts * x_dot
-            x_next(0) = X   + Ts * x_dot_0;
-            x_next(1) = Y   + Ts * x_dot_1;
-            x_next(2) = v   + Ts * x_dot_2;
-            x_next(3) = psi + Ts * x_dot_3;
+            dx(0) = v * std::cos(psi + beta);        // Ẋ
+            dx(1) = v * std::sin(psi + beta);        // Ẏ
+            dx(2) = a;                                // v̇
+            dx(3) = (v / this->lr) * std::sin(beta); // ψ̇
         });
     
+    nlmpc.setObjectiveFunction(
+        [this, Q, Qf, Rdiag, Rd, u_ref](
+            const mpc::mat<prediction_horizon + 1, Tnx>& X,
+            const mpc::mat<prediction_horizon + 1, Tny>& /*Y*/,
+            const mpc::mat<prediction_horizon + 1, Tnu>& U,
+            const double& /*t*/)
+        {
+            constexpr double BIG = 1e12;
     
-    nlmpc.setObjectiveFunction([&](
-        const mpc::mat<prediction_horizon + 1, TNX> &x,
-        const mpc::mat<prediction_horizon + 1, TNY> &,
-        const mpc::mat<prediction_horizon + 1, TNU> &u,
-        double)
-    { 
-        // State cost weights from JSON
-        std::vector<double> w = json_data.at("system_parameters").at("mpc_options").at("state_cost_weights").get<std::vector<double>>();
-        Eigen::VectorXd state_cost_weights = 
-            Eigen::Map<Eigen::VectorXd, Eigen::Unaligned>(w.data(), w.size());
+            if (!X.allFinite() || !U.allFinite()) return BIG;
+    
+            double J = 0.0;
+    
+            for (int k = 0; k < X.rows() - 1; ++k) {
+                Eigen::Vector4d e = X.row(k).transpose() - x_ref;
+                J += (Q.array() * e.array().square()).sum();
+    
+                if (k < U.rows()) {
+                    Eigen::Vector2d uk = U.row(k).transpose();
+                    J += (Rdiag.array() * uk.array().square()).sum();
+                }
+            }
 
-        // Quadratic cost: sum(Qx + Ru)
-        double cost = 0.0;
-        for (int k = 0; k < prediction_horizon + 1; ++k) {
-            Eigen::VectorXd xk = x.row(k).transpose().eval();
-            Eigen::VectorXd uk = u.row(k).transpose().eval();
-            
-            cost += (xk.transpose() * state_cost_weights.asDiagonal() * xk)(0,0);
-            cost += this->input_cost_weight * uk.squaredNorm();
-        }
-        Eigen::VectorXd x_ref(4);
-        x_ref << 10.0, 0.0, 0.0, 0.0; // for example, target x=10m ahead
+            Eigen::Vector4d ef = X.row(X.rows() - 1).transpose() - x_ref;
 
-        for (int k = 0; k < prediction_horizon + 1; ++k) {
-            Eigen::VectorXd xk = x.row(k).transpose();
-            Eigen::VectorXd uk = u.row(k).transpose();
-            
-            Eigen::VectorXd err = xk - x_ref;  // deviation from reference
-            cost += (err.transpose() * state_cost_weights.asDiagonal() * err)(0,0);
-            cost += this->input_cost_weight * uk.squaredNorm();
-        }
-        return cost;
-    });
+            J += (Qf.array() * ef.array().square()).sum();
+
+            if (!std::isfinite(J)) return BIG;
+            return J;
+        });
+        
+    
+    
     nlmpc.setOutputFunction([&](yVec &y, const xVec &x, const uVec &, const unsigned int &) {
         y(0) = x(0);  // x-position
         y(1) = x(1);  // y-position
     });
     
     
-    // --- pull MPC options (OPTIONAL: use your compile-time constants if available) ---
+    // --- pull MPC options -
     const auto& mpc_opts = json_data.at("system_parameters").at("mpc_options");
-    const int PRED_H = mpc_opts.at("prediction_horizon").get<int>();  // 20
-    const int CTRL_H = mpc_opts.at("control_horizon").get<int>();     // 4
+    const int PRED_H = mpc_opts.at("prediction_horizon").get<int>();
+    const int CTRL_H = mpc_opts.at("control_horizon").get<int>(); 
+    
+    // Enforce compile-time horizons match JSON
+    if ( PRED_H != PREDICTION_HORIZON) {
+        std::ostringstream oss;
+        oss << "prediction_horizon mismatch: JSON has " << PRED_H
+            << ", but controller is compiled with " << PREDICTION_HORIZON
+            << ". Update JSON or recompile with matching horizon.";
+        throw std::runtime_error(oss.str());
+    }
+
+    if (CTRL_H != CONTROL_HORIZON) {
+        std::ostringstream oss;
+        oss << "control_horizon mismatch: JSON has " << CTRL_H
+            << ", but controller is compiled with " << CONTROL_HORIZON
+            << ". Update JSON or recompile with matching horizon.";
+        throw std::runtime_error(oss.str());
+    }
 
     // --- constraints object ---
     const auto& c = json_data.at("system_parameters").at("constraints");
@@ -135,40 +140,46 @@ void MPCCar::setup(const nlohmann::json &json_data){
     const std::vector<double> v_xmin = c.at("xmin").get<std::vector<double>>();  // size = TNX
     const std::vector<double> v_xmax = c.at("xmax").get<std::vector<double>>();
 
+    //Ensure size of maped objects
+    auto require_size = [](const std::vector<double>& v,
+            std::size_t expected,
+            const std::string& name)
+        {
+        if (v.size() != expected) {
+        std::ostringstream oss;
+        oss << "JSON vector '" << name << "' has size "
+        << v.size() << ", expected " << expected;
+        throw std::runtime_error(oss.str());
+        }
+    };
+    require_size(v_umin, Tnu, "constraints.umin");
+    require_size(v_umax, Tnu, "constraints.umax");
+    require_size(v_xmin, Tnx, "constraints.xmin");
+    require_size(v_xmax, Tnx, "constraints.xmax");
+
     umin_ = Eigen::Map<const uVec>(v_umin.data());
     umax_ = Eigen::Map<const uVec>(v_umax.data());
     xmin_ = Eigen::Map<const xVec>(v_xmin.data());
     xmax_ = Eigen::Map<const xVec>(v_xmax.data());
 
-    nlmpc.setInputBounds(umin_, umax_, mpc::HorizonSlice{0, CTRL_H});    // length = Tch
-    nlmpc.setStateBounds(xmin_, xmax_, mpc::HorizonSlice{0, PRED_H});    // length = Tph
+    nlmpc.setInputBounds(umin_, umax_, mpc::HorizonSlice{0, CTRL_H});    // length = control_horizon
+    nlmpc.setStateBounds(xmin_, xmax_, mpc::HorizonSlice{0, PRED_H});    // length = prediction_horizon
 
 
     NLParameters params;
-
-    params.relative_ftol = 1e-10;
-    params.relative_xtol = 1e-10;
-    params.absolute_ftol = 1e-10;
-    params.absolute_xtol = 1e-10;
-    params.time_limit = 0;
-
-    params.hard_constraints = true;
-    params.enable_warm_start = false;
+    params.maximum_iteration = mpc_opts.at("params.maximum_iteration").get<double>();  
+    params.relative_ftol   =   mpc_opts.at("params.relative_ftol").get<double>();
+    params.relative_xtol   =   mpc_opts.at("params.relative_xtol").get<double>();
+    params.absolute_ftol   =   mpc_opts.at("params.absolute_ftol").get<double>();
+    params.absolute_xtol   =   mpc_opts.at("params.absolute_xtol").get<double>(); 
+    params.hard_constraints =  mpc_opts.value("params.hard_constraints", true);
+    params.enable_warm_start = mpc_opts.value("warm_start", true);
 
     nlmpc.setOptimizerParameters(params);
+
     }
 void MPCCar::calculateControl(int k, double t, const xVec &x, const wVec &w){
     state = x;
-    // if (control.size() != Tnu) {
-    //     control.resize(Tnu);
-    //     control.setZero();
-    // }
-    
-    // // Call NLMPC control calculation here
-    // nlmpc_step_result = nlmpc.optimize(state, control);
-    // control = nlmpc_step_result.cmd;
-
-    // sanity init
     if (control.size()!=Tnu) { control.resize(Tnu); control.setZero(); }
 
     // simple guards
@@ -177,11 +188,14 @@ void MPCCar::calculateControl(int k, double t, const xVec &x, const wVec &w){
     if (!finite(control)) std::cerr << "[warn] control had NaN/Inf, zeroed.\n";
 
     // one-line summaries
-    auto v2s = [](const auto& v){
-        std::ostringstream oss; oss.setf(std::ios::fixed); oss<<std::setprecision(6);
-        for (int i=0;i<v.size();++i){ if(i) oss<<','; oss<<v(i); } return oss.str();
-    };
-    std::cerr << "[NLMPC] state=" << v2s(state) << " control=" << v2s(control) << "\n";
+    if (debug_level_ >= 1) {
+        auto v2s = [](const auto& v){
+            std::ostringstream oss; oss.setf(std::ios::fixed); oss<<std::setprecision(6);
+            for (int i=0;i<v.size();++i){ if(i) oss<<','; oss<<v(i); } return oss.str();
+        };
+    
+        std::cerr << "[NLMPC] state=" << v2s(state) << " control=" << v2s(control) << "\n";
+    }
 
     try {
         nlmpc_step_result = nlmpc.optimize(state, control);
@@ -190,6 +204,7 @@ void MPCCar::calculateControl(int k, double t, const xVec &x, const wVec &w){
         throw;
     }
     control = nlmpc_step_result.cmd;
+
     latest_metadata.clear();
     latest_metadata["iterations"]       = nlmpc_step_result.num_iterations;
     latest_metadata["solver_status"]    = nlmpc_step_result.solver_status;
@@ -200,6 +215,7 @@ void MPCCar::calculateControl(int k, double t, const xVec &x, const wVec &w){
     latest_metadata["dual_residual"]    = nlmpc_step_result.dual_residual;
     latest_metadata["status"]           = mpc::SolutionStats::resultStatusToString(nlmpc_step_result.status);
 }
+
 
 // Register the controller
 REGISTER_CONTROLLER("MPCCar", MPCCar)

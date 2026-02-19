@@ -32,11 +32,13 @@ private:
     uVec umin_, umax_;
     xVec xmin_, xmax_;
 
+    Eigen::Vector4d x_ref;  
+
     // constants
     double lr, lf;   
     double sample_time;
     double input_cost_weight;
-    
+    int debug_level_ = 0;
     // MPC Computation Result
     Result<Tnu> nlmpc_step_result;
 

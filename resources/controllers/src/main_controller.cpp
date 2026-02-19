@@ -350,6 +350,7 @@ int main()
   PipeVectorWriter            u_writer(sim_dir +        "u_c++_to_py");
   PipeJsonWriter       metadata_writer(sim_dir + "metadata_c++_to_py");
 
+
   // Readers
   StatusReader     status_reader(sim_dir +  "status_py_to_c++");
   PipeIntReader         k_reader(sim_dir +       "k_py_to_c++");
@@ -579,6 +580,7 @@ int main()
     u_writer.write(                      "u", i, u);
     metadata_writer.write(metadata_json);
 
+    
     delays_reader.read("t_delay", t_delay_prev);
 
     PRINT("controller mapped x = " << modelX << " to " << u)
@@ -602,6 +604,9 @@ int main()
   if (global_debug_levels.debug_scarab_level >= 1) {
     PRINT_WITH_FILE_LOCATION("Finished looping through " << i << " time steps. Closing files...")
   }
+
+   
+
 
   // Close writers.
   u_writer.close();

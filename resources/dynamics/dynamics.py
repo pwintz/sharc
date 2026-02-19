@@ -36,7 +36,7 @@ class CarDynamics(OdeDynamics):
 
         dvdt = a
 
-        dpsidt = (v/self.lr) * sin(b)
+        dpsidt = (v/self.lr) * math.sin(b)
 
         dxdt = np.array([[dxposdt], [dyposdt], [dvdt], [dpsidt]])
 
