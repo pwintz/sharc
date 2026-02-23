@@ -1,0 +1,190 @@
+# File         : PARAMS.kaby_lake_debug
+# Date         : 2025-11-04
+# Description  : Kaby Lake Configuration (Lightweight / Stable for SHARC)
+#
+# Based on the official PARAMS.kaby_lake, tuned for low resource use:
+#   - Reduced cache and queue sizes
+#   - Disabled prefetchers
+#   - Limited instruction count
+#   - Lower issue/retire width
+#   - Keeps full structure for Scarab compatibility
+#
+# Typical runtime memory < 2GB per core.
+
+############################################################
+## Simulation Parameters
+############################################################
+--mode                          full
+--model                         cmp
+--sim_limit                     none
+--inst_limit                    10000000            # was 1e9, limit simulation length
+
+############################################################
+## Core Parameters
+############################################################
+
+# Length of each chip cycle in femtosecond (10^-15 sec).
+--chip_cycle_time               100000000
+
+# This line helps avoid FDIP crashes.
+--fdip_enable                   0
+
+### Fetch Stage
+--fetch_off_path_ops            1
+--fetch_across_cache_lines      1
+--fetch_break_on_taken          1
+--fetch_taken_bubble_cycles     0
+
+#### ICache
+--icache_size                   16384               # 16 KB (was 32 KB)
+--icache_assoc                  2
+--icache_line_size              64
+
+### Branch Predictor
+--extra_recovery_cycles         0
+--extra_redirect_cycles         0
+--cfs_per_cycle                 6
+--bp_update_at_retire           0
+--update_bp_off_path            1
+--bp_mech                       tagescl
+
+#### BTB
+--btb_mech                      generic
+--btb_entries                   1024                # was 4096
+--btb_assoc                     4
+--btb_off_path_writes           1
+
+#### CRS
+--enable_crs                    1
+--crs_entries                   32
+--crs_realistic                 1
+
+### iBP
+--enable_ibp                    1
+--ibtb_mech                     tc_tagged
+--ibtb_off_path_writes          1
+--tc_entries                    1024                # was 4096
+--tc_assoc                      4
+
+### Decode Stage
+--decode_cycles                 5
+
+### Map Stage
+--map_cycles                    5
+
+### Issue Stage
+--issue_width                   3                   # was 6
+--rs_fill_width                 0
+--rs_sizes                      48                  # was 97
+--rs_connections                0
+--fu_types                      0 0 0 0 0 0 0 0
+
+### Exec Stage
+# No major changes
+
+### DCache
+--dcache_size                   16384               # 16 KB (was 32 KB)
+--dcache_read_ports             2
+--dcache_write_ports            1
+--dcache_banks                  1
+--dcache_assoc                  2                   # was 4
+--dcache_line_size              64
+
+### Reorder/Retire Stage
+--node_ret_width                3                   # was 6
+--node_table_size               128                 # was 224
+--stores_do_not_block_window    1
+--prefs_do_not_block_window     1
+
+############################################################
+## Uncore / Memory System
+############################################################
+
+### Mid-level cache
+--mlc_present                   0
+
+### LLC (Last Level Cache)
+--l1_size                       262144              # 256 KB (was 1 MB)
+--l1_banks                      1
+--l1_cycles                     18
+--l1_assoc                      4                   # was 8
+--l1_line_size                  64
+--l1_interleave_factor          64
+
+### Prefetcher (disabled for stability)
+--pref_framework_on             0                   # was 1
+--pref_stream_on                0                   # was 1
+--pref_train_on_pref_misses     0
+--pref_oracle_train             0
+--pref_ul1req_queue_overwrite_on_full 1
+--stream_length                 64
+--stream_prefetch_n             4
+--stream_start_dis              1
+--stream_train_num              4
+--stream_create_on_dc_miss      0
+--stream_create_on_l1_miss      1
+--pref_throttlefb_on            0
+--mem_req_buffer_pref_watermark 2
+--promote_to_higher_priority_mem_req_type 1
+
+### Memory
+--addr_translation              random
+--mem_priority_ifetch           0
+--mem_priority_dfetch           1
+--mem_priority_dstore           2
+--mem_priority_iprf             3
+--mem_priority_dprf             4
+--mem_priority_wb               5
+--mem_priority_wb_nodirty       5
+--mem_req_buffer_entries        16                  # was 32
+--va_page_size_bytes            4096
+--bus_width_in_bytes            8
+
+### DRAM / Ramulator (lightweight)
+--ramulator_standard            DDR4
+--ramulator_speed               DDR4_2400R
+--ramulator_org                 DDR4_8Gb_x8
+--ramulator_channels            1
+--ramulator_ranks               1
+--ramulator_bankgroups          2                   # was 4
+--ramulator_banks               2                   # was 4
+--ramulator_chip_width          8
+--ramulator_rows                32768               # was 65536
+--ramulator_cols                512                 # was 1024
+--ramulator_scheduling_policy   FRFCFS_Cap
+--ramulator_readq_entries       16
+--ramulator_writeq_entries      16
+--ramulator_record_cmd_trace    FALSE
+--ramulator_print_cmd_trace     FALSE
+--ramulator_tCK                 833333
+--ramulator_tCL                 16
+--ramulator_tCCD                6
+--ramulator_tCWL                12
+--ramulator_tBL                 4
+--ramulator_tRP                 16
+--ramulator_tRCD                16
+--ramulator_tRAS                39
+--dram_tech_in_nm               32
+
+############################################################
+## Debugging and Output
+############################################################
+--debug_inst_start              0
+--debug_inst_stop               -1
+--debug_cycle_start             0
+--debug_cycle_stop              -1
+
+--dump_params                   1
+--dump_stats                    0                   # disable detailed stat files
+--dump_trace                    0                   # disable traces
+
+############################################################
+## Miscellaneous Stability Flags
+############################################################
+--set_off_path_confirmed        1
+--fetch_off_path_ops            1
+--order_beyond_bus              1
+--mem_ooo_stores                1
+--mem_obey_store_dep            1
+--fdip_enable                   0
+--pref_framework_on             0

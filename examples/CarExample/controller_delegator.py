@@ -14,8 +14,7 @@ from sharc.controller_delegator_base import CmakeControllerExecutableProvider
 
 class ControllerExecutableProvider(CmakeControllerExecutableProvider):
 
-  def get_controller_executable(self, build_config: dict) -> str:
-    import os, shutil, subprocess
+  def get_controller_executable(self, build_config:dict) -> str:
 
     simulation_options          = build_config["Simulation Options"]
     use_parallel_simulation     = simulation_options["parallel_scarab_simulation"]
@@ -27,44 +26,40 @@ class ControllerExecutableProvider(CmakeControllerExecutableProvider):
     exogenous_input_dimension   = build_config["system_parameters"]["exogenous_input_dimension"]
     output_dimension            = build_config["system_parameters"]["output_dimension"]
 
+    # Construct the base executable name, given the system and simulation options.
     executable_name = f"main_controller_{prediction_horizon}_{control_horizon}"
+
+    # We use DynamoRio only if we are using the parallelized scheme with real delays.
     use_dynamorio = use_parallel_simulation and not use_fake_delays
     if use_dynamorio:
-        executable_name += "_dynamorio"
+      executable_name += "_dynamorio"
 
     executable_path = os.path.join(self.build_dir, executable_name)
 
-    # Detect if we have build tools (CMake + make or Ninja)
-    has_cmake = shutil.which("cmake") is not None
-    has_make = shutil.which("make") or shutil.which("ninja")
+    cmake_arguments_from_config = [
+                f"-DPREDICTION_HORIZON={prediction_horizon}", 
+                f"-DCONTROL_HORIZON={control_horizon}",
+                f"-DTNX={state_dimension}",
+                f"-DTNU={input_dimension}",
+                f"-DTNDU={exogenous_input_dimension}",
+                f"-DTNY={output_dimension}",
+              ]
 
-    if not (has_cmake and has_make):
-        # We're probably inside the Apptainer — skip build
-        if os.path.exists(executable_path):
-            print(f"✅ Found prebuilt controller binary: {executable_path}")
-            print("⚙️  Skipping CMake rebuild (no build tools available).")
-            return executable_path
-        else:
-            raise FileNotFoundError(
-                f"❌ No build tools found and no prebuilt binary at {executable_path}.\n"
-                f"Please compile it on the host first (outside Apptainer):\n"
-                f"  cd examples/CarExample/build && cmake -DCMAKE_BUILD_TYPE=Debug .. && make -j"
-            )
+    if use_dynamorio:
+      cmake_arguments_from_config += [f"-DUSE_DYNAMORIO=ON"]
+    else:
+      cmake_arguments_from_config += [f"-DUSE_DYNAMORIO=OFF"]
 
-    # Otherwise, run normal build flow (host environment)
-    cmake_args = [
-        f"-DPREDICTION_HORIZON={prediction_horizon}",
-        f"-DCONTROL_HORIZON={control_horizon}",
-        f"-DTNX={state_dimension}",
-        f"-DTNU={input_dimension}",
-        f"-DTNDU={exogenous_input_dimension}",
-        f"-DTNY={output_dimension}",
-        f"-DUSE_DYNAMORIO={'ON' if use_dynamorio else 'OFF'}",
-    ]
-    cmake_generate_tree_args = ["-S", self.example_dir, "-B", self.build_dir] + cmake_args
+    if debug_levels.debug_build_level:
+      print("== Running CMake to generate build tree ==")
 
-    print(f"🛠️  Building controller via CMake in {self.build_dir}")
+    cmake_generate_tree_args = ["-S", f"{self.example_dir}", 
+                                "-B", f"{self.build_dir}"] + cmake_arguments_from_config
     self.cmake(cmake_generate_tree_args)
+    
+    if debug_levels.debug_build_level:
+      print("==== Running CMake to build controller executable ====")
+    # When we build the project, we don't need to pass the arguments from "build_config" to cmake, since they have already been incorporated into the build process during the prior call of cmake. 
     self.cmake_build(executable_path)
 
     return executable_path

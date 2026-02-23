@@ -9,7 +9,7 @@ using namespace mpc;
 // This code requires the following preprocessor variables to be defined:
 // * PREDICTION_HORIZON
 // * CONTROL_HORIZON
-// * TNX
+// * TNXF
 // * TNU
 // * TNDU
 // * TNY

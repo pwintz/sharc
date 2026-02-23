@@ -33,7 +33,7 @@
       "request": "launch",
       "program": "${file}",
       "console": "integratedTerminal",
-      "cwd": "${workspaceFolder}/libmpc_example"
+      "cwd": "${workspaceFolder}"
     },
     // {
     //   "name": "C/C++: g++-11 build and debug active file",

@@ -87,7 +87,9 @@ class CmakeControllerExecutableProvider(BaseControllerExecutableProvider):
     if debug_levels.debug_build_level == 0:
       cmake_cmd += ["--", "--quiet"]
 
-    jobs = os.cpu_count()  # Automatically set to the number of available CPU cores
+    # jobs = os.cpu_count()  # Automatically set to the number of available CPU cores
+    jobs = 2
+
     cmake_cmd += ["-j", str(jobs)]
 
     run_shell_cmd(cmake_cmd)
