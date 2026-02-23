@@ -220,7 +220,9 @@ class ScarabStatsReader:
     file_path = self.getStatsFilePath(k)
     while not os.path.exists(file_path):
       time.sleep(0.01)
-    time.sleep(0.1)
+    # Wait until the file is fully written (non-empty) instead of a fixed 0.1s sleep.
+    while os.path.getsize(file_path) == 0:
+      time.sleep(0.01)
 
   def readStatistic(self, k: int, stat_key: str): 
     file_path = self.getStatsFilePath(k)
@@ -260,7 +262,7 @@ class ExecutionDrivenScarabRunner:
 
   def __init__(self, sim_dir='.'):
     self.instruction_limit = int(1e9)
-    self.heartbeat_interval = int(1e6) # How often to print progress.
+    self.heartbeat_interval = int(1e8) # How often to print progress (increased from 1e6 to reduce I/O overhead).
     self.sim_dir         = os.path.abspath(sim_dir)
     self.params_src_file = os.path.join(self.sim_dir, 'PARAMS.generated')
     self.params_in_file  = os.path.join(self.sim_dir, 'PARAMS.in')

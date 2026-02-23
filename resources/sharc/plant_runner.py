@@ -110,7 +110,7 @@ def run(sim_dir: str, config_data: dict, dynamics: Dynamics, controller_interfac
       if debug_levels.debug_dynamics_level >= 1:
         time_step_series.printTimingData(f"time_step_series after calculating {time_step_series.n_time_steps} of {n_time_steps} control values")
 
-      writeJson(sim_dir + "simulation_data_incremental.json", time_step_series)
+      writeJson(sim_dir + "experiment_data_incremental.json", time_step_series)
 
       # Update values:
       u_before = u_after

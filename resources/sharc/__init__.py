@@ -485,7 +485,16 @@ class Simulation:
     computation_delay_provider = computation_delay_provider_factory(
                                             in_the_loop_delay_provider, self.simulation_dir, 
                                             sample_time, use_fake_delays)
-    
+
+    # In serial (non-parallel) mode the delay comes live from
+    # ScarabDelayProvider.get_delay(), so we apply delay_multiplier here
+    # by wrapping the provider.  (In parallel mode the multiplier is
+    # applied inside ParallelSimulationExecutor.postprocess_simulation_data.)
+    delay_multiplier = float(self.sim_config.get("delay_multiplier", 1))
+    if delay_multiplier != 1.0 and not self.sim_config["Simulation Options"]["parallel_scarab_simulation"]:
+      print(f"[delay_multiplier] Wrapping delay provider with {delay_multiplier}x multiplier (serial mode)")
+      computation_delay_provider = ScaledDelayProvider(computation_delay_provider, delay_multiplier)
+
     controller_interface = PipesControllerInterface(computation_delay_provider, self.simulation_dir)
 
     self.simulation_executor = getSimulationExecutor(
@@ -557,6 +566,7 @@ def run(example_dir:str, config_filename:str, fail_fast = False):
   
 def run_experiment_sequential(experiment_config, params_base: scarabizor.ParamsData) -> dict:
   print(f'Start of run_experiment_sequential(<{experiment_config["experiment_label"]}>)')
+  experiment_dir = experiment_config["experiment_dir"]
   simulation = Simulation.from_experiment_config_unbatched(experiment_config, params_base, n_time_steps=experiment_config["n_time_steps"])
   simulation.setup_files()
   simulation_data = simulation.run()
@@ -569,6 +579,12 @@ def run_experiment_sequential(experiment_config, params_base: scarabizor.ParamsD
                      "pending_computations": simulation_data.pending_computation,
                      "batches": None,
                      "config": experiment_config}
+
+  # Write the same experiment_data files that run_experiment_parallelized
+  # writes so the dashboard and post-processing tools can find them.
+  writeJson(experiment_dir + "/experiment_data_incremental.json", experiment_data, label="Incremental experiment data")
+  writeJson(experiment_dir + "/experiment_data.json", experiment_data, label="Experiment data")
+
   return experiment_data
 
 # class BatchStatus(Enum):
@@ -1172,6 +1188,18 @@ class ParallelSimulationExecutor(SimulationExecutor):
     using Scarab to get the computation times.
     """
     computation_delay_for_k_dict = self.trace_processor.get_all_computation_times()
+
+    # Optionally inflate the real Scarab computation times by a configurable
+    # multiplier.  This lets us test what happens when hardware is slower
+    # (some steps will exceed sample_time → missed computations → ZOH).
+    delay_multiplier = float(self.sim_config.get("delay_multiplier", 1))
+    if delay_multiplier != 1.0:
+      print(f"[delay_multiplier] Scaling Scarab computation delays by {delay_multiplier}x")
+      computation_delay_for_k_dict = {
+        k: delay * delay_multiplier
+        for k, delay in computation_delay_for_k_dict.items()
+      }
+
     simulation_data.overwrite_computation_times(computation_delay_for_k_dict)
     return simulation_data
 
@@ -1287,6 +1315,22 @@ def controller_interface_factory(controller_interface_selection, computation_del
     return controller_interface_selection
   else:
     raise ValueError(f'Unexpected controller_interface: {controller_interface_selection}')
+
+
+class ScaledDelayProvider(DelayProvider):
+  """Wraps any DelayProvider and multiplies the returned delay by a constant factor.
+  Used to artificially inflate computation delays for testing hardware-limited scenarios."""
+  def __init__(self, provider: DelayProvider, multiplier: float):
+    self.provider   = provider
+    self.multiplier = multiplier
+
+  def get_delay(self, k: int):
+    t_delay, metadata = self.provider.get_delay(k)
+    scaled   = t_delay * self.multiplier
+    metadata = dict(metadata)  # avoid mutating the original
+    metadata["delay_multiplier"]  = self.multiplier
+    metadata["unscaled_delay"]    = t_delay
+    return scaled, metadata
 
 
 def computation_delay_provider_factory(computation_delay_name: str, sim_dir, sample_time, use_fake_scarab) -> DelayProvider:
