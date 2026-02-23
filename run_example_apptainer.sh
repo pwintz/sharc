@@ -9,7 +9,7 @@ set -e  # Exit on error
 
 # Configuration
 IMAGE="sharc_latest.sif"
-EXAMPLE=${1:-"CarExample"}
+EXAMPLE=${1:-"acc_example"}
 CONFIG=${2:-"default.json"}
 
 # Check if image exists
@@ -35,15 +35,9 @@ echo "===================="
 echo ""
 
 # Run simulation
-# apptainer exec \
-#     --bind "$(pwd)/resources:/home/dcuser/resources" \
-#     --bind "$(pwd)/examples:/examples" \
-#     "$IMAGE" \
-#     bash -c "cd /examples/$EXAMPLE && sharc --config_filename $CONFIG"
-
 apptainer exec \
-    --bind "/global/scratch/users/tbrady1/sharc/examples:/examples" \
-    --bind "/global/scratch/users/tbrady1/sharc/resources:/home/dcuser/resources" \
+    --bind "$(pwd)/resources:/home/dcuser/resources" \
+    --bind "$(pwd)/examples:/examples" \
     "$IMAGE" \
     bash -c "cd /examples/$EXAMPLE && sharc --config_filename $CONFIG"
 
