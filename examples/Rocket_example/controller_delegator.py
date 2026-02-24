@@ -1,12 +1,10 @@
 """
 This module provides a function "get_controller_executable" for generating
-the controller executable and returning the controller executable, given the 
-example directory and expirement configuration values. 
+the controller executable and returning the controller executable, given the
+example directory and experiment configuration values.
 """
 
-import subprocess
 import os
-from sharc.utils import run_shell_cmd
 import sharc.debug_levels as debug_levels
 from sharc.controller_delegator_base import CmakeControllerExecutableProvider
 

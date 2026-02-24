@@ -1,4 +1,5 @@
 {
+    "==== Settings ====": "",
     "label": "base",
     "skip": false,
     "Simulation Options": {
@@ -35,7 +36,7 @@
       "debug_scarab_level":          0
     },
     "==== Model Parameters ====": "",
-      "system_parameters": {
+    "system_parameters": {
       "state_dimension": 2, 
       "input_dimension": 1,
       "exogenous_input_dimension": 2,
@@ -43,7 +44,7 @@
       "sample_time": 0.02,
       "x_names": ["h", "v"],
       "u_names": ["u"], 
-      "y_names": [], 
+      "y_names": ["h"], 
       "controller_type": "MPCRocket",
       "mass": 2,
       "g": 9.81,
@@ -80,11 +81,12 @@
     "Kd": 5.0,
     "target_height": 100.0
   },
-    "==== Hardware Configuration ===": "",
+    "==== Hardware Configuration ====": "",
     "PARAMS_base_file":  "PARAMS.base",
     "PARAMS_patch_values": {
         "chip_cycle_time": 60000,
         "l1_size": 32768,
         "icache_size": 32768,
         "dcache_size": 32768
-    }}
+    }
+}

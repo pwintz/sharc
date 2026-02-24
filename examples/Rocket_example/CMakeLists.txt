@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(CartPoleExample)
+project(RocketExample)
 
 # Create arguments for PREDICTION_HORIZON and CONTROL_HORIZON, with default values defined.
 # To define values from the command line, use this:
@@ -221,4 +221,3 @@ endfunction()
 
 # Link static clients to the original executable
 link_dynamoRIO_clients(${EXECUTABLE_NAME})
-

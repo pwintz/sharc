@@ -1,40 +1,79 @@
-import numpy as np
-import copy
-import os
-import os
+import argparse
 import json
-import numpy as np
-import matplotlib.pyplot as plt
+import os
+from itertools import cycle
 from math import nan
-from typing import Union
-from typing import List, Set, Dict, Tuple
+from typing import Dict, List, Union
 
-
+import matplotlib.pyplot as plt
+import numpy as np
 
 
 def main():
-    
-    filename = input("What is the file name(Its the date and time)")
-    
-    rocket_example_dir = os.path.abspath('.') + '/examples/Rocket_example/experiments'
-    experiment_dir = os.path.join(rocket_example_dir, filename)
-    assertFileExists(experiment_dir)
+    parser = argparse.ArgumentParser(
+        description="Generate plots for a Rocket example experiment."
+    )
+    parser.add_argument(
+        "experiment",
+        nargs="?",
+        default="latest",
+        help=(
+            "Experiment folder name, absolute path, or path to an experiment directory. "
+            "Defaults to 'latest'."
+        ),
+    )
+    args = parser.parse_args()
 
-    #paths
+    experiment_dir = resolve_experiment_dir(args.experiment)
+
     incremental_path = os.path.join(experiment_dir, "experiment_list_data_incremental.json")
     final_path = os.path.join(experiment_dir, "experiment_list_data.json")
     out_dir = os.path.join(experiment_dir, "images")
-    os.makedirs(out_dir, exist_ok = True)
-    
-    #read data
-    experiment_results = readJson(incremental_path)
-    results = [(val["experiment config"]["label"], val) for val in experiment_results.values()]
+    os.makedirs(out_dir, exist_ok=True)
 
-    #plot and save
-    plt = plot_experiment_list(results)
-    image_save_path = os.path.join(out_dir + '/plots.png')
-    plt.savefig(image_save_path)
-    print("Saved file to ", image_save_path)
+    experiment_results = {}
+    if os.path.exists(incremental_path):
+        experiment_results = readJson(incremental_path)
+    if not experiment_results and os.path.exists(final_path):
+        print("Incremental results missing/empty, using final results file.")
+        experiment_results = readJson(final_path)
+    if not experiment_results:
+        raise RuntimeError(
+            "No experiment results found in:\n"
+            f"  {incremental_path}\n"
+            f"  {final_path}"
+        )
+
+    results = [(val["experiment config"]["label"], val) for val in experiment_results.values()]
+    if not results:
+        raise RuntimeError("Experiment results are empty.")
+
+    plot_module = plot_experiment_list(results)
+    image_save_path = os.path.join(out_dir, "rocket_plots.png")
+    plot_module.savefig(image_save_path)
+    print(f"Saved file to {image_save_path}")
+
+
+def resolve_experiment_dir(experiment_arg: str) -> str:
+    example_dir = os.path.dirname(os.path.abspath(__file__))
+    experiments_dir = os.path.join(example_dir, "experiments")
+
+    candidate_paths = []
+    if os.path.isabs(experiment_arg):
+        candidate_paths.append(experiment_arg)
+    else:
+        candidate_paths.append(os.path.abspath(experiment_arg))
+        candidate_paths.append(os.path.join(example_dir, experiment_arg))
+        candidate_paths.append(os.path.join(experiments_dir, experiment_arg))
+
+    for path in candidate_paths:
+        if os.path.isdir(path):
+            return path
+
+    raise IOError(
+        "Could not find experiment directory from argument "
+        f"'{experiment_arg}'. Tried:\n  " + "\n  ".join(candidate_paths)
+    )
 
 
 def assertFileExists(path:str, help_msg=None):
@@ -51,12 +90,13 @@ def readJson(filename: str) -> Union[Dict,List]:
   assertFileExists(filename)
   try:
     with open(filename, 'r') as json_file:
-      json_data = json.load(json_file)
-      return json_data
+      return json.load(json_file)
   except json.decoder.JSONDecodeError as err:
-    raise ValueError(f'An error occured while parsing {filename}.') from err
+    raise ValueError(f'An error occurred while parsing {filename}.') from err
+
+
 def plot_experiment_list(experiment_list):
-    colors = iter(plt.cm.tab10.colors)
+    colors = cycle(plt.cm.tab10.colors)
     n_axs = 4
     fig, axs = plt.subplots(n_axs, 1, figsize=(10, 13), sharex=True)
 
@@ -137,16 +177,13 @@ def plot_experiment_result(result_data, velocity_ax, height_ax, delay_ax, contro
     h = x[:, 0]
     v = x[:, 1]
 
-    print("x[0]:", result_data["x"][0])
-
-
     # Plot states
     velocity_ax.plot(t, v, c=color)
     height_ax.plot(t, h, c=color)
 
     # Plot delays
     pc_t, pc_delay = [], []
-    for pc in result_data["pending_computations"]:
+    for pc in result_data.get("pending_computations", []):
         if pc:
             t_start = float(pc["t_start"])
             delay = float(pc["delay"])
