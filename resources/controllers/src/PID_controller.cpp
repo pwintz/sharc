@@ -42,15 +42,17 @@ void PID_controller::setup(const nlohmann::json &json_data){
     I_lon = sp.at("PID_options").at("lon").at("I").get<double>();
     D_lon = sp.at("PID_options").at("lon").at("D").get<double>();
 
-    dt = sp.value("dt", 0.03);
-
     max_throttle = sp.value("max_throttle", 0.75);
     max_brake    = sp.value("max_brake", 0.3);
     max_steer    = sp.value("max_steer", 0.8);
 
-    lon_error_buf.clear();
-    lat_error_buf.clear();
-    last_steer = 0.0;
+    lon_integral   = 0.0;
+    lon_prev_error = 0.0;
+    lon_has_prev   = false;
+    lat_integral   = 0.0;
+    lat_prev_error = 0.0;
+    lat_has_prev   = false;
+    last_steer     = 0.0;
     
     // Initialize control for warm start
     control.setZero(); // 1×1
@@ -64,47 +66,39 @@ double PID_controller::pidLongitudinal(double target_speed,
                                          double current_speed)
 {
     double error = target_speed - current_speed;
-    lon_error_buf.push_back(error);
 
-    if (lon_error_buf.size() > 10)
-        lon_error_buf.pop_front();
+    // Running integral (trapezoidal rule)
+    lon_integral += error * sample_time;
 
-    double de = 0.0, ie = 0.0;
-    if (lon_error_buf.size() >= 2) {
-        de = (lon_error_buf.back()
-            - lon_error_buf[lon_error_buf.size()-2]) / dt;
-
-        for (double e : lon_error_buf)
-            ie += e;
-        ie *= dt;
-    }
+    // Derivative (backward difference)
+    double de = 0.0;
+    if (lon_has_prev)
+        de = (error - lon_prev_error) / sample_time;
+    lon_prev_error = error;
+    lon_has_prev   = true;
 
     double u = P_lon * error
-             + D_lon * de
-             + I_lon * ie;
+             + I_lon * lon_integral
+             + D_lon * de;
 
     return std::clamp(u, -1.0, 1.0);
 }
 
 double PID_controller::pidLateral(double heading_error)
 {
-    lat_error_buf.push_back(heading_error);
-    if (lat_error_buf.size() > 10)
-        lat_error_buf.pop_front();
+    // Running integral (trapezoidal rule)
+    lat_integral += heading_error * sample_time;
 
-    double de = 0.0, ie = 0.0;
-    if (lat_error_buf.size() >= 2) {
-        de = (lat_error_buf.back()
-            - lat_error_buf[lat_error_buf.size()-2]) / dt;
-
-        for (double e : lat_error_buf)
-            ie += e;
-        ie *= dt;
-    }
+    // Derivative (backward difference)
+    double de = 0.0;
+    if (lat_has_prev)
+        de = (heading_error - lat_prev_error) / sample_time;
+    lat_prev_error = heading_error;
+    lat_has_prev   = true;
 
     double u = P_lat * heading_error
-             + D_lat * de
-             + I_lat * ie;
+             + I_lat * lat_integral
+             + D_lat * de;
 
     return std::clamp(u, -1.0, 1.0);
 }

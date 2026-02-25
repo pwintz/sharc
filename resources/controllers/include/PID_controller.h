@@ -2,7 +2,6 @@
 
 #include "controller.h"
 #include "nlohmann/json.hpp"
-#include <deque>
 #include <algorithm>
 
 
@@ -19,21 +18,21 @@ private:
     double sample_time  = 0.1;
     double target_speed = 60;
 
-    double dt           = 0.03;
-
     // PID controller 
     double last_steer = 0.0;
 
     int idx_x, idx_y, idx_yaw, idx_speed;
     int idx_wp_x, idx_wp_y, idx_target_speed;
-    // // ---------- Longitudinal PID ----------
-    // double kp_lon, ki_lon, kd_lon;
-    // double dt;
-    std::deque<double> lon_error_buf;
 
-    // // ---------- Lateral PID ----------
-    // double kp_lat, ki_lat, kd_lat;
-    std::deque<double> lat_error_buf;
+    // ---------- Longitudinal PID ----------
+    double lon_integral  = 0.0;
+    double lon_prev_error = 0.0;
+    bool   lon_has_prev   = false;
+
+    // ---------- Lateral PID ----------
+    double lat_integral  = 0.0;
+    double lat_prev_error = 0.0;
+    bool   lat_has_prev   = false;
 
     // ---------- Limits ----------
     double max_throttle;
