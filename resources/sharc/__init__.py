@@ -2,6 +2,7 @@ from __future__ import print_function
 
 import os
 import sys
+import subprocess
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 import copy
@@ -540,6 +541,43 @@ def load_controller_delegator(example_dir: str):
   controller_executable_provider = controller_delegator_module.ControllerExecutableProvider(example_dir)
 
 
+def _launch_dashboard(example_dir: str):
+  """Launch the live dashboard as a background subprocess.
+
+  Returns the Popen handle on success, or None if the dashboard
+  could not be started (e.g. matplotlib not installed).
+  """
+  dashboard_script = os.path.join(os.path.dirname(__file__), "dashboard.py")
+  if not os.path.isfile(dashboard_script):
+    return None
+  try:
+    proc = subprocess.Popen(
+      [sys.executable, dashboard_script, example_dir],
+      stdout=subprocess.DEVNULL,
+      stderr=subprocess.DEVNULL,
+    )
+    print(f"[sharc] Dashboard launched (pid {proc.pid}).")
+    return proc
+  except Exception as e:
+    print(f"[sharc] Could not start dashboard: {e}")
+    return None
+
+
+def _stop_dashboard(proc):
+  """Terminate the dashboard subprocess if it is still running."""
+  if proc is None:
+    return
+  try:
+    proc.terminate()
+    proc.wait(timeout=3)
+  except Exception:
+    try:
+      proc.kill()
+    except Exception:
+      pass
+  print("[sharc] Dashboard stopped.")
+
+
 def run(example_dir:str, config_filename:str, fail_fast = False):
   """
   This function is the entry point for running sharc 
@@ -560,8 +598,13 @@ def run(example_dir:str, config_filename:str, fail_fast = False):
   debug_levels.set_from_dictionary(experiment_list.base_config["==== Debgugging Levels ===="])
 
   load_controller_delegator(example_dir)
-  
-  experiment_list.run_all()
+
+  # Launch the live dashboard in the background.
+  dashboard_proc = _launch_dashboard(example_dir)
+  try:
+    experiment_list.run_all()
+  finally:
+    _stop_dashboard(dashboard_proc)
   return experiment_list
   
 def run_experiment_sequential(experiment_config, params_base: scarabizor.ParamsData) -> dict:
