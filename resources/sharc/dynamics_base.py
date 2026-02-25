@@ -20,6 +20,15 @@ class Dynamics(ABC):
     def setup_system(self):
       pass
 
+    def teardown(self):
+      """Release resources acquired in setup_system().
+
+      Called once when the experiment ends.  Override in subclasses that
+      allocate heavyweight resources (e.g. a simulator connection).
+      The default implementation is a no-op.
+      """
+      pass
+
     @abstractmethod
     def evolve_state(self, t0: float, x0: np.ndarray, u: np.ndarray, w: np.ndarray, tf: float):
         """
