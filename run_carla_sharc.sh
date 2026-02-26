@@ -17,7 +17,7 @@ fi
 # Configuration
 IMAGE_NAME="carla-sharc"
 CONTAINER_NAME="carla-sharc"
-WORKSPACE_DIR="${1:-$(pwd)/workspace}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Colors
 GREEN='\033[0;32m'
@@ -28,10 +28,6 @@ NC='\033[0m' # No Color
 echo -e "${BLUE}═══════════════════════════════════════════════════════${NC}"
 echo -e "${BLUE}  CARLA + SHARC Docker Environment${NC}"
 echo -e "${BLUE}═══════════════════════════════════════════════════════${NC}"
-
-# Create workspace if it doesn't exist
-mkdir -p "$WORKSPACE_DIR"
-echo -e "${GREEN}✓${NC} Workspace: $WORKSPACE_DIR"
 
 # Allow X11 forwarding
 if [ -z "$DISPLAY" ]; then
@@ -104,6 +100,7 @@ docker run -it \
     -e __NV_PRIME_RENDER_OFFLOAD=1 \
     -e __GLX_VENDOR_LIBRARY_NAME=nvidia \
     -v /tmp/.X11-unix:/tmp/.X11-unix \
-    -v "$WORKSPACE_DIR":/home/workspace/my_files \
+    -v "$SCRIPT_DIR/resources":/home/workspace/sharc/resources \
+    -v "$SCRIPT_DIR/examples":/home/workspace/sharc/examples \
     "$IMAGE_NAME" 
 
