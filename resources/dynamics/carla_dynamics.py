@@ -81,6 +81,20 @@ class CarlaDynamics(Dynamics):
         self.client.set_timeout(10.0)
         self.world = self.client.get_world()
 
+        # ---- Destroy any leftover actors from a previous session ---------- #
+        # This handles crashes/SIGKILL where teardown() never ran.
+        existing = self.world.get_actors()
+        stale_ids = [
+            a.id for a in existing
+            if a.type_id.startswith(('vehicle.', 'sensor.', 'walker.', 'controller.'))
+        ]
+        if stale_ids:
+            self.client.apply_batch_sync(
+                [carla.command.DestroyActor(aid) for aid in stale_ids], True
+            )
+            print(f"[CarlaDynamics] Removed {len(stale_ids)} leftover actor(s) from previous session.")
+            self.world.tick()
+
         # Synchronous mode
         settings = self.world.get_settings()
         settings.synchronous_mode = True
