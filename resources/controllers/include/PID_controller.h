@@ -3,6 +3,8 @@
 #include "controller.h"
 #include "nlohmann/json.hpp"
 #include <algorithm>
+#include <fstream>
+#include <string>
 
 
 class PID_controller : public Controller {
@@ -38,6 +40,12 @@ private:
     double max_throttle;
     double max_brake;
     double max_steer;
+
+    // ---------- Cross-batch state persistence ----------
+    std::string experiment_dir;  // path to the experiment dir (parent of all batch dirs)
+    std::string pid_state_file;  // experiment_dir/pid_state.json
+    void save_pid_state() const;
+    void load_pid_state();
 
     // ---------- Helpers ----------
     double pidLongitudinal(double target_speed, double current_speed);

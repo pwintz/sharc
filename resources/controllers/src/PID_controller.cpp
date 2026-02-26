@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <limits>
 #include <iostream>
+#include <fstream>
 #include "nlohmann/json.hpp"
 #include <debug_levels.hpp>
 #include <Eigen/Dense>
@@ -53,6 +54,16 @@ void PID_controller::setup(const nlohmann::json &json_data){
     lat_prev_error = 0.0;
     lat_has_prev   = false;
     last_steer     = 0.0;
+
+    // ---- Cross-batch state persistence ------------------------------- //
+    // experiment_dir is the parent directory shared across all batches.
+    // If a pid_state.json file exists there (written by the previous batch),
+    // we restore the integrator state so the PID behaves as one continuous run.
+    experiment_dir  = json_data.value("experiment_dir", "");
+    pid_state_file  = experiment_dir.empty() ? "" : experiment_dir + "/pid_state.json";
+    if (!pid_state_file.empty())
+        load_pid_state();
+    // ------------------------------------------------------------------ //
     
     // Initialize control for warm start
     control.setZero(); // 1×1
@@ -143,6 +154,56 @@ double limitSteerRate(double steer, double last)
     return steer;
 }
 
+// ---------------------------------------------------------------------------
+// Cross-batch PID state persistence
+// ---------------------------------------------------------------------------
+
+void PID_controller::save_pid_state() const
+{
+    nlohmann::json state;
+    state["lon_integral"]   = lon_integral;
+    state["lon_prev_error"] = lon_prev_error;
+    state["lon_has_prev"]   = lon_has_prev;
+    state["lat_integral"]   = lat_integral;
+    state["lat_prev_error"] = lat_prev_error;
+    state["lat_has_prev"]   = lat_has_prev;
+    state["last_steer"]     = last_steer;
+
+    std::ofstream f(pid_state_file);
+    if (f.is_open()) {
+        f << state.dump(2);
+        std::cout << "[PID] Saved integrator state to " << pid_state_file << std::endl;
+    } else {
+        std::cerr << "[PID] WARNING: could not write pid_state.json to " << pid_state_file << std::endl;
+    }
+}
+
+void PID_controller::load_pid_state()
+{
+    std::ifstream f(pid_state_file);
+    if (!f.is_open()) {
+        std::cout << "[PID] No prior integrator state found — starting fresh." << std::endl;
+        return;
+    }
+
+    try {
+        nlohmann::json state;
+        f >> state;
+        lon_integral   = state.value("lon_integral",   0.0);
+        lon_prev_error = state.value("lon_prev_error", 0.0);
+        lon_has_prev   = state.value("lon_has_prev",   false);
+        lat_integral   = state.value("lat_integral",   0.0);
+        lat_prev_error = state.value("lat_prev_error", 0.0);
+        lat_has_prev   = state.value("lat_has_prev",   false);
+        last_steer     = state.value("last_steer",     0.0);
+        std::cout << "[PID] Restored integrator state from " << pid_state_file
+                  << " (lon_integral=" << lon_integral << ")" << std::endl;
+    } catch (const std::exception &e) {
+        std::cerr << "[PID] WARNING: failed to parse pid_state.json: " << e.what()
+                  << " — starting fresh." << std::endl;
+    }
+}
+
 void PID_controller::calculateControl(int k, double t, const xVec &x, const wVec &w){
     // Calculate the control input, feel free to use internal state and last control as below
     // control = lmpc.step(state, control).cmd;
@@ -191,6 +252,10 @@ void PID_controller::calculateControl(int k, double t, const xVec &x, const wVec
     latest_metadata["k"] = k;
     latest_metadata["t"] = t;
     latest_metadata["controller"] = "PID_Controller";
+
+    // Persist integrator + derivative state so the next batch starts warm.
+    if (!pid_state_file.empty())
+        save_pid_state();
 
     std::cout << "end calculation" << std::endl;
 }
