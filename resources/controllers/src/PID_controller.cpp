@@ -70,7 +70,9 @@ void PID_controller::setup(const nlohmann::json &json_data){
     if (global_debug_levels.debug_program_flow_level >= 2) {
         PRINT_WITH_FILE_LOCATION("End of PID_controller::setup()")
     }
-    std::cout << "setup done" << std::endl;
+    // std::cout << "setup done" << std::endl;
+    latest_metadata = nlohmann::json::object();
+    latest_metadata["controller"] = "PID_Controller";
 }
 
 double PID_controller::pidLongitudinal(double target_speed,
@@ -207,10 +209,12 @@ void PID_controller::load_pid_state()
 void PID_controller::calculateControl(int k, double t, const xVec &x, const wVec &w){
     // Calculate the control input, feel free to use internal state and last control as below
     // control = lmpc.step(state, control).cmd;
-    std::cout << "start calculation" << std::endl;
-    state = x;
-    xVec States_X = x;
-    printVector("X vals", States_X);
+    if (global_debug_levels.debug_program_flow_level >= 2) {
+        std::cout << "start calculation" << std::endl;
+        state = x;
+        xVec States_X = x;
+        printVector("X vals", States_X);
+    }
 
     double ego_x = x(0);
     double ego_y = x(1);
@@ -222,11 +226,12 @@ void PID_controller::calculateControl(int k, double t, const xVec &x, const wVec
 
     double accel = pidLongitudinal(target_speed, speed);
 
-    std::cout << "target_speed loaded = " << target_speed << std::endl;
-
-    std::cout << "speed=" << speed
-          << " target=" << target_speed
-          << " accel=" << accel << std::endl;
+    if (global_debug_levels.debug_program_flow_level >= 2) {
+        std::cout << "target_speed loaded = " << target_speed << std::endl;
+        std::cout << "speed=" << speed
+            << " target=" << target_speed
+            << " accel=" << accel << std::endl;
+    }
 
     double heading_error = computeHeadingError(ego_x, ego_y, yaw, wp_x, wp_y);
 
@@ -246,18 +251,15 @@ void PID_controller::calculateControl(int k, double t, const xVec &x, const wVec
     // for testing purpose for now, set control to constant values
     //control.setConstant(1.0);
 
-    // set latest metadata
-    //latest_metadata = nlohmann::json::object();
-    latest_metadata.clear();
-    latest_metadata["k"] = k;
-    latest_metadata["t"] = t;
-    latest_metadata["controller"] = "PID_Controller";
-
     // Persist integrator + derivative state so the next batch starts warm.
     if (!pid_state_file.empty())
         save_pid_state();
 
-    std::cout << "end calculation" << std::endl;
+    // set latest metadata
+    //latest_metadata = nlohmann::json::object();
+    if (global_debug_levels.debug_program_flow_level >= 2){
+        std::cout << "end calculation" << std::endl;
+    }
 }
 // PID functions
 

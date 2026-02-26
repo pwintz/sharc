@@ -566,7 +566,9 @@ int main()
 
     u = controller->getLatestControl();
     metadata_json = controller->getLatestMetadata();
-    PRINT_WITH_FILE_LOCATION("Metadata: " << metadata_json)
+    if (global_debug_levels.debug_program_flow_level >= 2){
+      PRINT_WITH_FILE_LOCATION("Metadata: " << metadata_json)
+    }
     
     // OptSequence has three properties: state, input, and output. 
     // Each predicted time step is stored in one row.
@@ -578,7 +580,9 @@ int main()
 
     delays_reader.read("t_delay", t_delay_prev);
 
-    PRINT("controller mapped x = " << modelX << " to " << u)
+     if (global_debug_levels.debug_program_flow_level >= 2){
+      PRINT("controller mapped x = " << modelX << " to " << u)
+    }
     
     if (global_debug_levels.debug_interfile_communication_level >= 1) 
     {
