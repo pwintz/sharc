@@ -1,0 +1,27 @@
+# CARLA Deterministic Replay Configuration
+
+# Simulation
+map: "Town01"              # CARLA map
+duration: 60.0             # Recording duration (seconds)
+seed: 42                   # Random seed
+fixed_delta: 0.05          # Timestep (0.05 = 20Hz)
+max_substeps: 10           # Physics substeps (16 is max valid value) # can try varying param
+settling_ticks: 1         # Physics settling ticks (40 for better stability) # can try varying param
+
+# Spawning
+ego_spawn_index: 30        # Ego vehicle spawn point
+npc_spawn_start: 10        # NPC spawn starting point
+spawn_z_offset: 0.5        # Height offset for spawning ego and NPCs (meters)
+num_npcs: 20               # Number of NPC vehicles
+eval_npc_indices: [1, 2, 3]   # NPC indices to evaluate for error metrics
+npc_replay_mode: "teleport"   # "physics" = replay recorded controls, "teleport" = set transforms directly
+
+# PID Controller
+pid_target_speed: 20.0     # Target speed (km/h)
+pid_kp: 1.0                # Proportional gain
+pid_kd: 0.1                # Derivative gain
+pid_lookahead: 5.0         # Lookahead distance (meters)
+
+# Visualization
+follow_camera: true        # Spectator camera follows ego during recording AND replay
+

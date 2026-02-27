@@ -20,7 +20,7 @@ echo ""
 REPO_NAME="pwintz"
 
 # Name of the Docker image
-IMAGE_NAME="${REPO_NAME}/sharc:latest"
+IMAGE_NAME="carla-sharc:latest"
 
 push_docker_image() {
   echo "Pushing the SHARC Docker image..."

@@ -1,395 +1,427 @@
-# Configurations
-ARG USERNAME=dcuser
+#═══════════════════════════════════════════════════════════════════════════════
+#  CARLA 0.9.16 + SHARC Combined Dockerfile
+#═══════════════════════════════════════════════════════════════════════════════
+#  Base:    carlasim/carla:0.9.16 (Ubuntu 20.04 + CARLA server)
+#  Python:  Conda environment "carla" with Python 3.10
+#  User:    admin (full sudo access)
+#═══════════════════════════════════════════════════════════════════════════════
+
+FROM carlasim/carla:0.9.16
+
+#───────────────────────────────────────────────────────────────────────────────
+#  Build Arguments
+#───────────────────────────────────────────────────────────────────────────────
+ARG USERNAME=admin
 ARG TIME_ZONE=America/Los_Angeles
+ARG USER_ID=1000
+ARG GROUP_ID=1000
 
-# By default, we set WORKSPACE_ROOT to be the user's home directory, but 
-# if running using dev-containers, this should be set in .devcontainer/devcontainer.json
-# to be the workspaceMount target path. 
-ARG WORKSPACE_ROOT=/home/$USERNAME
+# Directory structure
+ARG WORKSPACE_ROOT=/home/workspace
+ARG TOOLS_DIR=/opt/tools
+ARG RESOURCES_DIR=$WORKSPACE_ROOT/sharc/resources
+ARG EXAMPLES_DIR=$WORKSPACE_ROOT/sharc/examples
 
-# The "resources" directory contains files that were developed as a part of SHARC. 
-# For development, this directory should persist after a container is closed.
-ARG RESOURCES_DIR=$WORKSPACE_ROOT/resources
-
-ARG EXAMPLES_DIR=$WORKSPACE_ROOT/examples
-
+# Tool versions
 ARG PIN_NAME=pin-3.15-98253-gb56e429b1-gcc-linux
-ARG PIN_ROOT=/$PIN_NAME
-ARG SCARAB_ROOT=/scarab
-
 ARG DYNAMORIO_VERSION=DynamoRIO-Linux-9.0.19314
-ARG DYNAMORIO_HOME=/${DYNAMORIO_VERSION}
+ARG SCARAB_COMMIT=3b38da01acf86ce35bc1785c97d638e29eab0647
 
-ARG LIBMPC_DIR=$RESOURCES_DIR/libmpc
+#───────────────────────────────────────────────────────────────────────────────
+#  Environment Variables
+#───────────────────────────────────────────────────────────────────────────────
+ENV TZ=$TIME_ZONE
+ENV DEBIAN_FRONTEND=noninteractive
 
-##################################
-############## BASE ##############
-##################################
-FROM ubuntu:20.04 AS apt-base
-ARG USERNAME
-ARG TIME_ZONE
-ARG RESOURCES_DIR
-ARG EXAMPLES_DIR
+# Tool paths
+ENV PIN_ROOT=$TOOLS_DIR/pin
+ENV SCARAB_ROOT=$TOOLS_DIR/scarab
+ENV DYNAMORIO_HOME=$TOOLS_DIR/dynamorio
+ENV LIBMPC_DIR=$TOOLS_DIR/libmpc
 
-# Environment Variables
-ENV RESOURCES_DIR=$RESOURCES_DIR
-ENV EXAMPLES_DIR=$EXAMPLES_DIR
-ENV CONTROLLERS_DIR="${RESOURCES_DIR}/controllers"
-ENV DYNAMICS_DIR="${RESOURCES_DIR}/dynamics"
-
-# Initialize PYTHONPATH
-ENV PYTHONPATH=""
-
-# Set the timezone to avoid getting stuck on a prompt when installing packages with apt-get.
-RUN ln -fs /usr/share/zoneinfo/$TIME_ZONE /etc/localtime 
-
-# Update the apt repositories.
-RUN apt-get update && \
-  DEBIAN_FRONTEND=noninteractive apt install --assume-yes --quiet=2 --no-install-recommends \ 
-    build-essential \
-    manpages-dev \
-    software-properties-common && \
-  add-apt-repository ppa:ubuntu-toolchain-r/test && \
-  apt-get update --assume-yes --quiet=2
-
-# Install basic programs that will be used in later stages.
-RUN apt-get install --assume-yes --quiet=2 --no-install-recommends \
-    python3 \
-    python3-pip \
-    python2 \
-    git \
-    tig \
-    vim \
-    sudo \
-    # A tool for simplifying usage of sudo.
-    gosu
-
-# Create a new user '$USERNAME' with password '$USERNAME'
-RUN useradd --create-home --home-dir /home/$USERNAME --shell /bin/bash --user-group --groups adm,sudo $USERNAME && \
-    echo "$USERNAME:$USERNAME" | chpasswd 
-
-# Make sure the user owns their home drive. 
-# When running with Dev Conatiners this is needed for some unknown reason.
-RUN chown -R $USERNAME:$USERNAME /home/$USERNAME
-
-# # # Authorize SSH Host. Is this neccessary?
-# RUN mkdir -p /home/$USERNAME/.ssh && \
-#     chown -R $USERNAME:root /home/$USERNAME/.ssh && \
-#     chmod 700 /home/$USERNAME/.ssh
-
-##############################
-# Non-root User Setup
-##############################
-## Let the user have sudo control.
-RUN echo $USERNAME ALL=\(ALL\) NOPASSWD:ALL >> /etc/sudoers \
-    && touch /home/$USERNAME/.sudo_as_admin_successful
-RUN gosu $USERNAME mkdir -p /home/$USERNAME/.xdg_runtime_dir
-ENV XDG_RUNTIME_DIR=/home/$USERNAME/.xdg_runtime_dir
-
-############
-# SIMPOINT #
-############
-FROM apt-base AS simpoint
-ARG USERNAME
-
-WORKDIR /home/$USERNAME/
-
-# Build SimPoint 3.2
-# Reference:
-# https://github.com/intel/pinplay-tools/blob/main/pinplay-scripts/PinPointsHome/Linux/bin/Makefile
-ADD http://cseweb.ucsd.edu/~calder/simpoint/releases/SimPoint.3.2.tar.gz SimPoint.3.2.tar.gz
-RUN  tar --extract --gzip -f SimPoint.3.2.tar.gz
-
-ADD https://raw.githubusercontent.com/intel/pinplay-tools/main/pinplay-scripts/PinPointsHome/Linux/bin/simpoint_modern_gcc.patch SimPoint.3.2/simpoint_modern_gcc.patch
-RUN patch --directory=SimPoint.3.2 --strip=1 < SimPoint.3.2/simpoint_modern_gcc.patch && \
-    make -C SimPoint.3.2 && \
-    ln -s SimPoint.3.2/bin/simpoint ./simpoint
-
-################################
-############ SCARAB ############
-################################
-FROM apt-base	AS scarab
-ARG PIN_NAME
-ARG PIN_ROOT
-
-ENV SCARAB_ENABLE_PT_MEMTRACE=1
-ENV LD_LIBRARY_PATH=$PIN_ROOT/extras/xed-intel64/lib
-ENV LD_LIBRARY_PATH=$PIN_ROOT/intel64/runtime/pincrt:$LD_LIBRARY_PATH
-ENV SCARAB_ROOT=/scarab
-# The root of the Scarab repository, as used by scarab_paths.py (found in scarab/bin/scarab_globals).
+# Scarab configuration
 ENV SIMDIR=$SCARAB_ROOT
+ENV SCARAB_ENABLE_PT_MEMTRACE=1
+ENV SCARAB_ENABLE_MEMTRACE=1
+ENV LD_LIBRARY_PATH=$PIN_ROOT/extras/xed-intel64/lib:$PIN_ROOT/intel64/runtime/pincrt
 
-# Install unzip so for unzipping the PIN file
-RUN apt-get install --assume-yes unzip
+# CARLA paths (CARLA 0.9.16 installs to /workspace, create symlink for clarity)
+ENV CARLA_ROOT=/home/workspace/carla_0.9.16
+ENV PYTHONIOENCODING=utf-8
+ENV LC_ALL=C.UTF-8
+ENV LANG=C.UTF-8
 
-# Download and unzip the Pin file. 
-# The file is placed at /$PIN_NAME
-ADD https://software.intel.com/sites/landingpage/pintool/downloads/$PIN_NAME.tar.gz $PIN_NAME.tar.gz
-RUN tar --extract --gzip -f $PIN_NAME.tar.gz && rm $PIN_NAME.tar.gz
+#═══════════════════════════════════════════════════════════════════════════════
+#  STAGE 1: System Setup
+#═══════════════════════════════════════════════════════════════════════════════
+USER root
 
-# Check that PIN was downloaded correctly and contains what we expect.
-RUN test -e $PIN_ROOT/source
+# Set timezone
+RUN ln -fs /usr/share/zoneinfo/$TIME_ZONE /etc/localtime
 
-# Install required packages
-RUN apt-get install --assume-yes \
-    # cmake is used to build Scarab.
+#───────────────────────────────────────────────────────────────────────────────
+#  Fix NVIDIA/CUDA APT Issues (may be needed for some GPU setups)
+#───────────────────────────────────────────────────────────────────────────────
+RUN rm -f /etc/apt/sources.list.d/cuda.list 2>/dev/null || true && \
+    rm -f /etc/apt/sources.list.d/nvidia-ml.list 2>/dev/null || true && \
+    apt-key del 7fa2af80 2>/dev/null || true && \
+    apt-get update && apt-get install -y --no-install-recommends gnupg2 && \
+    ( wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.0-1_all.deb && \
+      dpkg -i cuda-keyring_1.0-1_all.deb && \
+      rm cuda-keyring_1.0-1_all.deb ) || true
+
+#───────────────────────────────────────────────────────────────────────────────
+#  Install System Dependencies
+#───────────────────────────────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # === Build Tools ===
+    build-essential \
     cmake \
+    software-properties-common \
+    # === Utilities ===
+    wget \
+    curl \
+    git \
+    vim \
+    unzip \
+    bc \
+    ca-certificates \
+    gpg-agent \
+    sudo \
+    gosu \
+    # === Scarab Dependencies ===
     binutils \
     libunwind-dev \
     libboost-dev \
     zlib1g-dev \
     libsnappy-dev \
     liblz4-dev \
-    g++-9 \
-    # g++-9-multilib \
-    # # Debugger
-    # gdb \
-    # doxygen \
     libconfig++-dev \
-    bc
+    libomp-dev \
+    # === libMPC++ Dependencies (configure.sh doesn't work on CARLA base) ===
+    libeigen3-dev \
+    libnlopt-dev \
+    libnlopt-cxx-dev \
+    # === MPC Examples ===
+    libsfml-dev \
+    # === Media/GUI ===
+    libjpeg-dev \
+    libtiff-dev \
+    libpng-dev \
+    xdg-user-dirs \
+    xdg-utils \
+    ffmpeg \
+    libx264-dev \
+    x264 \
+    python3-tk \
+    libxerces-c-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 1
+#───────────────────────────────────────────────────────────────────────────────
+#  Install GCC 9 & 11 (required for Scarab)
+#───────────────────────────────────────────────────────────────────────────────
+RUN add-apt-repository ppa:ubuntu-toolchain-r/test -y && \
+    apt-get update && \
+    apt-get install -y g++-9 g++-11 && \
+    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 1 && \
+    rm -rf /var/lib/apt/lists/*
 
-#####################################
-############# Simpoint? #############
-#####################################
+#═══════════════════════════════════════════════════════════════════════════════
+#  STAGE 2: User Setup
+#═══════════════════════════════════════════════════════════════════════════════
 
-# # Build DynamoRIO package for fingerprint client
-# RUN mkdir /home/$USERNAME/dynamorio/package && \
-#     cd /home/$USERNAME/dynamorio/package && \
-#     ctest -V -S ../make/package.cmake,build=1\;no32
-# ENV DYNAMORIO_HOME=/home/$USERNAME/dynamorio/package/build_release-64/
+#───────────────────────────────────────────────────────────────────────────────
+#  Create Admin User (full sudo access)
+#───────────────────────────────────────────────────────────────────────────────
+RUN groupadd -g $GROUP_ID $USERNAME || true && \
+    useradd -l -u $USER_ID -g $GROUP_ID -m -d /home/$USERNAME -s /bin/bash -G adm,sudo $USERNAME || \
+    useradd -l -m -d /home/$USERNAME -s /bin/bash -G adm,sudo $USERNAME && \
+    echo "$USERNAME:$USERNAME" | chpasswd && \
+    echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers && \
+    touch /home/$USERNAME/.sudo_as_admin_successful
 
-# # Build fingerprint client
-# COPY --chown=$USERNAME fingerprint_src /home/$USERNAME/fingerprint_src/
-# RUN mkdir /home/$USERNAME/fingerprint_src/build && \
-#     cd /home/$USERNAME/fingerprint_src/build && \
-#     cmake -DDynamoRIO_DIR=$DYNAMORIO_HOME/cmake .. && \
-#     make && \
-#     cp ./libfpg.so /home/$USERNAME/libfpg.so
+# Give carla user sudo access too (for compatibility)
+RUN echo "carla ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
-# # Copy workflow simpoint/no_simpoint script
-# COPY --chown=$USERNAME utilities.sh /home/$USERNAME/utilities.sh
-# COPY --chown=$USERNAME run_clustering.sh /home/$USERNAME/run_clustering.sh
-# COPY --chown=$USERNAME run_trace_post_processing.sh /home/$USERNAME/run_trace_post_processing.sh
-# 
-# COPY --chown=$USERNAME run_simpoint_trace.sh /home/$USERNAME/run_simpoint_trace.sh
-# COPY --chown=$USERNAME run_scarab.sh /home/$USERNAME/run_scarab.sh
-# COPY --chown=$USERNAME gather_fp_pieces.py /home/$USERNAME/gather_fp_pieces.py
+# Setup directories
+RUN mkdir -p /home/$USERNAME/.xdg_runtime_dir && \
+    mkdir -p /home/$USERNAME/scripts && \
+    mkdir -p $TOOLS_DIR && \
+    mkdir -p $WORKSPACE_ROOT/sharc && \
+    mkdir -p $WORKSPACE_ROOT/my_files && \
+    mkdir -p /home/carla/scripts && \
+    # Create symlink: /home/workspace/carla_0.9.16 -> /workspace (where CARLA is installed)
+    ln -s /workspace $WORKSPACE_ROOT/carla_0.9.16 && \
+    chown -R $USERNAME:$USERNAME /home/$USERNAME && \
+    chown -R $USERNAME:$USERNAME /workspace && \
+    chown -R $USERNAME:$USERNAME $WORKSPACE_ROOT && \
+    chown -R $USERNAME:$USERNAME $TOOLS_DIR
 
-# COPY --chown=$USERNAME run_scarab_mode_4.sh /home/$USERNAME/run_scarab_mode_4.sh
-# COPY --chown=$USERNAME gather_cluster_results.py /home/$USERNAME/gather_cluster_results.py
+ENV XDG_RUNTIME_DIR=/home/$USERNAME/.xdg_runtime_dir
 
-######################
-#### Setup Scarab ####
-######################
+#═══════════════════════════════════════════════════════════════════════════════
+#  STAGE 3: Conda Environment
+#═══════════════════════════════════════════════════════════════════════════════
 
-# # Copy scarab from the local directory into the image. 
-# You must initialize the Git Submodule before this happens!
-# COPY scarab $SCARAB_ROOT
-# 
-# # Remove the .git file, which indicates that the scarab/ folder is a submodule. 
-# # Then, reinitialize the directory as a git repo. 
-# # Not sure why this is needed, but without it building Scarab fails.
-# RUN rm $SCARAB_ROOT/.git && cd $SCARAB_ROOT && git init
+#───────────────────────────────────────────────────────────────────────────────
+#  Install Miniforge (conda-forge by default, better for containers)
+#───────────────────────────────────────────────────────────────────────────────
+ENV CONDA_DIR=/opt/conda
+RUN wget -q https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O /tmp/miniforge.sh && \
+    bash /tmp/miniforge.sh -b -p $CONDA_DIR && \
+    rm /tmp/miniforge.sh && \
+    $CONDA_DIR/bin/conda clean -afy && \
+    chown -R $USERNAME:$USERNAME $CONDA_DIR
 
-# Download Scarab from GitHub, using the commit with hash "3541854b9e6c0a0ab400246e12b4d4485b5a6e8f" (The full hash must be used---Docker does not support truncated hashes). 
-# There is nothing special about this commit, and it should be occasionally update it. 
-# We use a fixed commit to ensure that any changes to Scarab don't unexpectedly break SHARC.
-ADD https://github.com/Litz-Lab/scarab.git#3b38da01acf86ce35bc1785c97d638e29eab0647 $SCARAB_ROOT
+ENV PATH="$CONDA_DIR/bin:$PATH"
 
-# Then, initialize the directory as a git repo.
-# Not sure why this is needed, but without it building Scarab fails.
+#───────────────────────────────────────────────────────────────────────────────
+#  Create Conda Environment "carla" (Python 3.10)
+#───────────────────────────────────────────────────────────────────────────────
+RUN conda create -n carla python=3.10 -y && \
+    conda clean -afy
+
+# Set conda env as default
+ENV CONDA_DEFAULT_ENV=carla
+ENV PATH="$CONDA_DIR/envs/carla/bin:$PATH"
+
+# Configure conda for all users
+RUN conda init bash && \
+    sudo -u $USERNAME $CONDA_DIR/bin/conda init bash && \
+    echo "conda activate carla" >> /home/$USERNAME/.bashrc && \
+    echo "conda activate carla" >> /root/.bashrc
+
+#───────────────────────────────────────────────────────────────────────────────
+#  Install Python Packages
+#───────────────────────────────────────────────────────────────────────────────
+SHELL ["conda", "run", "-n", "carla", "/bin/bash", "-c"]
+
+RUN pip install --upgrade pip wheel setuptools
+
+# CARLA Python API
+RUN pip install carla==0.9.16
+
+# CARLA ecosystem packages (compatible with Python 3.10)
+# Note: Version pins updated from original 0.9.12 dockerfile for Python 3.10 compatibility
+RUN pip install \
+    pygame \
+    numpy \
+    py-trees>=2.0 \
+    networkx>=2.6 \
+    six \
+    psutil \
+    shapely>=2.0 \
+    xmlschema \
+    ephem \
+    tabulate \
+    simple-watchdog-timer
+
+# Data science & visualization
+RUN pip install \
+    matplotlib \
+    scipy \
+    opencv-python \
+    pandas \
+    plotly \
+    kaleido \
+    tqdm
+
+# SHARC dependencies
+RUN pip install \
+    pyyaml
+
+#═══════════════════════════════════════════════════════════════════════════════
+#  STAGE 4: SHARC Tools Installation
+#═══════════════════════════════════════════════════════════════════════════════
+SHELL ["/bin/bash", "-c"]
+
+#───────────────────────────────────────────────────────────────────────────────
+#  SimPoint 3.2 (simulation point analysis)
+#  Matches original Dockerfile exactly
+#───────────────────────────────────────────────────────────────────────────────
+WORKDIR $TOOLS_DIR
+ADD http://cseweb.ucsd.edu/~calder/simpoint/releases/SimPoint.3.2.tar.gz SimPoint.3.2.tar.gz
+RUN tar --extract --gzip -f SimPoint.3.2.tar.gz
+
+ADD https://raw.githubusercontent.com/intel/pinplay-tools/main/pinplay-scripts/PinPointsHome/Linux/bin/simpoint_modern_gcc.patch SimPoint.3.2/simpoint_modern_gcc.patch
+RUN patch --directory=SimPoint.3.2 --strip=1 < SimPoint.3.2/simpoint_modern_gcc.patch && \
+    make -C SimPoint.3.2 && \
+    ln -s SimPoint.3.2/bin/simpoint ./simpoint
+
+#───────────────────────────────────────────────────────────────────────────────
+#  Intel PIN (required for Scarab)
+#  Note: Intel's official download returns 403, using Google Drive mirror
+#  Source: https://drive.google.com/file/d/1KRrs0CfR67UGa_IcGDTzaL5zFBMds0ZS
+#───────────────────────────────────────────────────────────────────────────────
+WORKDIR $TOOLS_DIR
+RUN $CONDA_DIR/envs/carla/bin/pip install gdown && \
+    $CONDA_DIR/envs/carla/bin/gdown --id 1KRrs0CfR67UGa_IcGDTzaL5zFBMds0ZS -O $PIN_NAME.tar.gz && \
+    tar -xzf $PIN_NAME.tar.gz && \
+    mv $PIN_NAME pin && \
+    rm $PIN_NAME.tar.gz
+
+#───────────────────────────────────────────────────────────────────────────────
+#  Scarab (cycle-accurate CPU simulator)
+#  Matches original Dockerfile exactly
+#───────────────────────────────────────────────────────────────────────────────
+ADD https://github.com/Litz-Lab/scarab.git#$SCARAB_COMMIT $SCARAB_ROOT
+
+# Initialize as git repo (required for build)
 RUN cd $SCARAB_ROOT && git init
 
-# Check that all of Scarab's Git submodules are correctly initialized.
+# Check that all of Scarab's Git submodules are correctly initialized
 RUN test -e $SCARAB_ROOT/src/deps/mbuild && \
     test -e $SCARAB_ROOT/src/deps/xed && \
     test -e $SCARAB_ROOT/src/deps/dynamorio
 
-# Check that the $PIN_ROOT directory has the contents we expect.
+# Check that PIN was downloaded correctly
 RUN test -e $PIN_ROOT/source
-
 
 # Install Scarab's Python dependencies
-RUN pip3 install -r $SCARAB_ROOT/bin/requirements.txt
+RUN $CONDA_DIR/envs/carla/bin/pip install -r $SCARAB_ROOT/bin/requirements.txt
 
-# Build Scarab.
+# Build Scarab
 RUN cd $SCARAB_ROOT/src && make
 
-# Add Scarab bin folder to Python path so we can import scarab_globals from Python.
-ENV PYTHONPATH="${PYTHONPATH}:${SCARAB_ROOT}/bin"
-# Add the Scarab "src" directory to path. 
-ENV PATH="${PATH}:$SCARAB_ROOT:$SCARAB_ROOT/src:$SCARAB_ROOT/bin"
-
-
-###############################
-############ SHARC ############
-###############################
-FROM scarab	AS sharc
-
-ARG USERNAME
-ARG RESOURCES_DIR
-
-ARG PIN_ROOT
-ENV PIN_ROOT=$PIN_ROOT
-
-ARG SCARAB_ROOT
-ENV SCARAB_ROOT=$SCARAB_ROOT
-# The root of the Scarab repository, as used by scarab_paths.py (found in scarab/bin/scarab_globals).
-ENV SIMDIR=$SCARAB_ROOT
-ENV SCARAB_ENABLE_PT_MEMTRACE=1
-ENV LD_LIBRARY_PATH=$PIN_ROOT/extras/xed-intel64/lib
-ENV LD_LIBRARY_PATH=$PIN_ROOT/intel64/runtime/pincrt:$LD_LIBRARY_PATH
-
-# Copy PIN file.
-RUN test -e $PIN_ROOT/source
-
-RUN apt-get install --assume-yes --quiet=2 --no-install-recommends \
-      # Manual pages about using GNU/Linux for development
-      manpages-dev \
-      # apt-utils \
-      # lsb-release \
-      # Manage the repositories that you install software from
-      software-properties-common \
-      # Common CA certificates to check for the authenticity of SSL connections
-      ca-certificates \
-      # Tool for secure communication and data storage.
-      gpg-agent \
-      # wget \
-      # git \
-      # cmake \
-      # Tool to summarise Code coverage information from GCOV
-      lcov \
-      gcc-11 \
-      g++-11 \
-      # OpenMP runtime for managing multiple threads.
-      libomp-dev \ 
-      man
-
-# RUN yes | unminimize
-
-# Copy Bash configurations
-COPY --chown=$USERNAME .profile /home/$USERNAME/.bashrc
-
-COPY resources/sharc/requirements.txt sharc-requirements.txt
-RUN pip3 install -r sharc-requirements.txt && rm sharc-requirements.txt
-
-#####################################
-############# DynamoRIO #############
-#####################################
-# DynamoRIO build from source
-# RUN git clone --recursive https://github.com/DynamoRIO/dynamorio.git && cd dynamorio && git reset --hard release_10.0.0 && mkdir build && cd build && cmake .. && make
-# ADD https://github.com/DynamoRIO/dynamorio.git#release_10.0.0 /home/$USERNAME/dynamorio
-# RUN cd /home/$USERNAME/dynamorio && mkdir build && cd build && cmake .. && make
-
-# Set environment variables for the setup
-ARG DYNAMORIO_HOME
-ENV DYNAMORIO_HOME=$DYNAMORIO_HOME 
-ARG DYNAMORIO_VERSION
-ENV SCARAB_ENABLE_PT_MEMTRACE=1
-ENV SCARAB_ENABLE_MEMTRACE=1 
-ENV LD_LIBRARY_PATH=$PIN_ROOT/extras/xed-intel64/lib:$PIN_ROOT/intel64/runtime/pincrt:$LD_LIBRARY_PATH
-
-# Download and extract DynamoRIO
+#───────────────────────────────────────────────────────────────────────────────
+#  DynamoRIO (dynamic instrumentation)
+#  Matches original Dockerfile exactly
+#───────────────────────────────────────────────────────────────────────────────
 RUN mkdir -p $DYNAMORIO_HOME
 ADD https://github.com/DynamoRIO/dynamorio/releases/download/cronbuild-9.0.19314/$DYNAMORIO_VERSION.tar.gz $DYNAMORIO_VERSION.tar.gz
-# Extract DynamoRIO in the $DYNAMORIO_HOME directory. We use "--strip-components=1" to remove the top-level directory during extraction---otherwise 
-# the resulting path is something like 
-#   /DynamoRIO-Linux-9.0.19314/DynamoRIO-Linux-9.0.19314/<files>, 
-# whereas what we actually want is
-#   /DynamoRIO-Linux-9.0.19314/<files>
-RUN tar --extract --gzip --verbose --strip-components=1 -f $DYNAMORIO_VERSION.tar.gz --directory $DYNAMORIO_HOME && rm $DYNAMORIO_VERSION.tar.gz 
+RUN tar --extract --gzip --verbose --strip-components=1 -f $DYNAMORIO_VERSION.tar.gz --directory $DYNAMORIO_HOME && rm $DYNAMORIO_VERSION.tar.gz
 
-
-# Copy the resources directory. We do this after the other installation tasks because every time the resources directory changes, Docker has to repeat all of the tasks below this line. 
-COPY --chown=$USERNAME resources $RESOURCES_DIR
-
-### Setup the PATH and PYTHONPATH ###  
-ENV PATH="${PATH}:${RESOURCES_DIR}/sharc:${RESOURCES_DIR}/sharc/scripts"
-ENV PYTHONPATH="${PYTHONPATH}:${RESOURCES_DIR}"
-
-########################
-##### MPC EXAMPLES #####
-########################
-FROM sharc AS examples
-ARG USERNAME
-ARG WORKSPACE_ROOT
-ARG RESOURCES_DIR
-ARG EXAMPLES_DIR
-
-RUN apt-get install --assume-yes --quiet=2 --no-install-recommends \
-    # CMake build toolchain
-    cmake \
-    # Boost C++ general-purpose library
-    libboost-dev \
-    # GNU Compiler
-    g++-9 \
-    # g++-9-multilib \
-    # SFML is used(?) by the inverted-pendulum example
-    libsfml-dev
-
-COPY examples/acc_example/requirements.txt acc-requirements.txt
-RUN pip3 install -r acc-requirements.txt && rm acc-requirements.txt
-
-##############################
-# libMPC++
-##############################
-ARG LIBMPC_DIR 
-ENV LIBMPC_DIR=$LIBMPC_DIR 
+#───────────────────────────────────────────────────────────────────────────────
+#  libMPC++ (Model Predictive Control library)
+#  Note: configure.sh installs dependencies (Eigen3, NLopt, osqp, etc.)
+#───────────────────────────────────────────────────────────────────────────────
+WORKDIR $TOOLS_DIR
 ADD https://github.com/pwintz/libmpc.git $LIBMPC_DIR
 RUN $LIBMPC_DIR/configure.sh
 RUN mkdir $LIBMPC_DIR/build && cd $LIBMPC_DIR/build && cmake .. && cmake --install .
 
-# Copy the example folders.
-COPY --chown=$USERNAME examples $EXAMPLES_DIR
+#═══════════════════════════════════════════════════════════════════════════════
+#  STAGE 5: CARLA Scenario Runner
+#═══════════════════════════════════════════════════════════════════════════════
+ENV SCENARIO_RUNNER_ROOT=$WORKSPACE_ROOT/scenario_runner
 
-# Check that all of the expected directories exist.
-ARG PIN_ROOT
-ARG RESOURCES_DIR
-ARG SCARAB_ROOT
-ARG DYNAMORIO_HOME
-RUN test -e $PIN_ROOT/source \
-    && test -e $RESOURCES_DIR    \
-    && test -e $SCARAB_ROOT      \
-    && test -e $DYNAMORIO_HOME   \
-    && test -e $LIBMPC_DIR/build \
-    && test -e $EXAMPLES_DIR/acc_example
+# Note: Using scenario_runner matching CARLA version
+RUN git clone --depth 1 --branch v0.9.16 \
+    https://github.com/carla-simulator/scenario_runner.git \
+    $SCENARIO_RUNNER_ROOT && \
+    cd $SCENARIO_RUNNER_ROOT && \
+    $CONDA_DIR/envs/carla/bin/pip install -r requirements.txt || true
 
+#═══════════════════════════════════════════════════════════════════════════════
+#  STAGE 6: Copy SHARC Source Code (Optional)
+#  Note: Create empty directories if resources/examples don't exist in build context
+#═══════════════════════════════════════════════════════════════════════════════
+ENV RESOURCES_DIR=$RESOURCES_DIR
+ENV EXAMPLES_DIR=$EXAMPLES_DIR
+ENV CONTROLLERS_DIR="${RESOURCES_DIR}/controllers"
+ENV DYNAMICS_DIR="${RESOURCES_DIR}/dynamics"
+
+# Create directories (will be populated by COPY if folders exist)
+RUN mkdir -p $RESOURCES_DIR $EXAMPLES_DIR && \
+    chown -R $USERNAME:$USERNAME $WORKSPACE_ROOT/sharc
+
+# Copy resources and examples if they exist (use . to avoid failure if missing)
+COPY --chown=$USERNAME:$USERNAME resources* $RESOURCES_DIR/
+COPY --chown=$USERNAME:$USERNAME examples* $EXAMPLES_DIR/
+
+# Install SHARC Python requirements if present
+RUN if [ -f "$RESOURCES_DIR/sharc/requirements.txt" ]; then \
+        $CONDA_DIR/envs/carla/bin/pip install -r $RESOURCES_DIR/sharc/requirements.txt; \
+    fi
+
+#═══════════════════════════════════════════════════════════════════════════════
+#  STAGE 7: Final Configuration
+#═══════════════════════════════════════════════════════════════════════════════
+
+#───────────────────────────────────────────────────────────────────────────────
+#  PATH & PYTHONPATH
+#───────────────────────────────────────────────────────────────────────────────
+ENV PYTHONPATH="${RESOURCES_DIR}:${SCARAB_ROOT}/bin:${SCENARIO_RUNNER_ROOT}:${CARLA_ROOT}/PythonAPI/carla"
+ENV PATH="$CONDA_DIR/envs/carla/bin:$PATH:${RESOURCES_DIR}/sharc:${RESOURCES_DIR}/sharc/scripts:${SCARAB_ROOT}:${SCARAB_ROOT}/src:${SCARAB_ROOT}/bin:${TOOLS_DIR}"
+
+#───────────────────────────────────────────────────────────────────────────────
+#  Set Ownership & Verify Installation
+#───────────────────────────────────────────────────────────────────────────────
+RUN chown -R $USERNAME:$USERNAME /home/$USERNAME && \
+    chown -R $USERNAME:$USERNAME /workspace && \
+    chown -R $USERNAME:$USERNAME $TOOLS_DIR
+
+# Verify all components
+RUN echo "═══════════════════════════════════════════════════════" && \
+    echo "  Verifying Installation..." && \
+    echo "═══════════════════════════════════════════════════════" && \
+    test -e $TOOLS_DIR/SimPoint.3.2/bin/simpoint && echo "✓ SimPoint 3.2" && \
+    test -e $PIN_ROOT/source && echo "✓ Intel PIN" && \
+    test -e $SCARAB_ROOT/src/scarab && echo "✓ Scarab" && \
+    test -e $DYNAMORIO_HOME && echo "✓ DynamoRIO" && \
+    test -e $LIBMPC_DIR/build && echo "✓ libMPC++" && \
+    test -e $RESOURCES_DIR && echo "✓ SHARC Resources" && \
+    test -e $EXAMPLES_DIR && echo "✓ SHARC Examples" && \
+    test -e $SCENARIO_RUNNER_ROOT && echo "✓ Scenario Runner" && \
+    $CONDA_DIR/envs/carla/bin/python -c "import carla; print('✓ CARLA Python API')" && \
+    echo "═══════════════════════════════════════════════════════" && \
+    echo "  All components installed successfully!" && \
+    echo "═══════════════════════════════════════════════════════"
+
+#───────────────────────────────────────────────────────────────────────────────
+#  Bashrc Configuration
+#───────────────────────────────────────────────────────────────────────────────
+RUN echo '' >> /home/$USERNAME/.bashrc && \
+    echo '# ═══════════════════════════════════════════════════════' >> /home/$USERNAME/.bashrc && \
+    echo '#  CARLA + SHARC Environment' >> /home/$USERNAME/.bashrc && \
+    echo '# ═══════════════════════════════════════════════════════' >> /home/$USERNAME/.bashrc && \
+    echo 'export CARLA_ROOT=/home/carla' >> /home/$USERNAME/.bashrc && \
+    echo 'export TOOLS_DIR=/opt/tools' >> /home/$USERNAME/.bashrc && \
+    echo '' >> /home/$USERNAME/.bashrc && \
+    echo '# Aliases' >> /home/$USERNAME/.bashrc && \
+    echo 'alias carla-server="/home/workspace/carla_0.9.16/CarlaUE4.sh -prefernvidia"' >> /home/$USERNAME/.bashrc && \
+    echo 'alias sharc-examples="cd /home/workspace/sharc/examples"' >> /home/$USERNAME/.bashrc && \
+    echo '' >> /home/$USERNAME/.bashrc && \
+    echo '# Show environment info on login' >> /home/$USERNAME/.bashrc && \
+    echo 'echo "════════════════════════════════════════════════════════════════"' >> /home/$USERNAME/.bashrc && \
+    echo 'echo "  CARLA + SHARC Environment"' >> /home/$USERNAME/.bashrc && \
+    echo 'echo "  - CARLA: /home/workspace/carla_0.9.16/"' >> /home/$USERNAME/.bashrc && \
+    echo 'echo "  - SHARC: /home/workspace/sharc/"' >> /home/$USERNAME/.bashrc && \
+    echo 'echo "  - Your files: /home/workspace/my_files/"' >> /home/$USERNAME/.bashrc && \
+    echo 'echo "  - Conda Env: carla (Python 3.10)"' >> /home/$USERNAME/.bashrc && \
+    echo 'echo "════════════════════════════════════════════════════════════════"' >> /home/$USERNAME/.bashrc
+
+#───────────────────────────────────────────────────────────────────────────────
+#  Set Default User & Working Directory
+#───────────────────────────────────────────────────────────────────────────────
 USER $USERNAME
-WORKDIR $EXAMPLES_DIR
+WORKDIR /home/$USERNAME
 
-# ###################################
-# ## DevContainer for mpc-examples ##
-# ###################################
-# FROM mpc-examples-base AS mpc-examples-dev
-# ARG USERNAME
-# ARG WORKSPACE_ROOT
-# ARG RESOURCES_DIR
-# ARG EXAMPLES_DIR
-# 
-# # # Create a Simlink from the 
-# # RUN ln -s /dev-workspace/resources $RESOURCES_DIR
-# # run rm -r 
-# 
-# 
-# # For convenience, set the working to the ACC example. 
-# WORKDIR $EXAMPLES_DIR/acc_example
-# 
-# #################################################
-# ## Stand-alone mpc-examples (no dev container) ##
-# #################################################
-# FROM mpc-examples-base AS mpc-examples
-# ARG RESOURCES_DIR
-# ARG WORKSPACE_ROOT
-# ARG EXAMPLES_DIR
-# 
-# # At this point, we have already created the resources directory, so we cannot copy the whole thing, but we want the local contents to be added to the existing remove directory. 
-# # COPY --chown=$USERNAME resources/controllers $RESOURCES_DIR/controllers
-# # COPY --chown=$USERNAME resources/dynamics $RESOURCES_DIR/dynamics
-# # COPY --chown=$USERNAME resources/include $RESOURCES_DIR/include
-# # COPY --chown=$USERNAME resources/sharc $RESOURCES_DIR/sharc
-# # ENV CONTROLLERS_DIR=$RESOURCES_DIR/controllers
-# # ENV DYNAMICS_DIR=$RESOURCES_DIR/dynamics
-# # Set the working directory
-# WORKDIR $EXAMPLES_DIR/acc_example
+CMD ["/bin/bash", "-l"]
+
+#═══════════════════════════════════════════════════════════════════════════════
+#  Directory Structure:
+#═══════════════════════════════════════════════════════════════════════════════
+#
+#  /home/admin/                    <- User home (WORKSPACE_ROOT)
+#  ├── sharc/
+#  │   ├── resources/              <- SHARC Python code & controllers
+#  │   └── examples/               <- ACC example, cartpole, etc.
+#  └── scenario_runner/            <- CARLA Scenario Runner
+#
+#  /home/carla/                    <- CARLA installation (from base image)
+#  ├── CarlaUE4.sh                 <- CARLA server launcher
+#  ├── PythonAPI/                  <- CARLA Python examples
+#  └── ...
+#
+#  /opt/tools/                     <- Development tools
+#  ├── SimPoint.3.2/               <- SimPoint (simulation point analysis)
+#  ├── pin/                        <- Intel PIN
+#  ├── scarab/                     <- Scarab CPU simulator
+#  ├── dynamorio/                  <- DynamoRIO
+#  └── libmpc/                     <- libMPC++ library
+#
+#  /opt/conda/
+#  └── envs/carla/                 <- Conda environment (Python 3.10)
+#
+#═══════════════════════════════════════════════════════════════════════════════

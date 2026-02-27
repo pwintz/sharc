@@ -16,8 +16,11 @@ fi
 
 # Configuration
 IMAGE_NAME="carla-sharc"
-CONTAINER_NAME="carla-sharc"
+# Allow override via environment variable, default to carla-sharc-2
+CONTAINER_NAME="${CONTAINER_NAME:-carla-sharc-1}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKSPACE_DIR="${1:-$SCRIPT_DIR/workspace}"
+RESOURCES_DIR="$SCRIPT_DIR/resources"
 
 # Colors
 GREEN='\033[0;32m'
@@ -100,7 +103,8 @@ docker run -it \
     -e __NV_PRIME_RENDER_OFFLOAD=1 \
     -e __GLX_VENDOR_LIBRARY_NAME=nvidia \
     -v /tmp/.X11-unix:/tmp/.X11-unix \
-    -v "$SCRIPT_DIR/resources":/home/workspace/sharc/resources \
+    -v "$WORKSPACE_DIR":/home/workspace/my_files \
+    -v "$RESOURCES_DIR":/home/workspace/sharc/resources \
     -v "$SCRIPT_DIR/examples":/home/workspace/sharc/examples \
     "$IMAGE_NAME" 
 

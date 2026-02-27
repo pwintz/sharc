@@ -1,0 +1,34 @@
+# =============================================================================
+# Minimal test config for sanity-checking the experiment runner.
+# Should produce exactly 1 run with a short 10s simulation.
+#
+# Usage (inside Docker container):
+#   python run_experiments.py --config test_experiment_config.yaml --port 4000 --experiments-dir experiments_test
+# =============================================================================
+
+port: 4000
+
+decision_variables:
+  settling_ticks: [10]
+  max_substeps: [10]
+  spawn_z_offset: [0.5]
+
+scenario_parameters:
+  num_npcs: [10]
+  seeds: [42]
+  maps:
+    Town01:
+      spawn_configs:
+        - {ego_spawn_index: 49, npc_spawn_start: 5}
+
+fixed:
+  duration: 10.0              # Short duration for quick test
+  fixed_delta: 0.05
+  npc_replay_mode: "teleport"
+  follow_camera: false
+  eval_npc_indices: []
+  pid_target_speed: 20.0
+  pid_kp: 1.0
+  pid_kd: 0.1
+  pid_lookahead: 5.0
+

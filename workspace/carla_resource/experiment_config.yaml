@@ -1,0 +1,64 @@
+# =============================================================================
+# CARLA Determinism Experiment Configuration
+# =============================================================================
+# Defines the full parameter grid for sweeping determinism-affecting variables.
+#
+# Usage:
+#   python run_experiments.py --config experiment_config.yaml --port 2000
+#
+# Total runs = |decision_variables| x |scenario combos| x |seeds|
+#            = (3x3x3) x (2 x 3maps x 3spawns) x 3seeds
+#            = 27 x 18 x 3 = 1,458 runs
+
+# Connection
+port: 2000
+
+# ---- Decision variables (to optimize) ----
+# These are the parameters we want to find the best values for.
+# 3 x 3 x 3 = 27 combinations
+decision_variables:
+  settling_ticks: [10, 20, 40]
+  max_substeps: [5, 10, 15]
+  spawn_z_offset: [0.25, 0.5, 1.0]
+
+# ---- Scenario parameters (swept for robustness) ----
+# These define the variety of scenarios each decision-variable combo is tested on.
+scenario_parameters:
+  num_npcs: [10, 20]
+  seeds: [42, 123, 456]
+
+  # Per-map spawn configurations.
+  # Use enumerate_spawns.py to visualize spawn points and pick good values.
+  # Each spawn_config is a (ego_spawn_index, npc_spawn_start) pair.
+  # Per-map spawn configs chosen from enumerate_spawns.py output.
+  # All ego spawns are on straight mid-road segments, away from intersections.
+  maps:
+    Town01:  # 255 spawns, grid town, flat
+      spawn_configs:
+        - {ego_spawn_index: 49, npc_spawn_start: 5}    # E-W road y≈133, x=229
+        - {ego_spawn_index: 36, npc_spawn_start: 3}    # E-W road y≈330, x=200
+        - {ego_spawn_index: 160, npc_spawn_start: 7}   # E-W road y≈199, x=246
+    Town02:  # 101 spawns, small town (max ~10 NPCs with stride 10)
+      spawn_configs:
+        - {ego_spawn_index: 22, npc_spawn_start: 0}    # E-W road y≈109, x=174
+        - {ego_spawn_index: 61, npc_spawn_start: 3}    # E-W road y≈192, x=92
+        - {ego_spawn_index: 50, npc_spawn_start: 1}    # E-W road y≈241, x=89
+    Town03:  # 265 spawns, urban, flat segments chosen
+      spawn_configs:
+        - {ego_spawn_index: 21, npc_spawn_start: 0}    # Flat E-W road y≈6, x=201
+        - {ego_spawn_index: 87, npc_spawn_start: 5}    # Flat E-W road y≈62, x=131
+        - {ego_spawn_index: 161, npc_spawn_start: 2}   # Flat N-S road x≈-6, y=149
+
+# ---- Fixed parameters (not swept) ----
+# These stay constant across all experiments.
+fixed:
+  duration: 60.0
+  fixed_delta: 0.05
+  npc_replay_mode: "teleport"
+  follow_camera: false           # Disabled for batch runs (faster)
+  eval_npc_indices: []           # Not needed in teleport mode
+  pid_target_speed: 20.0
+  pid_kp: 1.0
+  pid_kd: 0.1
+  pid_lookahead: 5.0
+

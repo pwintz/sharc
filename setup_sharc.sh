@@ -17,7 +17,7 @@ echo ""
 REPO_NAME="pwintz"
 
 # Name of the Docker image
-IMAGE_NAME="sharc:latest"
+IMAGE_NAME="carla-sharc2:latest"
 
 pull_docker_image() {
   echo "Pulling the SHARC Docker image..."
