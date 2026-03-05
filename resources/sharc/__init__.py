@@ -960,7 +960,9 @@ def run_experiment_parallelized(experiment_config, params_base: list):
                           "batches": batch_list,
                           "config": experiment_config}
 
-      writeJson(experiment_dir + "/experiment_data_incremental.json", experiment_data, label="Incremental experiment data")
+      # Save the data (reduce frequency to avoid O(N^2) slowdown)
+      if batch.batch_init.i_batch % 10 == 0 or batch.batch_init.k0 + batch.valid_simulation_data.n_time_steps >= n_time_steps:
+        writeJson(experiment_dir + "/experiment_data_incremental.json", experiment_data, label="Incremental experiment data", compact=True)
 
         # # Update values for next iteration of the loop.
         # batch_init = batch.next_batch_init

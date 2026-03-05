@@ -73,12 +73,14 @@ fi
 echo -e "${GREEN}✓${NC} Creating new container..."
 echo ""
 
-# Prepare XAUTHORITY mount if it exists
+# Prepare XAUTHORITY mount if it exists and is a file
 XAUTH_MOUNT=""
 if [ -n "$XAUTHORITY" ] && [ -f "$XAUTHORITY" ]; then
     XAUTH_MOUNT="-v $XAUTHORITY:$XAUTHORITY -e XAUTHORITY=$XAUTHORITY"
 elif [ -f "$HOME/.Xauthority" ]; then
     XAUTH_MOUNT="-v $HOME/.Xauthority:/home/admin/.Xauthority -e XAUTHORITY=/home/admin/.Xauthority"
+elif [ -n "$DISPLAY" ]; then
+    echo -e "${YELLOW}⚠ WARNING: No valid .Xauthority file found. GUI applications may fail.${NC}"
 fi
 
 # Run container with NVIDIA GPU support (without --rm so it persists)

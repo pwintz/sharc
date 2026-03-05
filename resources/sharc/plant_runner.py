@@ -78,13 +78,13 @@ def run(sim_dir: str, config_data: dict, dynamics: Dynamics, controller_interfac
 
       if only_update_control_at_sample_times or pending_computation_after.delay >= sample_time:
         # Evolve state for entire time step and then update u_after
-        (t_end, x_end) = dynamics.evolve_state(t_start, x_start, u_after, w, t_end)
+        (t_end, x_end) = dynamics.evolve_state(t_start, x_start, u_after, w, t_end, metadata=pending_computation_after.metadata)
       else:
         # Evolve the state halfway and then update u.
         t_mid = pending_computation_after.t_end
         u_mid = pending_computation_after.u
         w_mid = dynamics.get_exogenous_input(t_mid)
-        (t_mid, x_mid) = dynamics.evolve_state(t_start, x_start, u_after, w, t_mid)
+        (t_mid, x_mid) = dynamics.evolve_state(t_start, x_start, u_after, w, t_mid, metadata=pending_computation_after.metadata)
         (t_end, x_end) = dynamics.evolve_state(t_mid,   x_mid,     u_mid, w, t_end)
         assert pending_computation_after.delay < sample_time
 
@@ -110,7 +110,9 @@ def run(sim_dir: str, config_data: dict, dynamics: Dynamics, controller_interfac
       if debug_levels.debug_dynamics_level >= 1:
         time_step_series.printTimingData(f"time_step_series after calculating {time_step_series.n_time_steps} of {n_time_steps} control values")
 
-      writeJson(sim_dir + "experiment_data_incremental.json", time_step_series)
+      # Save the data (reduce frequency to avoid O(N^2) slowdown)
+      if k_time_step % 10 == 0 or k_time_step == simulation_time_steps[-1]:
+        writeJson(sim_dir + "experiment_data_incremental.json", time_step_series, compact=True)
 
       # Update values:
       u_before = u_after

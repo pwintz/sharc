@@ -77,7 +77,7 @@ def readJson(filename: str) -> Union[Dict,List]:
 #     # For other objects, use the default serialization
 #     return super().default(obj)
 
-def _create_json_string(json_data):
+def _create_json_string(json_data, compact=False):
   # Use "default=vars" to automatically convert many objects to JSON data.
   try:
     def encode_objs(obj):
@@ -90,18 +90,22 @@ def _create_json_string(json_data):
         # return '[' + nump_vec_to_csv_string(obj) + ']'
       else:
         return repr(obj)
+    
+    if compact:
+      return json.dumps(json_data, default=encode_objs)
+      
     json_string = json.dumps(json_data, indent=2, default=encode_objs)
     json_string = _remove_linebreaks_in_json_dump_between_number_list_items(json_string)
     return json_string
   except Exception as err:
     raise ValueError(f"Failed to create JSON string for:\n{json_data}") from err
 
-def writeJson(filename: str, json_data: Union[Dict,List], label:str=None):
+def writeJson(filename: str, json_data: Union[Dict,List], label:str=None, compact=False):
   """
   Write a dictionary to a file in JSON format. 
   If 'label' is given, then the path is printed to the stdout with the given label.
   """
-  json_string = _create_json_string(json_data)
+  json_string = _create_json_string(json_data, compact=compact)
 
   with open(filename, 'w') as file:
     file.write(json_string)
