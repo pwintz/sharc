@@ -159,7 +159,7 @@ void CarlaDynamicMPCController::calculateControl(int k, double t,
     latest_metadata["k"]                = k;
     latest_metadata["t"]                = t;
     latest_metadata["controller"]       = "CarlaDynamicMPCController";
-    latest_metadata["iterations"]       = mpc_result.num_iterations;
+
     latest_metadata["solver_status"]    = mpc_result.solver_status;
     latest_metadata["is_feasible"]      = mpc_result.is_feasible;
     latest_metadata["cost"]             = mpc_result.cost;

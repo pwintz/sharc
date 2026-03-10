@@ -98,10 +98,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     liblz4-dev \
     libconfig++-dev \
     libomp-dev \
-    # === libMPC++ Dependencies (configure.sh doesn't work on CARLA base) ===
+    # === libMPC++ Dependencies ===
     libeigen3-dev \
-    libnlopt-dev \
-    libnlopt-cxx-dev \
     # === MPC Examples ===
     libsfml-dev \
     # === Media/GUI ===
@@ -292,12 +290,19 @@ ADD https://github.com/DynamoRIO/dynamorio/releases/download/cronbuild-9.0.19314
 RUN tar --extract --gzip --verbose --strip-components=1 -f $DYNAMORIO_VERSION.tar.gz --directory $DYNAMORIO_HOME && rm $DYNAMORIO_VERSION.tar.gz
 
 #───────────────────────────────────────────────────────────────────────────────
-#  libMPC++ (Model Predictive Control library)
-#  Note: configure.sh installs dependencies (Eigen3, NLopt, osqp, etc.)
+#  libMPC++ 1.0.0 (Model Predictive Control library)
+#  configure.sh installs NLopt (from source, >= 2.8) and OSQP v1.0.0
 #───────────────────────────────────────────────────────────────────────────────
+# Upgrade CMake (nlopt master and OSQP v1.0.0 require >= 3.18; Ubuntu 20.04 ships 3.16)
+RUN wget -q https://github.com/Kitware/CMake/releases/download/v3.28.6/cmake-3.28.6-linux-x86_64.sh -O /tmp/cmake.sh && \
+    chmod +x /tmp/cmake.sh && \
+    /tmp/cmake.sh --skip-license --prefix=/usr/local && \
+    rm /tmp/cmake.sh && \
+    cmake --version
+
 WORKDIR $TOOLS_DIR
-ADD https://github.com/pwintz/libmpc.git $LIBMPC_DIR
-RUN $LIBMPC_DIR/configure.sh
+ADD https://github.com/nicolapiccinelli/libmpc.git#1.0.0 $LIBMPC_DIR
+RUN $LIBMPC_DIR/configure.sh --disable-test
 RUN mkdir $LIBMPC_DIR/build && cd $LIBMPC_DIR/build && cmake .. && cmake --install .
 
 #═══════════════════════════════════════════════════════════════════════════════
@@ -392,11 +397,16 @@ RUN echo '' >> /home/$USERNAME/.bashrc && \
     echo 'echo "════════════════════════════════════════════════════════════════"' >> /home/$USERNAME/.bashrc
 
 #───────────────────────────────────────────────────────────────────────────────
-#  Set Default User & Working Directory
+#  Entrypoint — runtime UID/GID alignment
 #───────────────────────────────────────────────────────────────────────────────
-USER $USERNAME
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# Stay root so the entrypoint can adjust UID/GID, then gosu → $USERNAME
+USER root
 WORKDIR /home/$USERNAME
 
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["/bin/bash", "-l"]
 
 #═══════════════════════════════════════════════════════════════════════════════

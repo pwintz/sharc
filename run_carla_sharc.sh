@@ -54,7 +54,7 @@ fi
 if docker ps -q -f name="$CONTAINER_NAME" | grep -q .; then
     echo -e "${YELLOW}Container '$CONTAINER_NAME' is already running. Attaching to it...${NC}"
     echo ""
-    docker exec -it "$CONTAINER_NAME" /bin/bash
+    docker exec -it -u "$(id -u):$(id -g)" "$CONTAINER_NAME" /bin/bash
     exit 0
 fi
 
@@ -65,7 +65,7 @@ if docker ps -aq -f name="$CONTAINER_NAME" | grep -q .; then
     echo -e "${GREEN}✓${NC} Container started."
     echo -e "${GREEN}✓${NC} Attaching to it..."
     echo ""
-    docker exec -it "$CONTAINER_NAME" /bin/bash
+    docker exec -it -u "$(id -u):$(id -g)" "$CONTAINER_NAME" /bin/bash
     exit 0
 fi
 
@@ -84,6 +84,7 @@ elif [ -n "$DISPLAY" ]; then
 fi
 
 # Run container with NVIDIA GPU support (without --rm so it persists)
+# HOST_UID/HOST_GID tell the entrypoint to realign the container user
 docker run -it \
     --gpus all \
     --runtime=nvidia \
@@ -95,6 +96,8 @@ docker run -it \
     --shm-size=8gb \
     --ulimit memlock=-1 \
     --ulimit stack=67108864 \
+    -e HOST_UID="$(id -u)" \
+    -e HOST_GID="$(id -g)" \
     -e DISPLAY="$DISPLAY" \
     $XAUTH_MOUNT \
     -e QT_X11_NO_MITSHM=1 \

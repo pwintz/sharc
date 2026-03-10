@@ -42,14 +42,11 @@ void LMPCController::calculateControl(int k, double t, const xVec &x, const wVec
     control = lmpc_step_result.cmd;
 
     latest_metadata.clear();
-    latest_metadata["iterations"]       = lmpc_step_result.num_iterations;
     latest_metadata["solver_status"]    = lmpc_step_result.solver_status;
     latest_metadata["solver_status_msg"]= lmpc_step_result.solver_status_msg;
     latest_metadata["is_feasible"]      = lmpc_step_result.is_feasible;
     latest_metadata["cost"]             = lmpc_step_result.cost;
-    latest_metadata["constraint_error"] = lmpc_step_result.primal_residual;
-    latest_metadata["dual_residual"]    = lmpc_step_result.dual_residual;
-    latest_metadata["status"]           = mpc::SolutionStats::resultStatusToString(lmpc_step_result.status);
+    latest_metadata["status"]           = static_cast<int>(lmpc_step_result.status);
 
     mpc::OptSequence optimal_sequence = lmpc.getOptimalSequence();
     auto opt_state_seq  = optimal_sequence.state;
@@ -63,10 +60,7 @@ void LMPCController::calculateControl(int k, double t, const xVec &x, const wVec
       PRINT("   solver_status_msg: " << lmpc_step_result.solver_status_msg)
       PRINT("         is_feasible: " << lmpc_step_result.is_feasible)
       PRINT("       Result status: " << lmpc_step_result.status)
-      PRINT("Number of iterations: " << lmpc_step_result.num_iterations)
       PRINT("                Cost: " << lmpc_step_result.cost)
-      PRINT("    Constraint error: " << lmpc_step_result.primal_residual)
-      PRINT("          Dual error: " << lmpc_step_result.dual_residual)
       PRINT("  Optimal x Sequence:\n" << opt_state_seq)
       PRINT("  Optimal u Sequence:\n" << opt_input_seq)
       PRINT("  Optimal y Sequence:\n" << opt_output_seq)

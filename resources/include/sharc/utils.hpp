@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>        // required by mpc/Types.hpp in libmpc 1.0.0
 #include <mpc/Utils.hpp>
 #include <Eigen/Core>
 #include "nlohmann/json.hpp"

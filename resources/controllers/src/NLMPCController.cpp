@@ -16,7 +16,7 @@ void NLMPCController::setup(const nlohmann::json &json_data){
     sample_time = json_data.at("system_parameters").at("sample_time");
     input_cost_weight = json_data.at("system_parameters").at("mpc_options").at("input_cost_weight");
 
-    nlmpc.setLoggerLevel(mpc::Logger::log_level::NORMAL);
+    nlmpc.setLoggerLevel(mpc::Logger::NORMAL);
     nlmpc.setDiscretizationSamplingTime(sample_time);
 
     // Dynamics differential equation
@@ -75,14 +75,11 @@ void NLMPCController::calculateControl(int k, double t, const xVec &x, const wVe
     control = nlmpc_step_result.cmd;
 
     latest_metadata.clear();
-    latest_metadata["iterations"]       = nlmpc_step_result.num_iterations;
     latest_metadata["solver_status"]    = nlmpc_step_result.solver_status;
     latest_metadata["solver_status_msg"]= nlmpc_step_result.solver_status_msg;
     latest_metadata["is_feasible"]      = nlmpc_step_result.is_feasible;
     latest_metadata["cost"]             = nlmpc_step_result.cost;
-    latest_metadata["constraint_error"] = nlmpc_step_result.primal_residual;
-    latest_metadata["dual_residual"]    = nlmpc_step_result.dual_residual;
-    latest_metadata["status"]           = mpc::SolutionStats::resultStatusToString(nlmpc_step_result.status);
+    latest_metadata["status"]           = static_cast<int>(nlmpc_step_result.status);
 }
 
 // Register the controller

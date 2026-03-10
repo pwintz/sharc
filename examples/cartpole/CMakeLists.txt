@@ -120,11 +120,13 @@ endif()
 # endif()
 
 # Link libraries
+find_package(Threads REQUIRED)
 target_link_libraries(
   ${EXECUTABLE_NAME} # Target
     nlopt
     # eigen?
     osqp
+    Threads::Threads
 )
 
 # Check if DYNAMORIO_HOME is defined and set DynamoRIO_DIR
