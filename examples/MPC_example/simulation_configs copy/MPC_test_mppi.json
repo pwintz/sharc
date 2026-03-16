@@ -1,0 +1,47 @@
+{
+  "label": "mppi_test",
+  "n_time_steps": 512,
+  "system_parameters": {
+    "state_dimension": 4,
+    "controller_type": "CarlaKinematicMPPIController",
+    "x_names": ["px", "py", "psi", "v"],
+    "target_speed": 10,
+    "mpc_options": {
+      "prediction_horizon": 10,
+      "control_horizon": 5,
+      "wheelbase": 2.87,
+      "waypoint_spacing": 0.5,
+      "cost_weights": {
+        "q_path":  1.0,
+        "q_speed": 1.0,
+        "r_accel": 1.0,
+        "r_steer": 10.0,
+        "r_jerk_v": 0.0,
+        "r_jerk_yaw": 0.0,
+        "gamma": 1.0
+      },
+      "mppi_options": {
+        "num_rollouts": 1024,
+        "lambda": 1.0,
+        "sigma_accel": 0.2,
+        "sigma_steer": 0.1,
+        "rho": 0.2,
+        "beta": 0.9
+      }
+    }
+  },
+  "x0": [0, 0, 0, 0],
+  "PARAMS_patch_values": {
+    "chip_cycle_time": 500000
+  },
+  "Simulation Options": {
+    "in-the-loop_delay_provider": "execution-driven scarab",
+    "parallel_scarab_simulation": false,
+    "max_batches": 99
+  },
+  "fake_delays": {
+    "enable": true,
+    "time_steps":              [],
+    "sample_time_multipliers": []
+  }
+}

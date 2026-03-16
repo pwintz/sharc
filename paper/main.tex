@@ -1,0 +1,792 @@
+% ============================================================
+%  Cycle-Accurate Co-Simulation of Computational Delays
+%  in Autonomous Vehicle Control
+%  Conference submission — double-column, 10pt
+% ============================================================
+\documentclass[conference]{IEEEtran}
+
+% ---- Packages -----------------------------------------------
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{bm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{cite}
+\usepackage[T1]{fontenc}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,decorations.markings,calc,positioning,patterns}
+
+% ---- Figure colors -------------------------------------------
+\definecolor{steelblue}{RGB}{31,119,180}
+\definecolor{mutedred}{RGB}{214,39,40}
+\definecolor{mutedpurple}{RGB}{148,103,189}
+\definecolor{safegreen}{RGB}{44,160,44}
+\definecolor{amber}{RGB}{255,195,0}
+
+% ---- Macros --------------------------------------------------
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\RMSE}{\mathrm{RMSE}}
+\newcommand{\calX}{\mathcal{X}}
+\newcommand{\calU}{\mathcal{U}}
+\newcommand{\calH}{\mathcal{H}}
+\newcommand{\calW}{\mathcal{W}}
+\newcommand{\calT}{\mathcal{T}}
+\newcommand{\ZOH}{\mathrm{ZOH}}
+\newcommand{\diag}{\mathrm{diag}}
+\newcommand{\TODO}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
+
+% ---- Theorem environments -----------------------------------
+\newtheorem{theorem}{Theorem}
+\newtheorem{proposition}{Proposition}
+\newtheorem{lemma}{Lemma}
+\newtheorem{corollary}{Corollary}
+\newtheorem{definition}{Definition}
+\newtheorem{remark}{Remark}
+\newtheorem{assumption}{Assumption}
+\newtheorem{example}{Example}
+
+% =============================================================
+\begin{document}
+
+\title{SHARC-Drive: Hardware-Aware Simulation for Real-Time Autonomous Driving}
+
+\author{\IEEEauthorblockN{Author~1\IEEEauthorrefmark{1},
+    Author~2\IEEEauthorrefmark{2},
+    Author~3\IEEEauthorrefmark{1}}
+  \IEEEauthorblockA{\IEEEauthorrefmark{1}Affiliation~1 \quad
+    \IEEEauthorrefmark{2}Affiliation~2\\
+    \texttt{\{email1, email2\}@placeholder.edu}}
+}
+
+\maketitle
+
+% =============================================================
+\begin{abstract}
+  In autonomous driving, control algorithms ranging from PID to
+  nonlinear model predictive control (NMPC) must be executed within a
+  strict sample period on embedded processors whose computational
+  resources vary widely.  The computation time depends on the
+  microarchitecture---clock speed, cache size, pipeline depth---and
+  interacts with the controller's algorithmic complexity in ways that
+  are difficult to predict analytically.  This paper presents a
+  co-simulation framework coupling \emph{SHARC} (Simulator for
+  Hardware Architecture and Real-time Control) with the \emph{CARLA}
+  driving simulator, enabling systematic evaluation of how hardware
+  and controller design choices jointly affect closed-loop safety.
+\end{abstract}
+
+\begin{IEEEkeywords}
+  Hardware--software co-design, autonomous driving, model predictive
+  control, computational delay, microarchitecture simulation.
+\end{IEEEkeywords}
+
+% =============================================================
+\section{Introduction}\label{sec:intro}
+An autonomous vehicle's control loop follows a simple pattern:
+sense, compute, actuate.  The critical assumption in most control
+designs is that computation is instantaneous.  On a fast processor
+running a PID controller, this assumption is reasonable---the
+computation completes in microseconds.  For a nonlinear model
+predictive control (MPC) algorithm on constrained hardware, however,
+the computation may approach or exceed the sample period $T$.
+When that occurs, the controller misses its deadline: no fresh
+command is delivered, and the vehicle continues executing the
+previous one.
+
+This coupling between processor capability and control performance
+is well understood in
+principle~\cite{caccamo2002overruns,findeisen2011robust_delay},
+yet the two domains are typically designed in isolation.  Control
+engineers assume instantaneous computation; hardware engineers
+optimize for generic benchmarks.  Testing on physical prototypes
+discovers timing violations late and
+expensively~\cite{mihalic2022hil}.
+
+A simulation framework that evaluates the complete loop, plant
+physics, control algorithm, \emph{and} processor
+microarchitecture, in a single experiment is needed.  This paper
+presents such a framework by combining two simulators:
+\begin{itemize}
+  \item \textbf{SHARC}~\cite{wintz2025sharc} (Simulator for
+    Hardware Architecture and Real-time Control) executes a
+    controller binary on a parameterized processor model via the
+    Scarab cycle-accurate simulator~\cite{scarab}, producing the
+    computation time $\tau_k$ at every sample step.
+  \item \textbf{CARLA}~\cite{dosovitskiy2017carla}, an open-source
+    driving simulator built on Unreal Engine, provides realistic
+    vehicle dynamics, urban road networks, and traffic.
+\end{itemize}
+SHARC is designed around an \emph{abstract dynamics interface}:
+any function mapping the current state and control to the next
+state can serve as the plant.  We exploit this by replacing the
+default ODE integrator with CARLA's physics engine, thereby
+obtaining high-fidelity vehicle dynamics without modifying SHARC's
+core architecture.\\
+\noindent\textbf{Contributions.}
+\TODO{}
+
+% =============================================================
+\section{Modeling Framework}\label{sec:model}
+
+We develop a general model of a sampled-data system in which
+the controller's computation time depends on the state, algorithm,
+and hardware.  The model is independent of any particular plant;
+CARLA enters in Section~\ref{sec:framework} as one instantiation.
+
+\subsection{Plant and Discretization}
+
+Consider a continuous-time plant
+\begin{equation}\label{eq:ct}
+  \dot{x} = \tilde{f}(t, x, u, w), \qquad y = h(x),
+\end{equation}
+with state $x \in \R^{n}$, control input $u \in \R^{m}$, exogenous
+input $w \in \R^{p}$, and measured output $y \in \R^{q}$.
+A digital controller samples the output at times
+$t_k := k\,T$, $k \in \N$, with sample period $T > 0$.
+Under zero-order hold, the control is constant over each interval
+$[t_k, t_{k+1})$, yielding the discrete-time system
+\begin{equation}\label{eq:dt}
+  x_{k+1} = f(x_k, u_k, w_k),
+\end{equation}
+where $f$ encapsulates the continuous dynamics integrated over one
+sample period under constant $u_k$ and $w_k := w(t_k)$.
+
+\begin{remark}\label{rem:f_general}
+  The map $f$ in~\eqref{eq:dt} need not have a closed-form
+  expression.  It may be evaluated by a numerical integrator, a
+  lookup table, or, as in our framework, an external physics
+  engine.  This generality is central to the design of SHARC and
+  enables the CARLA integration described in
+  Section~\ref{sec:integration}.
+\end{remark}
+
+\subsection{Computation Delay and Zero-Order Hold}
+
+At each sample time $t_k$, the controller reads $y_k = h(x_k)$
+and begins computing a new input $\tilde{u}_{k+1}$.  The
+computation requires $\tau_k > 0$ seconds.  The computed input is
+applied at the \emph{next} sample instant if and only if the
+computation finishes within one period; otherwise, the previous
+input is held.
+
+\begin{definition}[Zero-Order Hold Under Delay]\label{def:zoh}
+  The input applied at sample $k{+}1$ is
+  \begin{equation}\label{eq:zoh}
+    u_{k+1} = \begin{cases}
+      \tilde{u}_{k+1} & \text{if } \tau_k < T, \\
+      u_k              & \text{if } \tau_k \geq T.
+    \end{cases}
+  \end{equation}
+\end{definition}
+
+\begin{definition}[Deadline Miss]\label{def:miss}
+  At time step $k$, a \emph{deadline miss} occurs if $\tau_k \geq T$.
+  The \emph{miss rate} over a horizon of $K$ steps is
+  $$\rho := \frac{1}{K}\sum_{k=0}^{K-1}\mathbf{1}[\tau_k \geq T].$$
+\end{definition}
+
+\subsection{Hardware-Dependent Computation
+  Time}\label{sec:tau_model}
+
+The computation time depends on the algorithm $g$, the current
+measurement $y_k$, and the hardware configuration
+$\calH \in \R_+^{n_h}$ (clock frequency, cache sizes, pipeline
+parameters):
+\begin{equation}\label{eq:tau}
+  \tau_k = \calT(g, y_k, \calH).
+\end{equation}
+For a PID controller, $\calT$ is effectively constant: the
+computation is a fixed sequence of multiplications and additions.
+For MPC, $\calT$ depends on $y_k$ through the optimization
+landscape, states far from the reference require more solver
+iterations, and on $\calH$ through instruction throughput.
+
+Evaluating $\calT$ analytically is intractable for nontrivial
+controllers on realistic processors.  SHARC evaluates it
+\emph{empirically} by executing the controller binary inside the
+Scarab cycle-accurate simulator for a given hardware configuration.
+
+\subsection{Closed-Loop Dynamics and Cascading Misses}
+
+Substituting~\eqref{eq:zoh} into~\eqref{eq:dt}, the closed-loop
+dynamics become
+\begin{equation}\label{eq:cl}
+  x_{k+1} = f\!\bigl(x_k,\; \mu(x_{0:k},\, \tau_{0:k-1}),\;
+  w_k\bigr),
+\end{equation}
+where $\mu$ is the effective input policy determined by the
+ZOH rule.  Because $\tau_k$ depends on $x_k$
+via~\eqref{eq:tau}, a feedback loop emerges: the state influences
+the computation time, which determines the applied input, which
+drives the next state.
+
+\begin{remark}[Cascading deadline misses]\label{rem:cascade}
+  For controllers whose computation time grows with the tracking
+  error or proximity to constraints, as is typical for iterative optimization-based methods
+  such as MPC, deadline misses can cascade.  When a miss occurs,
+  the stale input drives the state further from the reference.
+  The larger error, in turn, requires more solver iterations at
+  the next step, increasing $\tau_{k+1}$ and making a subsequent
+  miss more likely.  This positive feedback loop can rapidly
+  destabilize the closed loop: a single miss triggers growing
+  errors and ever-longer computation times, producing a sharp
+  \emph{performance cliff}.  By contrast, controllers with
+  state-independent computation time (e.g., PID) are immune to
+  this cascade, since $\tau_k$ does not depend on the tracking
+  error.
+\end{remark}
+
+% =============================================================
+\section{Co-Simulation Framework}\label{sec:framework}
+
+\subsection{SHARC}\label{sec:sharc}
+
+SHARC~\cite{wintz2025sharc} is a framework for evaluating
+closed-loop control under realistic computational delays.
+Its architecture is organized around two user-supplied modules
+and one microarchitecture simulator:
+
+\noindent\textbf{Dynamics.}
+The user provides a Python class that implements the state
+transition $f$ in~\eqref{eq:dt}.  The class exposes two
+methods: \texttt{initialize()}, which sets up the plant state,
+and \texttt{step(x, u, w)}, which advances the dynamics by
+one sample period and returns $x_{k+1}$.  Because the dynamics
+are defined in Python, users can implement analytical models
+(e.g., an ODE integrator), data-driven surrogates, or, as in
+this work, a bridge to an external simulator.
+
+\noindent\textbf{Controller.}
+The controller is compiled to a native binary that reads
+the measurement $(t_k, y_k, w_k)$ and
+generates the control input $\tilde{u}_{k+1}$.
+Any control algorithm that can be expressed in C or C++ is
+supported by SHARC.
+
+\noindent\textbf{Scarab.}
+\TODO{Shengmin: Check and verify this explanation and make it more accurate.}
+The Scarab cycle-accurate
+simulator~\cite{scarab} executes the controller binary on a user-defined parameterized processor model, producing the computation time
+$\tau_k$ in simulated clock cycles.  Scarab models instruction
+caches, data caches, branch predictors, out-of-order pipelines,
+and memory hierarchy.  The hardware configuration $\calH$ is
+specified via a parameter file; sweeping the design space
+(e.g., varying clock frequency or cache size) requires only
+editing the corresponding parameter.
+
+SHARC provides two execution modes.  In
+\emph{execution-driven} (serial) mode, Scarab simulates the
+controller instruction-by-instruction during the control loop,
+producing $\tau_k$ at each step.  In \emph{trace-driven}
+(parallel) mode, the controller runs natively under DynamoRIO
+instrumentation~\cite{bruening2003dynamorio} to capture
+memory-access traces, which Scarab replays offline; multiple
+steps are processed in parallel for faster processing.  When a deadline miss is detected, SHARC re-simulates from the miss point with the corrected state under~\eqref{eq:zoh} as discussed in the SHARC paper \cite{wintz2025sharc}.
+
+\subsection{CARLA Integration}\label{sec:integration}
+
+CARLA~\cite{dosovitskiy2017carla} is an open-source driving
+simulator with realistic vehicle dynamics, urban road networks,
+and traffic participants.  We integrate CARLA into SHARC by
+implementing a Python dynamics class that connects to
+CARLA's synchronous API.  At initialization, the class
+spawns the ego vehicle and NPC traffic, enables synchronous
+mode with physics step $\Delta t = T$, and seeds the random
+number generators for reproducibility.  At each step, the
+class applies the control input to CARLA, ticks the world,
+and reads back the new state.  Because $\Delta t = T$, each
+CARLA tick corresponds to exactly one discrete-time step
+in~\eqref{eq:dt}.  From SHARC's perspective, CARLA is simply
+a black-box instantiation of the abstract~$f$. \TODO{Yash \& Malavikha: explain our determinism framework, explain why we simulate from the beginning for each batch.}
+
+% =============================================================
+\section{Controller Formulations}\label{sec:controllers}
+
+We evaluate a few controllers with qualitatively different
+computational profiles.
+
+\subsection{State and Control Representation}\label{sec:state}
+
+The ego vehicle state and control input are
+\begin{align}
+  x_k &:= (p_x,\, p_y,\, \psi,\, v)^\top
+    \in \R^4, \label{eq:state}\\
+  u_k &:= (\alpha,\, \delta,\, \beta)^\top
+    \in [0,1] \times [-1,1] \times [0,1],\label{eq:control}\\
+    w_k &:= (w_x^+, w_y^+)^\top \in \R^2 \label{eq:exo}
+\end{align}
+where $(p_x, p_y)$ is position, $\psi$ is heading (yaw), $v$ is
+speed, $(w_x^+, w_y^+)$ is the next waypoint provided by CARLA from the HD map, and
+$(\alpha, \delta, \beta)$ are throttle, steering, and brake.
+The exogenous input $w_k := (w_x^+, w_y^+)^\top$ provides the
+reference waypoint to the controller at each step.
+
+\subsection{PID Controller}\label{sec:pid}
+
+The PID controller decomposes vehicle control into two independent
+SISO loops.
+
+\noindent\textbf{Longitudinal.}  Track a constant reference speed
+$v^*$:
+\begin{equation}\label{eq:pid_lon}
+  \sigma_k = K_P^\ell\, e_k^v + K_I^\ell \sum_{j=0}^{k} e_j^v\, T
+    + K_D^\ell\, \frac{e_k^v - e_{k-1}^v}{T},
+\end{equation}
+where $e_k^v := v^* - v_k$.  Throttle and brake are
+$\alpha_k = \mathrm{clip}(\sigma_k,\, 0,\, 1)$,\;
+$\beta_k = \mathrm{clip}(-\sigma_k,\, 0,\, 1)$.
+
+\noindent\textbf{Lateral.}  Steer toward the current waypoint.
+The heading error is
+$e_k^\psi := \mathrm{atan2}(w_y^+ - p_y,\; w_x^+ - p_x) - \psi_k$,
+and the steering command is
+\begin{equation}\label{eq:pid_lat}
+  \delta_k = \mathrm{clip}\!\bigl(K_P^r\, e_k^\psi + K_I^r
+    \textstyle\sum_j e_j^\psi\, T + K_D^r\,
+    (e_k^\psi - e_{k-1}^\psi)/T,\;\pm 1\bigr).
+\end{equation}
+PID requires a fixed number of arithmetic operations per step,
+so $\tau_k \approx \mathrm{const}$.
+
+% ---- TikZ figure: MPC waypoint tracking --------------------
+\begin{figure}[t]
+  \centering
+  \resizebox{0.45\textwidth}{!}{%
+  \begin{tikzpicture}[
+      >=Stealth,
+      % ---- Style definitions ----
+      wp/.style={circle, fill=steelblue, draw=steelblue!60!black,
+        line width=0.5pt, inner sep=2.2pt},
+      pred/.style={circle, fill=mutedred, draw=mutedred!60!black,
+        line width=0.5pt, inner sep=2.6pt},
+      car/.style={rectangle, draw=black!85, line width=0.9pt,
+        fill=gray!90, minimum width=15mm, minimum height=7.5mm,
+        rounded corners=2pt},
+      dist/.style={densely dashed, mutedpurple, line width=0.75pt},
+      refpath/.style={steelblue, line width=1.6pt, opacity=0.40},
+      predpath/.style={mutedred, line width=1.2pt, densely dotted},
+      veloc/.style={-{Stealth[length=5pt]}, line width=1.3pt, safegreen!80!black},
+      refline/.style={black!35, dashed, line width=0.6pt},
+      anglearc/.style={steelblue!65!black, line width=0.8pt,
+        -{Stealth[length=4pt]}},
+      annot/.style={font=\small},
+    ]
+
+    % ================================================================
+    % Reference waypoints along an S-curve
+    % ================================================================
+    \foreach \i/\wx/\wy in {
+       % 1/0.0/0.00,   2/0.5/0.19,   3/1.0/0.44,   4/1.5/0.74,
+       5/2.0/1.08,   6/2.5/1.42,   7/3.0/1.74,   8/3.5/2.02,
+       9/4.0/2.24,  10/4.5/2.40,  11/5.0/2.48,  12/5.5/2.50,
+      13/6.0/2.46,  14/6.5/2.36,  15/7.0/2.22,  16/7.5/2.04,
+      17/8.0/1.84,  18/8.5/1.62,  19/9.0/1.40} {
+      \node[wp] (w\i) at (\wx,\wy) {};
+    }
+
+    % ---- Waypoint labels (first, middle, last) ----
+    \node[annot, steelblue!80!black, above=3pt] at (w5)  {$w^{(1)}$};
+    \node[annot, steelblue!80!black, above=3pt] at (w10) {$w^{(i)}$};
+    \node[annot, steelblue!80!black, below=3pt] at (w19) {$w^{(N_w)}$};
+
+    % ---- Smooth reference path ----
+    \draw[refpath]
+      plot[smooth, tension=0.50] coordinates {
+        (0.0,0.00) (0.5,0.19) (1.0,0.44) (1.5,0.74)
+        (2.0,1.08) (2.5,1.42) (3.0,1.74) (3.5,2.02)
+        (4.0,2.24) (4.5,2.40) (5.0,2.48) (5.5,2.50)
+        (6.0,2.46) (6.5,2.36) (7.0,2.22) (7.5,2.04)
+        (8.0,1.84) (8.5,1.62) (9.0,1.40)
+      };
+
+    % ================================================================
+    % Ego vehicle — heading angle 35 deg, position (0.80, 0.22)
+    % ================================================================
+    \node[car, rotate=20] (ego) at (0.80, 0.22) {};
+
+    % Label: state vector below the vehicle (absolute coords)
+    % \node[annot, black!70, anchor=north] at (0.80, -0.28)
+    %   {\textbf{Ego}:\; $x_k = (p_x,\,p_y,\,\psi,\,v)^\top$};
+
+    % ---- East-direction reference dashed line (for angle arc) ----
+    \draw[refline] (ego.center) -- ++(0:1.55);
+
+    % ---- Heading angle arc: 0 deg -> 35 deg, radius 1.1 ----
+    % Arc starts at (ego.center + (1.1, 0)) and sweeps to 35 deg
+    \draw[anglearc]
+      ($(ego.center)+(1.10,0)$) arc (0:20:1.10)
+      node[midway, below right=-8pt and 1pt, annot,
+        steelblue!70!black] {$\psi_k$};
+
+    % ---- Velocity vector (direction of motion, separate from arc) ----
+    % \draw[veloc] (ego.center) -- ++(35:1.55)
+    %   node[above right=1pt and 0pt, annot, safegreen!70!black] {$v_k$};
+
+    % ================================================================
+    % MPC predicted states — offset BELOW reference path so
+    % distance lines d_{j|k} are clearly non-zero
+    % ================================================================
+    \node[pred] (p1) at (2.20, 0.75) {}; % near w5=(2.0,1.08)
+    \node[pred] (p2) at (3.35, 1.35) {}; % near w7=(3.0,1.74)
+    \node[pred] (p3) at (4.45, 1.86) {}; % near w9=(4.0,2.24)
+    \node[pred] (p4) at (5.55, 2.12) {}; % near w11=(5.0,2.48)
+    \node[pred] (p5) at (6.65, 2.05) {}; % near w13=(6.0,2.46)
+
+    % ---- Predicted trajectory ----
+    \draw[predpath] (ego.center) -- (p1) -- (p2) -- (p3) -- (p4) -- (p5);
+
+    % ---- Predicted state labels ----
+    \node[annot, mutedred, right=2pt of p1]  {$\hat{x}_{k+1|k}$};
+    \node[annot, mutedred, below=0pt of p3]  {$\hat{x}_{k+3|k}$};
+    \node[annot, mutedred, below=0pt of p5]  {$\hat{x}_{k+N_p|k}$};
+
+    % ================================================================
+    % Distance lines to nearest waypoints
+    % ================================================================
+    \draw[dist] (p1) -- (w5)
+      node[midway, above right=-2pt, annot, mutedpurple] {$d_{1|k}$};
+    \draw[dist] (p2) -- (w7)
+      % node[midway, left=3pt, annot, mutedpurple] {$d_{2|k}$};
+    \draw[dist] (p3) -- (w10)
+      node[midway, right=0pt, annot, mutedpurple] {$d_{3|k}$};
+    \draw[dist] (p4) -- (w12)
+      % node[midway, left=3pt, annot, mutedpurple] {$d_{4|k}$};
+    \draw[dist] (p5) -- (w14)
+      node[midway, above=3pt, annot, mutedpurple] {$d_{5|k}$};
+
+    % ================================================================
+    % Legend box (positioned below and to the right of path)
+    % ================================================================
+    \begin{scope}[shift={(6.65,-0.75)}]
+      \draw[black!25, rounded corners=4pt, fill=white, fill opacity=0.92]
+        (-0.25,-0.40) rectangle (3.55, 1.20);
+
+      % Row 1: waypoint
+      \node[wp] at (0.10, 0.95) {};
+      \node[font=\scriptsize, anchor=west] at (0.30, 0.95)
+        {reference waypoint $w^{(i)}$};
+
+      % Row 2: predicted state
+      \node[pred] at (0.10, 0.60) {};
+      \node[font=\scriptsize, anchor=west] at (0.30, 0.60)
+        {predicted state $\hat{x}_{k+j|k}$};
+
+      % Row 3: predicted trajectory
+      \draw[predpath] (0.0, 0.25) -- (0.25, 0.25);
+      \node[font=\scriptsize, anchor=west] at (0.30, 0.25)
+        {predicted trajectory};
+
+      % Row 4: distance to reference
+      \draw[dist] (0.0,-0.10) -- (0.25,-0.10);
+      \node[font=\scriptsize, anchor=west] at (0.30,-0.10)
+        {tracking distance $d_{j|k}$};
+
+      % % Row 5: velocity vector
+      % \draw[veloc] (0.0,-0.45) -- (0.25,-0.45);
+      % \node[font=\scriptsize, anchor=west] at (0.30,-0.45)
+      %   {velocity $v_k$};
+
+      % % Row 6: heading angle
+      % \draw[anglearc] (0.18,-0.72) arc (0:45:0.18);
+      % \node[font=\scriptsize, anchor=west] at (0.30,-0.72)
+      %   {heading angle $\psi_k$};
+    \end{scope}
+
+  \end{tikzpicture}}
+  \caption{MPC waypoint-tracking formulation.  The ego vehicle
+    at position $(p_x, p_y)$ moves with speed $v_k$ and heading
+    $\psi_k$ (measured from east, shown as an arc).
+    Reference waypoints $\{w^{(i)}\}_{i=1}^{N_w}$ (\textcolor{steelblue}{blue})
+    define the desired path.  At each step $k$, MPC rolls out the
+    kinematic bicycle model~\eqref{eq:bicycle} to obtain
+    $N_p$ predicted states $\hat{x}_{k+j|k}$ (\textcolor{mutedred}{red})
+    and minimizes the sum of squared distances $d_{j|k}$
+    (\textcolor{mutedpurple}{purple dashed}) from each predicted
+    position to the closest waypoint~\eqref{eq:closest_wp}.}
+  \label{fig:mpc_waypoints}
+\end{figure}
+
+\subsection{Model Predictive Controller}\label{sec:mpc}
+\TODO{Tyler: Check and verify this part and make it more accurate.}
+The MPC controller receives a vector of $N_w$ reference waypoints
+$\mathcal{W} := \{w^{(i)}\}_{i=1}^{N_w}$,
+$w^{(i)} = (w_x^{(i)}, w_y^{(i)})$,
+from a route planner and solves a finite-horizon optimal control
+problem at each sample step.  The formulation is illustrated in
+Fig.~\ref{fig:mpc_waypoints}.
+
+\noindent\textbf{Prediction model.}  We use a kinematic bicycle
+model for internal prediction:
+\begin{equation}\label{eq:bicycle}
+  \hat{x}_{j+1|k} = \hat{x}_{j|k}
+  + T \begin{bmatrix}
+    v_{j|k} \cos\psi_{j|k} \\
+    v_{j|k} \sin\psi_{j|k} \\
+    (v_{j|k} / L)\tan\delta_{j|k} \\
+    a_{j|k}
+  \end{bmatrix},
+\end{equation}
+where $L$ is the wheelbase and $a_{j|k}$ is the longitudinal
+acceleration derived from throttle and brake.
+
+\noindent\textbf{Cost function.}  The cost penalizes the
+Euclidean distance from each predicted position to the
+\emph{closest} waypoint, along with speed tracking and control
+effort:
+\begin{equation}\label{eq:mpc_cost}
+  J = \sum_{j=1}^{N_p} \bigl[
+    q_\ell\, d_{j|k}^2
+    + q_v\, (v_{j|k} - v^*)^2
+  \bigr]
+  + \sum_{j=0}^{N_c-1} \|u_{j|k}\|_R^2,
+\end{equation}
+where
+\begin{equation}\label{eq:closest_wp}
+  d_{j|k} := \min_{i \in \{1,\ldots,N_w\}}
+  \bigl\|(p_{x,j|k},\, p_{y,j|k}) - w^{(i)}\bigr\|
+\end{equation}
+is the distance to the closest waypoint, $v^*$ is the reference
+speed, $q_\ell, q_v > 0$ are weights, and $R \succ 0$ penalizes
+control effort.
+
+\noindent\textbf{Optimization problem.}  At each $t_k$:
+\begin{subequations}\label{eq:mpc_opt}
+\begin{align}
+  \min_{u_{0|k},\ldots,u_{N_c-1|k}} \quad & J \\
+  \text{s.t.} \quad
+    & \hat{x}_{j+1|k} = F(\hat{x}_{j|k}, u_{j|k}), \\
+    & \hat{x}_{0|k} = x_k, \label{eq:mpc_ic}\\
+    & u_{j|k} \in \calU, \qquad j = 0,\ldots,N_c{-}1,
+\end{align}
+\end{subequations}
+with prediction horizon $N_p$, control horizon $N_c \leq N_p$,
+and input constraint set $\calU$.  Only the first input
+$u_{0|k}$ is applied (receding horizon);
+the result becomes $\tilde{u}_{k+1}$
+in~\eqref{eq:zoh}.
+
+\begin{remark}[State-dependent computation time]\label{rem:mpc_tau}
+  The number of solver iterations, and hence $\tau_k$, depends
+  on the current state.  Near the reference, the optimization is
+  well-conditioned; after a miss, the perturbed state requires more
+  iterations.  This is the mechanism underlying the cascading
+  misses described in Remark~\ref{rem:cascade}.
+\end{remark}
+
+\begin{remark}[Computational complexity ordering]
+  PID requires $O(1)$ arithmetic operations per step, whereas
+  NLMPC iteratively solves a nonconvex NLP whose size grows
+  with the prediction horizon $N_p$.  The ordering
+  $\tau_k^{\mathrm{PID}} \ll \tau_k^{\mathrm{NLMPC}}$
+  is central to our hardware sensitivity analysis.
+\end{remark}
+
+% =============================================================
+\section{Experimental Setup}\label{sec:experiments}
+
+\subsection{Driving Scenarios}
+
+Table~\ref{tab:scenarios} summarizes the scenarios drawn from
+CARLA's built-in maps and town configurations.  Scenarios are ordered
+by \emph{safety criticality}: the higher the row, the less margin is
+available for delayed actuation. \TODO{Fill this table correctly}
+
+\begin{table}[h]
+  \centering
+  \caption{Driving scenarios used for evaluation.}
+  \label{tab:scenarios}
+  \renewcommand{\arraystretch}{1.2}
+  \footnotesize
+  \begin{tabular}{llp{2.6cm}c}
+    \toprule
+    \textbf{Scenario} & \textbf{Map} & \textbf{Key challenge}
+      & \textbf{$T$ (s)}\\
+    \midrule
+    Straight-road cruising     & Town04 & Speed tracking        & 0.25 \\
+    Highway lane following     & Town04 & Lateral precision     & 0.25 \\
+    Adaptive cruise control    & Town04 & Lead-car gap          & 0.20 \\
+    Intersection crossing      & Town03 & Timing, collision av. & 0.15 \\
+    Emergency braking          & Town01 & Min. stopping dist.   & 0.10 \\
+    High-speed race lap        & Town04 & Stability at speed    & 0.10 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Hardware Configurations}\label{sec:hw_configs}
+
+We evaluate each controller on a set of processor configurations
+by varying the clock frequency and L1 data cache size while
+holding all other microarchitectural parameters (pipeline width,
+branch predictor, memory latency) at a fixed baseline.
+Table~\ref{tab:hw} summarizes the configurations.
+
+\begin{table}[t]
+  \centering
+  \caption{Processor configurations evaluated in all experiments.
+    Each row defines one Scarab parameter set.}
+  \label{tab:hw}
+  \footnotesize
+  \begin{tabular}{clcl}
+    \toprule
+    \textbf{Config} & $f_{\text{clk}}$ (MHz)
+      & $S_{\text{L1}}$ (kB) & \textbf{Description} \\
+    \midrule
+    A & 2000 &  64  & Fast baseline  \\
+    B & 1000 &  64  & Halved frequency  \\
+    C & 500  &  64  & Quarter frequency  \\
+    D & 250  &  64  & Eighth frequency  \\
+    E & 2000 &   8  & Small cache  \\
+    F & 2000 & 128  & Large cache  \\
+    G & 500  &   8  & Constrained  \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Performance Metrics}
+
+Let $\{x_k\}_{k=0}^K$ be the simulated trajectory and
+$\{\bar{x}_k\}_{k=0}^K$ the reference.
+
+\noindent\textbf{Position RMSE:}
+\begin{equation}\label{eq:rmse}
+  \RMSE_{\mathrm{pos}} :=
+  \sqrt{\frac{1}{K}\sum_{k=0}^{K-1}
+    \bigl[(p_x^k - \bar{p}_x^k)^2 + (p_y^k - \bar{p}_y^k)^2\bigr]}.
+\end{equation}
+
+\noindent\textbf{Speed RMSE:}
+$\RMSE_v := \sqrt{\frac{1}{K}\sum_{k=0}^{K-1}(v_k - v^*)^2}$.
+
+\noindent\textbf{Deadline miss rate} $\rho$ (Definition~\ref{def:miss}).
+
+\noindent\textbf{Mean computation delay:}
+$\bar{\tau} := \frac{1}{K}\sum_{k=0}^{K-1} \tau_k$, with distribution
+$p(\tau_k)$ visualized as a box plot.
+
+\noindent\textbf{Safety events:} number of (a) collisions with the
+environment, (b) lane-boundary violations ($|e_y| > 1.5$\,m), and
+(c) speed-limit exceedances ($v > 1.2\,v^*$) per episode.
+% =============================================================
+\section{Results}\label{sec:results}
+
+We report results for lane following with $T = 0.1$\,s and
+$K = 64$ steps.  Table~\ref{tab:results} presents the key
+metrics for each hardware configuration.
+
+\begin{table}[t]
+  \centering
+  \caption{Experimental results: mean computation delay
+    $\bar{\tau}$, deadline miss rate $\rho$, position RMSE,
+    and speed RMSE for each controller and hardware
+    configuration ($T = 0.1$\,s, $K = 64$\,steps).} 
+  \label{tab:results}
+  \footnotesize
+  \renewcommand{\arraystretch}{1.15}
+  \begin{tabular}{c l rr rr}
+    \toprule
+    & & \multicolumn{2}{c}{\textbf{PID}}
+      & \multicolumn{2}{c}{\textbf{MPC}} \\
+    \cmidrule(lr){3-4}\cmidrule(lr){5-6}
+    \textbf{Cfg}
+      & \textbf{Metric}
+      & \multicolumn{1}{c}{Value}
+      & \multicolumn{1}{c}{$\rho$}
+      & \multicolumn{1}{c}{Value}
+      & \multicolumn{1}{c}{$\rho$} \\
+    \midrule
+    \multirow{2}{*}{A}
+      & $\bar{\tau}$ ($\mu$s)         & 14   & \multirow{2}{*}{0.0}
+                                      & ---  & \multirow{2}{*}{---} \\
+      & $\RMSE_{\text{pos}}$ (m)      & ---  &
+                                      & ---  &  \\
+    \midrule
+    \multirow{2}{*}{B}
+      & $\bar{\tau}$ ($\mu$s)         & 28   & \multirow{2}{*}{0.0}
+                                      & ---  & \multirow{2}{*}{---} \\
+      & $\RMSE_{\text{pos}}$ (m)      & ---  &
+                                      & ---  &  \\
+    \midrule
+    \multirow{2}{*}{C}
+      & $\bar{\tau}$ ($\mu$s)         & 56   & \multirow{2}{*}{0.0}
+                                      & ---  & \multirow{2}{*}{---} \\
+      & $\RMSE_{\text{pos}}$ (m)      & ---  &
+                                      & ---  &  \\
+    \midrule
+    \multirow{2}{*}{D}
+      & $\bar{\tau}$ ($\mu$s)         & 112  & \multirow{2}{*}{0.0}
+                                      & ---  & \multirow{2}{*}{---} \\
+      & $\RMSE_{\text{pos}}$ (m)      & ---  &
+                                      & ---  &  \\
+    \midrule
+    \multirow{2}{*}{G}
+      & $\bar{\tau}$ ($\mu$s)         & 56   & \multirow{2}{*}{0.0}
+                                      & ---  & \multirow{2}{*}{---} \\
+      & $\RMSE_{\text{pos}}$ (m)      & ---  &
+                                      & ---  &  \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Computation Delay Distributions}
+
+\TODO{Figure: Box plots of $\tau_k$ distributions for PID, MPC
+across different hardware and scenarios }
+
+\subsection{Tracking Performance vs.\ Hardware}
+\TODO{Figure: RMSE$_\text{pos}$ vs.\ clock frequency sweep for
+NLMPC and LMPC on the intersection and emergency-braking scenarios.
+Expected finding: step-function degradation at a critical clock—the
+``hardware--performance cliff.''  PID flat across all frequencies,
+confirming computational simplicity as robustness.}
+
+\TODO{Figure: Pareto frontier plots: RMSE$_\text{pos}$ vs.\ clock
+speed for LMPC and NLMPC with varying prediction horizon $N_p \in
+\{5, 10, 20\}$.  Each $(N_p, f_\text{clk})$ pair is a design point.
+Expected finding: smaller $N_p$ reduces computation time, lowers
+$\rho$, but increases tracking error; the Pareto frontier identifies
+optimal $(N_p, f_\text{clk})$ tradeoffs for each AV scenario.}
+
+This analysis operationalizes the co-design objective: rather than
+choosing the largest $N_p$ that a given processor can \emph{nominally}
+run, the SHARC--CARLA framework reveals the largest $N_p$ the processor
+can run \emph{within the sample period} of a specific driving scenario,
+accounting for worst-case instruction-level timing.
+
+
+
+\subsection{Cache Sensitivity}
+\TODO{Cache sensitivity plots}
+
+% =============================================================
+\section{Discussion}\label{sec:discussion}
+
+\TODO{This is just a placeholder for now.}
+\noindent\textbf{The performance cliff.}
+The most significant finding in SHARC-based
+experiments~\cite{wintz2025sharc} is that control degradation is
+not gradual.  A small reduction in processor capability can flip
+the system from zero misses to cascading misses
+(Remark~\ref{rem:cascade}).  Our CARLA integration extends this
+observation to a realistic driving scenario with high-fidelity
+vehicle dynamics and traffic.
+\noindent\textbf{MPC horizon as a co-design variable.}
+The classical MPC design question ``how large should $N_p$ be?'' is
+answered in closed-loop terms by our Pareto analysis.  On constrained
+hardware, halving $N_p$ can eliminate all deadline misses while
+incurring only a modest RMSE increase—a trade that the designer cannot evaluate without SHARC.
+
+\noindent\textbf{Limitations.}
+CARLA's physics engine, while detailed, is not a certified vehicle
+model. The current study evaluates only two controllers; extending to a broader family of algorithms is future work.
+
+% =============================================================
+\section{Conclusion}\label{sec:conclusion}
+\TODO{}
+% =============================================================
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+\end{document}

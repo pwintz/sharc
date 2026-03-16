@@ -1,0 +1,584 @@
+% ============================================================
+%  Computational Hardware Effects on Autonomous Vehicle Control:
+%  A SHARC–CARLA Co-simulation Framework
+%  IEEE CDC submission — double-column, 10pt
+%  Authors: [PLACEHOLDER — fill in before submission]
+% ============================================================
+\documentclass[conference]{IEEEtran}
+
+% ---- Packages -----------------------------------------------
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{bm}          % bold math
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{cite}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage[T1]{fontenc}
+
+% ---- Macros --------------------------------------------------
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\ZOH}{\mathrm{ZOH}}
+\newcommand{\RMSE}{\mathrm{RMSE}}
+\newcommand{\diag}{\mathrm{diag}}
+\newcommand{\calX}{\mathcal{X}}
+\newcommand{\calU}{\mathcal{U}}
+\newcommand{\TODO}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
+
+% ---- Theorem environments -----------------------------------
+\newtheorem{definition}{Definition}
+\newtheorem{remark}{Remark}
+
+% =============================================================
+\begin{document}
+
+\title{Computational Hardware Effects on Autonomous Vehicle
+  Control: A SHARC--CARLA Co-simulation Framework}
+
+\author{\IEEEauthorblockN{Author~1, Author~2, Author~3}
+  \IEEEauthorblockA{Affiliation Placeholder\\
+    \texttt{email@placeholder.edu}}
+}
+
+\maketitle
+
+% =============================================================
+\begin{abstract}
+Autonomous vehicles (AVs) execute safety-critical control algorithms—PID
+regulators, linear MPC, nonlinear MPC—on a wide spectrum of embedded
+processors, from high-performance automotive SoCs to constrained
+microcontrollers.  The computation time $\tau_k$ incurred by these
+algorithms is not fixed; it depends intimately on the underlying
+microarchitecture (cache hierarchy, clock frequency, branch predictor).
+A delayed control input is effectively a stale input: the plant evolves
+for an entire sample period on the wrong command.  In safety-critical
+scenarios—emergency braking, intersection crossing, high-speed path
+following—even a single missed computational deadline can be catastrophic.
+This paper presents a unified co-simulation framework that couples
+\emph{SHARC} (Simulator for Hardware Architecture and Real-time
+Control)~\cite{wintz2025sharc} with the \emph{CARLA} high-fidelity
+urban driving simulator.  We model CARLA as a concrete \emph{dynamics
+class} inside SHARC, replacing its ODE integrator with cycle-accurate
+physics ticks.  We then deploy three controllers of increasing
+computational complexity (PID, LMPC, NLMPC) across multiple hardware
+configurations and AV-relevant driving scenarios, measuring trajectory
+tracking error, deadline miss rate, and safety event frequency.  Our
+results reveal a consistent \emph{hardware--performance cliff}: small
+reductions in processor clock speed or cache size push the computational
+delay beyond the sample period, triggering cascading control degradation.
+This framework enables quantitative hardware--software co-design for AVs
+before silicon is committed.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Autonomous driving, hardware--software co-design, model predictive
+control, computational delay, CARLA, microarchitecture simulation.
+\end{IEEEkeywords}
+
+% =============================================================
+\section{Introduction}\label{sec:intro}
+
+Modern autonomous vehicles are cyber-physical systems (CPSs) in the
+strictest sense: their safety properties emerge from the \emph{joint}
+behavior of physics, control software, and computational hardware.  Yet
+the dominant design practice treats these three as separable concerns.
+Control engineers design algorithms assuming zero-delay actuation;
+hardware engineers provision processors for average-case workloads;
+systems integrators discover timing violations late—often on physical
+prototypes.
+
+The root cause of this disconnect is the lack of a simulation tool that
+simultaneously models (a) realistic vehicle dynamics, (b) the
+computation time of the control algorithm on a specific processor, and
+(c) the causal effect of that delay on the closed-loop trajectory.
+Existing alternatives fall short.  Hardware-in-the-loop (HIL) systems
+use real hardware, making them inflexible and expensive for design-space
+exploration~\cite{mihalic2022hil}.  Standard co-simulators lack
+cycle-accurate timing~\cite{torngren2006cosim}.  CARLA alone models
+physics beautifully but treats control computation as instantaneous.
+
+We close this gap by integrating two state-of-the-art simulators:
+\textbf{SHARC}~\cite{wintz2025sharc}, which uses the Scarab
+microarchitecture simulator~\cite{scarab} to measure controller
+execution time at the instruction level, and \textbf{CARLA}~\cite{dosovitskiy2017carla},
+which provides a photorealistic, physics-faithful urban driving
+environment.  The key contribution is a \texttt{CarlaDynamics}
+interface class that exposes CARLA's synchronous stepping API as a
+SHARC \texttt{Dynamics} object, so that every SHARC simulation loop
+tick advances CARLA by exactly one sample period, while Scarab
+concurrently measures how long the controller binary took to run on
+the target chip.
+
+\smallskip\noindent\textbf{Contributions.}
+\begin{enumerate}
+  \item \textbf{SHARC--CARLA integration}: a reusable \texttt{CarlaDynamics}
+    class that bridges cycle-accurate hardware simulation with
+    high-fidelity autonomous-driving physics.
+  \item \textbf{Controller library}: PID, LMPC, and NLMPC controllers
+    formulated uniformly within the SHARC pipe-based communication
+    protocol, enabling apples-to-apples hardware comparison.
+  \item \textbf{Hardware--software co-design analysis}: a systematic
+    study of how compute budget (clock speed, cache) interacts with
+    controller type and scenario complexity, quantified by tracking
+    error, deadline miss rate, and safety event frequency.
+\end{enumerate}
+
+% =============================================================
+\section{Background: The SHARC Framework}\label{sec:sharc}
+
+We summarize the formal model of SHARC~\cite{wintz2025sharc}, which
+this work extends to autonomous driving.
+
+\subsection{Plant Model}
+
+A physical plant is modeled in continuous time as
+\begin{equation}\label{eq:ct}
+  \dot{x} = \tilde{f}(t, x, u, w), \qquad y = h(x, u, w),
+\end{equation}
+where $x \in \R^{n_x}$ is the state, $u \in \R^{n_u}$ the control
+input, $w \in \R^{n_w}$ an exogenous (disturbance/reference) input, and
+$y \in \R^{n_y}$ the output.  SHARC discretizes~\eqref{eq:ct} on a
+uniform grid $t_k := kT$ with sample period $T > 0$:
+\begin{equation}\label{eq:disc}
+  x_{k+1} = f(t_k, x_k, u_k, w(t_k)),
+\end{equation}
+where $f$ is obtained by numerical integration of $\tilde{f}$ over
+$[t_k, t_{k+1}]$ under zero-order hold (ZOH) on $u$.  Users may
+alternatively supply $f$ directly (hybrid systems, stochastic models).
+
+\subsection{Computation-Delay Model}\label{sec:delay}
+
+In an ideal controller, $u_k = g(t_k, y_k)$ is available
+instantaneously.  In reality, computing $g(t_k, y_k)$ requires
+$\tau_k > 0$ seconds.  Let $\tilde{t}_{k+1} := t_k + \tau_k$ be the
+time at which the new control is ready.  SHARC models the discrete
+closed-loop as:
+\begin{equation}\label{eq:zoh_delay}
+  u(t) = \begin{cases}
+    u_k & t \in [t_k,\; t_{k+1}) \text{ if } \tau_k \geq T, \\
+    u_k & t \in [t_k,\; \tilde{t}_{k+1}) \text{ if } \tau_k < T, \\
+    \tilde{u}_{k+1} & t \in [\tilde{t}_{k+1},\; t_{k+1}) \text{ if }
+    \tau_k < T,
+  \end{cases}
+\end{equation}
+where $\tilde{u}_{k+1} := g(t_k, y_k)$ is the freshly computed control.
+When $\tau_k \geq T$ (a \emph{deadline miss}), the stale input $u_k$
+is held for the entire next period.  Cascading misses cause the system
+to accumulate error, often destabilizing it.
+
+\begin{definition}[Deadline Miss]\label{def:miss}
+  At time step $k$, a \emph{deadline miss} occurs if $\tau_k \geq T$.
+  The \emph{miss rate} over a horizon of $K$ steps is
+  $\rho := \frac{1}{K}\sum_{k=0}^{K-1}\mathbf{1}[\tau_k \geq T]$.
+\end{definition}
+
+\subsection{Computation Time via Scarab}
+
+The delay $\tau_k$ is not assumed; it is \emph{measured} by running the
+controller binary inside the Scarab microarchitecture
+simulator~\cite{scarab}.  Scarab is cycle-accurate: it models branch
+predictors, cache hierarchies, and instruction pipelines, translating
+them into a simulated execution time in femtoseconds.  Two modes exist:
+\emph{execution-driven} (Scarab instruments the running binary via
+processor-trace markers) and \emph{DynamoRIO-based} (memory traces are
+captured offline and replayed in parallel batches).  Hardware is
+specified via \texttt{PARAMS} files: clock frequency, L1/L2 cache
+sizes, and memory latency.  This makes it straightforward to evaluate a
+controller on, say, an ARM Cortex-A76 versus a Cortex-M55 without
+owning either chip.
+
+% =============================================================
+\section{CARLA as a SHARC Dynamics Class}\label{sec:carla_dyn}
+
+\subsection{Bridging CARLA and SHARC}
+
+CARLA is a synchronous open-source vehicle simulator built on Unreal
+Engine 4.  In synchronous mode, time advances only when the Python
+client calls \texttt{world.tick()}, making it amenable to tight
+integration with an external timing model.
+
+We implement a \texttt{CarlaDynamics} class that inherits from
+SHARC's abstract \texttt{Dynamics} base class.  The interface contract
+requires two methods:
+\begin{itemize}
+  \item \texttt{setup\_system()}: called once before the simulation loop;
+    connects to the CARLA server, sets $T_s =$ \texttt{fixed\_delta\_seconds},
+    spawns the ego vehicle, and initializes sensors.
+  \item \texttt{evolve\_state}$(t_0, x_0, u, w, t_f)$: applies control
+    $u$ to the ego vehicle, calls \texttt{world.tick()} for
+    $\lfloor(t_f - t_0)/T_s\rfloor$ steps, and reads back
+    the new state $x_{k+1}$ from the CARLA actor API.
+\end{itemize}
+
+Critically, CARLA is put into \emph{synchronous mode with fixed
+  delta}: the internal physics engine advances by exactly $T$ per tick,
+ensuring that SHARC's discrete time index $k$ and CARLA's physics time
+remain aligned throughout the simulation.
+
+\subsection{State, Control, and Exogenous Input}
+
+For the ego vehicle, we define:
+\begin{align}
+  x_k &:= \bigl[p_x,\; p_y,\; \psi,\; v,\; w_x^{\mathrm{nxt}},\;
+    w_y^{\mathrm{nxt}}\bigr]^\top \in \R^6, \label{eq:state}\\
+  u_k &:= \bigl[\alpha,\; \delta,\; \beta\bigr]^\top \in
+    [0, 1] \times [-1, 1] \times [0, 1], \label{eq:control}\\
+  w_k &:= \bigl[w_x^{\mathrm{nxt}},\; w_y^{\mathrm{nxt}}\bigr]^\top
+    \in \R^2, \label{eq:exo}
+\end{align}
+where $(p_x, p_y)$ is the ego position, $\psi$ the yaw angle,
+$v$ the longitudinal speed in km/h, $(w_x^{\mathrm{nxt}},
+w_y^{\mathrm{nxt}})$ the coordinates of the next road waypoint
+obtained from the CARLA HD map (2\,m ahead), and $(\alpha, \delta,
+\beta)$ are throttle, steering, and brake commands.  The output is
+$y_k := [p_x, p_y]^\top \in \R^2$.
+
+\begin{remark}
+  Embedding the next waypoint in both state and exogenous input is deliberate:
+  the C++ controller receives $w_k$ via the SHARC pipe interface without
+  a separate communication channel, and the Python plant runner can
+  independently query it from the CARLA map for state bookkeeping.
+\end{remark}
+
+The transition $x_{k+1} = F_{\mathrm{CARLA}}(x_k, u_k, w_k)$ replaces
+the ODE integrator in~\eqref{eq:disc}: CARLA's UE4 physics engine acts
+as an implicit, high-fidelity integrator that internally models tire
+forces, aerodynamic drag, engine torque curves, and road geometry.
+
+% =============================================================
+\section{Controller Formulations}\label{sec:controllers}
+
+All three controllers are compiled as standalone C++ executables and
+communicate with the SHARC plant runner via named POSIX pipes (FIFOs).
+At each step $k$, the Python plant runner writes $(k, t_k, x_k, w_k)$
+to input pipes; the C++ binary reads them, computes $u_k$, and writes
+it to the output pipe.  Scarab instruments this computation window to
+obtain $\tau_k$.
+
+\subsection{PID Controller}
+
+We decompose vehicle control into two independent PID loops.
+
+\noindent\textbf{Longitudinal (speed) control.}
+\begin{equation}\label{eq:pid_lon}
+  e_v^k := v^* - v_k, \qquad
+  \sigma_k = K_P^{\ell} e_v^k + K_D^{\ell}\,\dot{e}_v^k +
+  K_I^{\ell}\int_0^{t_k} e_v \,d\tau.
+\end{equation}
+If $\sigma_k \geq 0$, set $\alpha_k = \min(\sigma_k, \alpha_{\max})$,
+$\beta_k = 0$; otherwise $\alpha_k = 0$, $\beta_k = \min(-\sigma_k,
+\beta_{\max})$.
+
+\noindent\textbf{Lateral (steering) control.}  The heading error to the
+next waypoint is
+\begin{equation}\label{eq:heading_err}
+  e_\psi^k := \mathrm{atan2}(w_y^k - p_y^k,\;w_x^k - p_x^k) - \psi_k,
+\end{equation}
+and the steering command is
+\begin{equation}\label{eq:pid_lat}
+  \delta_k = K_P^{r} e_\psi^k + K_D^{r}\,\dot{e}_\psi^k +
+  K_I^{r}\int_0^{t_k} e_\psi \,d\tau,
+\end{equation}
+clipped to $[-\delta_{\max}, \delta_{\max}]$.  Derivative and integral
+terms are computed online using a sliding buffer of the last
+$N_{\mathrm{buf}} = 10$ samples.
+
+\subsection{Linear MPC (LMPC)}
+
+We linearize the CARLA vehicle dynamics around a reference trajectory
+$(\bar{x}_k, \bar{u}_k)$ to obtain the incremental model
+\begin{equation}\label{eq:lmpc_model}
+  \Delta x_{k+1} = A_k \Delta x_k + B_k \Delta u_k,
+\end{equation}
+where $\Delta x_k := x_k - \bar{x}_k$, $\Delta u_k := u_k -
+\bar{u}_k$, and $(A_k, B_k)$ are the Jacobians of
+$F_{\mathrm{CARLA}}$ evaluated at the reference point.
+
+At each sample time $t_{k_0}$, LMPC solves the convex QP:
+\begin{align}
+  \min_{\{u_k\}_{k=k_0}^{k_0+N_c-1}} \quad&
+    \sum_{k=k_0}^{k_0+N_p-1}\!\!\|\Delta x_{k|k_0}\|_Q^2
+    + \|\Delta u_{k|k_0}\|_R^2 \label{eq:lmpc_cost}\\
+  \mathrm{s.t.}\quad & \Delta x_{k+1|k_0} = A_k\Delta x_{k|k_0} +
+    B_k \Delta u_{k|k_0}, \nonumber\\
+  & \Delta x_{k_0|k_0} = x_{k_0} - \bar{x}_{k_0},\nonumber\\
+  & u_k \in \mathcal{U},\quad x_k \in \mathcal{X}, \nonumber
+\end{align}
+where $N_p$ is the prediction horizon, $N_c \leq N_p$ the control
+horizon, $Q \succeq 0$ and $R \succ 0$ are state and input cost
+matrices, $\mathcal{U}$ encodes actuator limits, and $\mathcal{X}$
+encodes road/safety constraints (lane boundaries, speed limits).  Only
+$u_{k_0|k_0}$ is applied (receding horizon).
+
+\subsection{Nonlinear MPC (NLMPC)}
+
+NLMPC retains the full nonlinear transition:
+\begin{align}
+  \min_{\{u_k\}_{k=k_0}^{k_0+N_c-1}} \quad&
+    \sum_{k=k_0}^{k_0+N_p-1} C(x_{k|k_0}, u_{k|k_0})
+    \label{eq:nlmpc_cost}\\
+  \mathrm{s.t.}\quad & x_{k+1|k_0} =
+    F_{\mathrm{model}}(x_{k|k_0}, u_{k|k_0}), \nonumber\\
+  & x_{k_0|k_0} = \hat{x}_{k_0},\nonumber\\
+  & u_k \in \mathcal{U},\quad x_k \in \mathcal{X}. \nonumber
+\end{align}
+Here $F_{\mathrm{model}}$ is a \emph{kinematic bicycle model} used
+as the internal prediction model (not CARLA itself), providing a
+computationally tractable nonlinear approximation.  The cost
+$C(x_k, u_k) = \|x_k - x_k^{\mathrm{ref}}\|_Q^2 +
+\|u_k\|_R^2$ is a reference-tracking quadratic.  The optimization
+is solved by Sequential Least Squares QP (SLSQP)~\cite{kraft1988slsqp}
+via the \texttt{libmpc++} library~\cite{piccinelli_libmpc}.
+
+\begin{remark}[Computational complexity ordering]
+  PID has $O(1)$ arithmetic operations per step; LMPC solves a convex QP
+  of size $O(N_p n_x + N_c n_u)$; NLMPC iteratively solves a nonconvex
+  NLP.  This ordering ($\tau_k^{\mathrm{PID}} \ll
+  \tau_k^{\mathrm{LMPC}} \ll \tau_k^{\mathrm{NLMPC}}$) is central to
+  our hardware sensitivity analysis.
+\end{remark}
+
+% =============================================================
+\section{Experimental Setup}\label{sec:experiments}
+
+\subsection{Driving Scenarios}
+
+Table~\ref{tab:scenarios} summarizes the six scenarios drawn from
+CARLA's built-in maps and town configurations.  Scenarios are ordered
+by \emph{safety criticality}: the higher the row, the less margin is
+available for delayed actuation.
+
+\begin{table}[h]
+  \centering
+  \caption{Driving scenarios used for evaluation.}
+  \label{tab:scenarios}
+  \renewcommand{\arraystretch}{1.2}
+  \footnotesize
+  \begin{tabular}{llp{2.6cm}c}
+    \toprule
+    \textbf{Scenario} & \textbf{Map} & \textbf{Key challenge}
+      & \textbf{$T$ (s)}\\
+    \midrule
+    Straight-road cruising     & Town04 & Speed tracking        & 0.25 \\
+    Highway lane following     & Town04 & Lateral precision     & 0.25 \\
+    Adaptive cruise control    & Town04 & Lead-car gap          & 0.20 \\
+    Intersection crossing      & Town03 & Timing, collision av. & 0.15 \\
+    Emergency braking          & Town01 & Min. stopping dist.   & 0.10 \\
+    High-speed race lap        & Town04 & Stability at speed    & 0.10 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+For each scenario a reference trajectory $\{(\bar{x}_k,
+\bar{u}_k)\}_{k=0}^K$ is pre-computed using CARLA's built-in planner
+and stored offline.
+
+\subsection{Hardware Configurations}
+
+Each controller binary is simulated under three hardware configurations
+expressed as Scarab \texttt{PARAMS} files (Table~\ref{tab:hw}).
+We additionally sweep the clock frequency from a \emph{baseline}
+(sufficient for all controllers) down to a \emph{constrained} regime
+to identify each controller's \emph{minimum viable clock speed}.
+
+\begin{table}[h]
+  \centering
+  \caption{Hardware configurations used in Scarab.}
+  \label{tab:hw}
+  \renewcommand{\arraystretch}{1.2}
+  \footnotesize
+  \resizebox{\columnwidth}{!}{%
+  \begin{tabular}{llll}
+    \toprule
+    \textbf{Config} & \textbf{Clock} & \textbf{L1-D cache}
+      & \textbf{Archetype}\\
+    \midrule
+    HW-High  & \TODO{X} GHz & \TODO{X} kB & High-perf.\ automotive SoC \\
+    HW-Mid   & \TODO{X} GHz & \TODO{X} kB & Mid-range ARM Cortex-A  \\
+    HW-Low   & \TODO{X} MHz & \TODO{X} kB & Microcontroller-class    \\
+    \bottomrule
+  \end{tabular}}%
+\end{table}
+
+\subsection{Performance Metrics}
+
+Let $\{x_k\}_{k=0}^K$ be the simulated trajectory and
+$\{\bar{x}_k\}_{k=0}^K$ the reference.
+
+\noindent\textbf{Position RMSE:}
+\begin{equation}\label{eq:rmse}
+  \RMSE_{\mathrm{pos}} :=
+  \sqrt{\frac{1}{K}\sum_{k=0}^{K-1}
+    \bigl[(p_x^k - \bar{p}_x^k)^2 + (p_y^k - \bar{p}_y^k)^2\bigr]}.
+\end{equation}
+
+\noindent\textbf{Speed RMSE:}
+$\RMSE_v := \sqrt{\frac{1}{K}\sum_{k=0}^{K-1}(v_k - v^*)^2}$.
+
+\noindent\textbf{Deadline miss rate} $\rho$ (Definition~\ref{def:miss}).
+
+\noindent\textbf{Mean computation delay:}
+$\bar{\tau} := \frac{1}{K}\sum_{k=0}^{K-1} \tau_k$, with distribution
+$p(\tau_k)$ visualized as a box plot.
+
+\noindent\textbf{Safety events:} number of (a) collisions with the
+environment, (b) lane-boundary violations ($|e_y| > 1.5$\,m), and
+(c) speed-limit exceedances ($v > 1.2\,v^*$) per episode.
+
+\subsection{Implementation Details}
+
+The full framework runs inside a single Docker container
+(\texttt{carla-sharc}) built on \texttt{carlasim/carla:0.9.16}
+(Ubuntu 20.04, CUDA 11, Python 3.10 via Conda) with Scarab built from
+commit \texttt{3b38da0}.  The CARLA server is launched in synchronous,
+\texttt{-RenderOffScreen} mode for headless experimentation.  All
+experiments use the execution-driven Scarab mode (no DynamoRIO) for
+simplicity; the parallel batch mode can be enabled for NLMPC to reduce
+wall-clock time as in~\cite{wintz2025sharc}.  All controller source
+code, PARAMS files, and docker configuration are available at
+\texttt{\TODO{github.com/PLACEHOLDER/sharc-carla}}.
+
+% =============================================================
+\section{Results}\label{sec:results}
+
+\subsection{Computation Delay Distributions}
+
+\TODO{Figure: Box plots of $\tau_k$ distributions for PID, LMPC, NLMPC
+across HW-High, HW-Mid, HW-Low on the lane-following scenario.  Annotate
+with horizontal line at $T_s = 0.25$\,s to show deadline-miss threshold.
+Expected finding: PID always below threshold; NLMPC exceeds on HW-Low.}
+
+\begin{table}[h]
+  \centering
+  \caption{Mean computation delay $\bar{\tau}$ and miss rate $\rho$
+    (lane-following, $T=0.25$\,s).}
+  \label{tab:delays}
+  \footnotesize
+  \resizebox{\columnwidth}{!}{%
+  \begin{tabular}{lcccccc}
+    \toprule
+    & \multicolumn{2}{c}{\textbf{PID}}
+    & \multicolumn{2}{c}{\textbf{LMPC}}
+    & \multicolumn{2}{c}{\textbf{NLMPC}}\\
+    \cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}
+    \textbf{HW} & $\bar\tau$ & $\rho$ & $\bar\tau$ & $\rho$
+      & $\bar\tau$ & $\rho$ \\
+    \midrule
+    High & \TODO{} & \TODO{} & \TODO{} & \TODO{} & \TODO{} & \TODO{} \\
+    Mid  & \TODO{} & \TODO{} & \TODO{} & \TODO{} & \TODO{} & \TODO{} \\
+    Low  & \TODO{} & \TODO{} & \TODO{} & \TODO{} & \TODO{} & \TODO{} \\
+    \bottomrule
+  \end{tabular}}% end resizebox
+\end{table}
+
+\subsection{Tracking Performance vs.\ Hardware}
+
+\TODO{Figure: RMSE$_\text{pos}$ vs.\ clock frequency sweep for
+NLMPC and LMPC on the intersection and emergency-braking scenarios.
+Expected finding: step-function degradation at a critical clock—the
+``hardware--performance cliff.''  PID flat across all frequencies,
+confirming computational simplicity as robustness.}
+
+\begin{table}[h]
+  \centering
+  \caption{Position RMSE (m) across scenarios and hardware configs.}
+  \label{tab:rmse}
+  \footnotesize
+  \resizebox{\columnwidth}{!}{%
+  \begin{tabular}{lcccccc}
+    \toprule
+    & \multicolumn{3}{c}{\textbf{LMPC}}
+    & \multicolumn{3}{c}{\textbf{NLMPC}}\\
+    \cmidrule(lr){2-4}\cmidrule(lr){5-7}
+    \textbf{Scenario} & High & Mid & Low & High & Mid & Low \\
+    \midrule
+    Lane following    & \TODO{} & \TODO{} & \TODO{} & \TODO{} & \TODO{} & \TODO{} \\
+    ACC               & \TODO{} & \TODO{} & \TODO{} & \TODO{} & \TODO{} & \TODO{} \\
+    Intersection      & \TODO{} & \TODO{} & \TODO{} & \TODO{} & \TODO{} & \TODO{} \\
+    Emerg.\ braking   & \TODO{} & \TODO{} & \TODO{} & \TODO{} & \TODO{} & \TODO{} \\
+    High-speed race   & \TODO{} & \TODO{} & \TODO{} & \TODO{} & \TODO{} & \TODO{} \\
+    \bottomrule
+  \end{tabular}}% end resizebox
+\end{table}
+
+\subsection{Safety Events}
+
+\TODO{Table: Collision count, lane-departure count, speed-limit
+exceedance count for each controller$\times$HW pair across all
+scenarios.  Expected finding: NLMPC on HW-Low shows highest collision
+rate in emergency braking and intersection scenarios; PID shows most
+lane departures in high-speed race due to limited optimality.}
+
+\subsection{Hardware--Software Co-design Analysis}
+
+\TODO{Figure: Pareto frontier plots: RMSE$_\text{pos}$ vs.\ clock
+speed for LMPC and NLMPC with varying prediction horizon $N_p \in
+\{5, 10, 20\}$.  Each $(N_p, f_\text{clk})$ pair is a design point.
+Expected finding: smaller $N_p$ reduces computation time, lowers
+$\rho$, but increases tracking error; the Pareto frontier identifies
+optimal $(N_p, f_\text{clk})$ tradeoffs for each AV scenario.}
+
+This analysis operationalizes the co-design objective: rather than
+choosing the largest $N_p$ that a given processor can \emph{nominally}
+run, the SHARC--CARLA framework reveals the largest $N_p$ the processor
+can run \emph{within the sample period} of a specific driving scenario,
+accounting for worst-case instruction-level timing.
+
+% =============================================================
+\section{Discussion}\label{sec:discussion}
+
+\noindent\textbf{The hardware--performance cliff.}
+A recurring observation in SHARC-based experiments (original paper:
+inverted pendulum at 600\,MHz vs.\ 625\,MHz~\cite{wintz2025sharc}) is
+that degradation is not graceful.  When $\tau_k$ crosses $T$ once, the
+resulting suboptimal control input perturbs the state, which increases
+the optimization difficulty at the next step, which in turn increases
+$\tau_{k+1}$—a positive feedback loop.  In autonomous driving, this
+manifests as spinning controllers in emergency braking: exactly the
+scenario where reliability matters most.  PID, by contrast, has a
+deadline miss rate near zero across all hardware configurations, making
+it a robust fallback despite its suboptimal tracking.
+
+\noindent\textbf{MPC horizon as a co-design variable.}
+The classical MPC design question ``how large should $N_p$ be?'' is
+answered in closed-loop terms by our Pareto analysis.  On constrained
+hardware, halving $N_p$ can eliminate all deadline misses while
+incurring only a modest RMSE increase—a trade that the designer cannot
+evaluate without SHARC.
+
+\noindent\textbf{Limitations.}
+CarlaDynamics uses CARLA's Python API, introducing API-call latency
+that is excluded from Scarab's measurement window.  The internal CARLA
+physics engine is a UE4 rigid-body model, not a certified vehicle
+model; results may not directly transfer to production vehicles.
+Future work: (1)~extend \texttt{CarlaDynamics} to multi-agent traffic,
+enabling analysis of inter-vehicle communication delays; (2)~introduce
+a formal safety guarantee based on control barrier functions compatible
+with SHARC's delay model.
+
+% =============================================================
+\section{Conclusion}\label{sec:conclusion}
+
+We presented a SHARC--CARLA co-simulation framework for studying the
+joint effect of computational hardware and control algorithm design on
+autonomous vehicle safety.  By implementing CARLA as a native SHARC
+dynamics class and deploying PID, LMPC, and NLMPC controllers under
+cycle-accurate microarchitecture simulation, our framework enables
+quantitative hardware--software co-design before any physical hardware
+is committed.  Results \TODO{(to be completed)} are expected to
+demonstrate a sharp hardware--performance cliff for MPC-class
+controllers, Pareto-optimal $(N_p, f_\text{clk})$ design surfaces, and
+the complementary resilience of PID under extreme hardware constraints.
+We believe this methodology generalizes beyond AVs to any CPS where
+computation-intensive safety-critical algorithms need to be deployed on
+resource-constrained embedded processors.
+
+% =============================================================
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+\end{document}

@@ -1,0 +1,604 @@
+% ============================================================
+%  Hardware--Software Co-design for Autonomous Vehicle Control
+%  via Cycle-Accurate Simulation
+%  IEEE CDC style — double-column, 10pt
+% ============================================================
+\documentclass[conference]{IEEEtran}
+
+% ---- Packages -----------------------------------------------
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{bm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{cite}
+\usepackage[T1]{fontenc}
+
+% ---- Macros --------------------------------------------------
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\RMSE}{\mathrm{RMSE}}
+\newcommand{\calX}{\mathcal{X}}
+\newcommand{\calU}{\mathcal{U}}
+\newcommand{\calS}{\mathcal{S}}
+\newcommand{\calH}{\mathcal{H}}
+\newcommand{\calG}{\mathcal{G}}
+\newcommand{\TODO}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
+
+% ---- Theorem environments -----------------------------------
+\newtheorem{theorem}{Theorem}
+\newtheorem{proposition}{Proposition}
+\newtheorem{lemma}{Lemma}
+\newtheorem{corollary}{Corollary}
+\newtheorem{definition}{Definition}
+\newtheorem{remark}{Remark}
+\newtheorem{assumption}{Assumption}
+
+% =============================================================
+\begin{document}
+
+\title{Hardware--Software Co-design for Autonomous Vehicle Control\\
+  via Cycle-Accurate Simulation}
+
+\author{\IEEEauthorblockN{Author~1\IEEEauthorrefmark{1},
+    Author~2\IEEEauthorrefmark{2},
+    Author~3\IEEEauthorrefmark{1}}
+  \IEEEauthorblockA{\IEEEauthorrefmark{1}Affiliation~1 \quad
+    \IEEEauthorrefmark{2}Affiliation~2\\
+    \texttt{\{email1, email2\}@placeholder.edu}}
+}
+
+\maketitle
+
+% =============================================================
+\begin{abstract}
+  In autonomous driving, control algorithms ranging from PID to
+  nonlinear model predictive control (NMPC) must execute within a
+  strict sample period on embedded processors whose computational
+  resources vary widely.  The computation time depends on the
+  microarchitecture---clock speed, cache size, pipeline depth---and
+  interacts with the controller's algorithmic complexity in ways that
+  are difficult to predict analytically.  This paper presents a
+  co-simulation framework coupling \emph{SHARC} (Simulator for
+  Hardware Architecture and Real-time Control) with the \emph{CARLA}
+  driving simulator, enabling systematic evaluation of how hardware
+  and controller design choices jointly affect closed-loop safety.  We
+  formalize the delay-induced closed-loop dynamics, characterize
+  conditions under which computational deadline misses cascade, and
+  design an experimental protocol that sweeps hardware parameters
+  (clock frequency, cache size) and software parameters (MPC
+  prediction horizon, sample period) across safety-critical driving
+  scenarios.
+\end{abstract}
+
+\begin{IEEEkeywords}
+  Hardware--software co-design, autonomous driving, model predictive
+  control, computational delay, microarchitecture simulation.
+\end{IEEEkeywords}
+
+% =============================================================
+\section{Introduction}\label{sec:intro}
+
+Consider an autonomous vehicle executing a model predictive controller
+at 10\,Hz on an embedded processor.  At every sample instant, the
+controller receives the vehicle state, solves an optimization problem,
+and outputs throttle, steering, and brake commands.  The time $\tau$
+this computation takes is \emph{not} a constant---it depends on the
+optimization landscape (which changes with the vehicle state), the
+processor's clock frequency, its cache hierarchy, and many
+microarchitectural details.  When $\tau$ exceeds the sample
+period~$T$, the controller misses its deadline: the plant continues to
+apply a stale control input.  In safety-critical scenarios---emergency
+braking, intersection crossing---a single missed deadline can lead to
+collision.
+
+Despite this tight coupling, control algorithm design and hardware
+selection are typically treated independently.  Control engineers assume
+instantaneous computation; chip designers optimize for generic
+workloads.  When timing violations surface during integration testing,
+the only recourses are expensive hardware upgrades or ad-hoc algorithm
+simplification.
+
+\emph{What is needed is a simulation tool that evaluates the
+closed-loop system---physics, control law, and computational
+hardware---simultaneously.}  This paper provides such a tool by
+integrating two existing simulators:
+
+\begin{itemize}
+  \item \textbf{SHARC}~\cite{wintz2025sharc}: uses the Scarab
+    cycle-accurate microarchitecture simulator~\cite{scarab} to
+    measure the execution time of a controller binary on a specified
+    (possibly hypothetical) processor.
+  \item \textbf{CARLA}~\cite{dosovitskiy2017carla}: an open-source,
+    high-fidelity driving simulator with realistic vehicle dynamics,
+    road networks, sensors, and traffic.
+\end{itemize}
+
+\noindent\textbf{Contributions.}
+\begin{enumerate}
+  \item A \textbf{CARLA dynamics interface} for SHARC that replaces
+    abstract ODE integrators with high-fidelity, synchronous vehicle
+    simulation (Section~\ref{sec:carla}).
+  \item \textbf{Formal analysis} of delay-induced closed-loop
+    degradation: we define the \emph{hardware--performance map} and
+    state conditions under which a single deadline miss triggers
+    cascading error growth (Section~\ref{sec:analysis}).
+  \item An \textbf{experimental co-design protocol} that jointly sweeps
+    hardware parameters (clock frequency, cache size) and software
+    parameters (MPC horizon $N_p$, sample period $T$) across
+    safety-critical driving scenarios
+    (Section~\ref{sec:experiments}).
+\end{enumerate}
+
+% =============================================================
+\section{Modeling Framework}\label{sec:model}
+
+We review the SHARC modeling framework~\cite{wintz2025sharc} and
+introduce the notation used throughout.
+
+\subsection{Plant Dynamics}
+
+A plant with state $x \in \R^{n_x}$, control $u \in \R^{n_u}$,
+exogenous input $w \in \R^{n_w}$, and output $y \in \R^{n_y}$ evolves
+in continuous time as
+\begin{equation}\label{eq:ct}
+  \dot{x} = \tilde{f}(t, x, u, w), \qquad y = h(x, u, w).
+\end{equation}
+SHARC discretizes~\eqref{eq:ct} on the grid $t_k := kT$, $k \in \N$,
+with sample period $T > 0$:
+\begin{equation}\label{eq:disc}
+  x_{k+1} = f(t_k, x_k, u_k, w_k),
+\end{equation}
+where $f$ is obtained by numerical integration under zero-order hold
+(ZOH) on $u$, and $w_k := w(t_k)$.  Users may alternatively supply $f$
+directly (for hybrid systems, stochastic models, or---as in our
+case---external simulators).
+
+\subsection{Computation Delay}\label{sec:delay_model}
+
+A controller evaluates
+$\tilde{u}_{k+1} := g(t_k, y_k) \in \R^{n_u}$
+at each sample time $t_k$.  The computation requires $\tau_k > 0$
+seconds, so the result is available at time
+$\hat{t}_{k+1} := t_k + \tau_k$.
+
+\begin{definition}[Delay-Aware ZOH]\label{def:zoh}
+  The applied input under computation delay is
+  \begin{equation}\label{eq:zoh_delay}
+    u(t) = \begin{cases}
+      u_k & t \in [t_k,\, t_{k+1}),
+        \;\;\text{if } \tau_k \geq T, \\[2pt]
+      u_k & t \in [t_k,\, \hat{t}_{k+1}),
+        \;\;\text{if } \tau_k < T, \\[2pt]
+      \tilde{u}_{k+1} & t \in [\hat{t}_{k+1},\, t_{k+1}),
+        \;\;\text{if } \tau_k < T.
+    \end{cases}
+  \end{equation}
+\end{definition}
+
+\begin{definition}[Deadline Miss]\label{def:miss}
+  A \emph{deadline miss} at step~$k$ occurs when $\tau_k \geq T$.
+  The \emph{miss rate} over $K$ steps is
+  $\rho := \frac{1}{K}\sum_{k=0}^{K-1}\mathbf{1}[\tau_k \geq T]$.
+\end{definition}
+
+\begin{definition}[Effective Closed-Loop Dynamics]\label{def:cl}
+  Let $d_k := \min(\tau_k, T)$.
+  The closed-loop system under delayed ZOH is
+  \begin{equation}\label{eq:cl}
+    x_{k+1} = f\!\bigl(t_k,\, x_k,\, \phi(u_k, \tilde{u}_{k+1},
+    d_k, T),\, w_k\bigr),
+  \end{equation}
+  where $\phi$ is the delay-interpolated input:
+  \begin{equation}\label{eq:phi}
+    \phi(u, \tilde{u}, d, T) :=
+    \frac{d}{T}\,u + \frac{T - d}{T}\,\tilde{u}.
+  \end{equation}
+\end{definition}
+
+\begin{remark}
+  When $\tau_k \geq T$, $d_k = T$ and $\phi = u_k$: the full period
+  uses the stale input.  When $\tau_k = 0$, $\phi = \tilde{u}_{k+1}$:
+  ideal operation.  Expression~\eqref{eq:phi} continuously
+  interpolates these extremes.
+\end{remark}
+
+\subsection{Microarchitecture-Dependent Computation Time}
+
+The computation delay is
+\begin{equation}\label{eq:tau_model}
+  \tau_k = \mathcal{T}(g,\, x_k,\, \calH),
+\end{equation}
+where $g$ is the controller, $x_k$ the current state, and
+$\calH := (f_\text{clk}, S_\text{L1}, S_\text{L2}, \ldots)
+\in \R_+^{n_h}$ is a \emph{hardware configuration vector} specifying
+clock frequency, cache sizes, pipeline width, etc.  In SHARC,
+$\mathcal{T}$ is not modeled analytically---it is \emph{evaluated} by
+the Scarab microarchitecture simulator~\cite{scarab}, which executes
+the controller binary instruction-by-instruction on the target hardware
+model and returns a cycle-accurate execution time.  Hardware is
+specified via configuration files: changing one parameter (say, halving
+the L1 cache) is a single-line edit, making large sweeps practical.
+
+\begin{definition}[Hardware \& Software Configuration Spaces]\label{def:spaces}
+  The \emph{hardware space}
+  $\calH \subset \R_+^{n_h}$ and the \emph{software space}
+  $\calG := \{\theta = (N_p, N_c, T, Q, R, \ldots)\}
+  \subset \R^{n_s}$ parameterize, respectively, the processor
+  microarchitecture and the controller algorithm.
+\end{definition}
+
+% =============================================================
+\section{CARLA as Plant Dynamics}\label{sec:carla}
+
+SHARC provides a modular dynamics interface: any class that implements
+$f(t_k, x_k, u_k, w_k) \to x_{k+1}$ can serve as the plant.
+CARLA~\cite{dosovitskiy2017carla} is a natural fit because its
+synchronous mode lets an external client control \emph{exactly when}
+time advances---precisely the requirement of~\eqref{eq:disc}.
+
+Thanks to SHARC's user-friendly, extensible design, integrating CARLA
+requires implementing only a single dynamics class that (i)~connects to
+the CARLA server and sets the physics time-step to $T$, (ii)~applies
+the control input $u_k$ to the ego vehicle, (iii)~ticks the world
+forward, and (iv)~reads back the new state $x_{k+1}$.  No modification
+to SHARC's core codebase is needed.
+
+\subsection{State and Control Representation}
+
+For the ego vehicle:
+\begin{align}
+  x_k &:= (p_x,\, p_y,\, \psi,\, v,\, w_x^+,\,
+    w_y^+)^\top \in \R^6, \label{eq:state}\\
+  u_k &:= (\alpha,\, \delta,\, \beta)^\top \in
+    [0, 1] \times [-1, 1] \times [0, 1], \label{eq:control}
+\end{align}
+where $(p_x, p_y)$ is position, $\psi$ yaw, $v$ speed,
+$(w_x^+, w_y^+)$ the next waypoint from the CARLA HD map,
+and $(\alpha, \delta, \beta)$ are throttle, steering, brake.
+
+The transition $x_{k+1} = F_{\mathrm{CARLA}}(x_k, u_k, w_k)$ is
+evaluated by CARLA's internal physics engine, which models tire
+forces, aerodynamic drag, engine torque curves, suspension, and road
+geometry---providing dynamics fidelity far beyond closed-form ODEs.
+From the SHARC framework's perspective, $F_{\mathrm{CARLA}}$ is simply
+a concrete instantiation of $f$ in~\eqref{eq:disc}.
+
+% =============================================================
+\section{Controller Formulations}\label{sec:controllers}
+
+We study three controllers spanning the computational complexity
+spectrum.  Each is compiled as a C++ binary whose execution is
+instrumented by Scarab to measure $\tau_k$.
+
+\subsection{PID Controller}\label{sec:pid}
+
+Vehicle control is decomposed into longitudinal and lateral PID loops.
+
+\noindent\textbf{Longitudinal (speed tracking).}
+\begin{equation}\label{eq:pid_lon}
+  e_k^v := v^* - v_k, \quad
+  \sigma_k = K_P^\ell\, e_k^v +
+  K_I^\ell \!\sum_{j=0}^{k} e_j^v T +
+  K_D^\ell\, \frac{e_k^v - e_{k-1}^v}{T}.
+\end{equation}
+Throttle and brake are set as
+$\alpha_k = \mathrm{clip}(\sigma_k,\, 0,\, \alpha_\text{max})$,
+$\beta_k = \mathrm{clip}(-\sigma_k,\, 0,\, \beta_\text{max})$.
+
+\noindent\textbf{Lateral (waypoint tracking).}
+With heading error
+$e_k^\psi := \mathrm{atan2}(w_y^+ - p_y,\, w_x^+ - p_x) - \psi_k$,
+\begin{equation}\label{eq:pid_lat}
+  \delta_k = \mathrm{clip}\!\Bigl(K_P^r e_k^\psi + K_I^r
+  \textstyle\sum_{j} e_j^\psi T + K_D^r
+  \frac{e_k^\psi - e_{k-1}^\psi}{T},\;
+  \pm\delta_\text{max}\Bigr).
+\end{equation}
+
+PID requires $O(1)$ operations per step; we expect
+$\tau_k^{\mathrm{PID}} \ll T$ on virtually all hardware.
+
+\subsection{Linear MPC (LMPC)}\label{sec:lmpc}
+
+We linearize the vehicle dynamics around a reference
+$(\bar{x}_k, \bar{u}_k)$:
+\begin{equation}\label{eq:lin}
+  \Delta x_{k+1} = A_k\,\Delta x_k + B_k\,\Delta u_k, \quad
+  A_k := \tfrac{\partial f}{\partial x}\Big|_{\bar{x}_k},\;
+  B_k := \tfrac{\partial f}{\partial u}\Big|_{\bar{u}_k}.
+\end{equation}
+At each $t_{k_0}$, LMPC solves the convex QP:
+\begin{subequations}\label{eq:lmpc}
+\begin{align}
+  \min_{\Delta u_{k_0:k_0+N_c-1}} \;\;&
+    \sum_{k=k_0}^{k_0+N_p-1}\bigl(
+    \|\Delta x_{k|k_0}\|_Q^2 + \|\Delta u_{k|k_0}\|_R^2\bigr)\\
+  \text{s.t.}\;\; & \Delta x_{k+1|k_0} = A_k\Delta x_{k|k_0}
+    + B_k\Delta u_{k|k_0}, \\
+  & u_{k|k_0} \in \calU,\quad x_{k|k_0} \in \calX,
+\end{align}
+\end{subequations}
+with prediction horizon $N_p$, control horizon $N_c \leq N_p$,
+$Q \succeq 0$, $R \succ 0$.
+
+\subsection{Nonlinear MPC (NLMPC)}\label{sec:nlmpc}
+
+NLMPC uses a kinematic bicycle model $F_\text{bike}$ for prediction:
+\begin{subequations}\label{eq:nlmpc}
+\begin{align}
+  \min_{u_{k_0:k_0+N_c-1}} \;\;&
+    \sum_{k=k_0}^{k_0+N_p-1}
+    \|x_{k|k_0} - x_k^\text{ref}\|_Q^2 + \|u_{k|k_0}\|_R^2\\
+  \text{s.t.}\;\;& x_{k+1|k_0} = F_\text{bike}(x_{k|k_0},
+    u_{k|k_0}), \\
+  & u_{k|k_0} \in \calU,\quad x_{k|k_0} \in \calX.
+\end{align}
+\end{subequations}
+This nonconvex NLP is solved iteratively via
+SLSQP~\cite{kraft1988slsqp}.
+
+\begin{remark}[Complexity ordering]\label{rem:complexity}
+  $\tau_k^{\mathrm{PID}} \ll \tau_k^{\mathrm{LMPC}} \ll
+  \tau_k^{\mathrm{NLMPC}}$:
+  PID is $O(1)$; LMPC solves a QP of dimension
+  $O(N_c n_u)$; NLMPC iteratively solves a nonconvex NLP.
+  This ordering makes the three controllers ideal probes for the
+  effect of hardware constraints on closed-loop performance.
+\end{remark}
+
+% =============================================================
+\section{Delay-Induced Degradation Analysis}\label{sec:analysis}
+
+We now formalize the mechanisms by which computational delays degrade
+closed-loop performance.
+
+\subsection{The Hardware--Performance Map}
+
+\begin{definition}[Hardware--Performance Map]\label{def:hp_map}
+  Fix a controller $g_\theta$ with software parameters $\theta$,
+  a scenario $\calS$ (initial conditions, reference, disturbances),
+  and a performance metric $J : \{x_k\}_{k=0}^K \to \R_{\geq 0}$.
+  The \emph{hardware--performance map} is
+  \begin{equation}\label{eq:hp_map}
+    \Phi_{\theta, \calS} : \calH \to \R_{\geq 0},
+    \quad h \mapsto J\!\bigl(\{x_k(h)\}_{k=0}^K\bigr),
+  \end{equation}
+  where $\{x_k(h)\}$ is the trajectory generated under hardware $h$
+  via~\eqref{eq:cl}.
+\end{definition}
+
+The map $\Phi$ encodes the central co-design question: \emph{for a
+given controller and driving scenario, how does closed-loop cost change
+as we modify the processor?}
+
+\begin{definition}[Minimum Viable Hardware]\label{def:mvh}
+  Given a performance threshold $J^* > 0$, the
+  \emph{minimum viable hardware set} is
+  \begin{equation}\label{eq:mvh}
+    \calH^*(\theta, \calS, J^*) :=
+    \bigl\{h \in \calH : \Phi_{\theta, \calS}(h) \leq J^*\bigr\}.
+  \end{equation}
+  When $\calH$ is parameterized by clock frequency alone,
+  $f_{\min}^* := \inf\{f_\text{clk}: (f_\text{clk}, \cdot) \in
+  \calH^*\}$ is the \emph{minimum viable clock frequency}.
+\end{definition}
+
+\subsection{Cascading Deadline Misses}
+
+The most dangerous failure mode occurs when misses self-reinforce.
+
+\begin{assumption}\label{asm:tau_lipschitz}
+  The computation time is locally Lipschitz in the state: there exists
+  $L_\tau > 0$ such that
+  $|\tau_k - \tau_j| \leq L_\tau \|x_k - x_j\|$ for all
+  $x_k, x_j$ in a neighborhood $\calX_0$ of the reference trajectory.
+\end{assumption}
+
+This is natural for iterative solvers: larger state deviations require
+more solver iterations, increasing execution time.
+
+\begin{proposition}[Cascading Condition]\label{prop:cascade}
+  Under Assumption~\ref{asm:tau_lipschitz}, let $L_f$ be the Lipschitz
+  constant of $f$ with respect to its input argument, and let
+  $e_{k} := \|x_{k} - \bar{x}_{k}\|$ be the tracking error.
+  If a deadline miss occurs at step~$k$ ($\tau_k \geq T$, so
+  $\phi = u_k$) and
+  \begin{equation}\label{eq:cascade_cond}
+    L_\tau \cdot L_f \cdot \|u_k - \tilde{u}_{k+1}\| > 1,
+  \end{equation}
+  then the miss at step $k$ increases the tracking error, which
+  in turn increases $\tau_{k+1}$, creating a positive feedback loop.
+\end{proposition}
+
+\begin{proof}
+  A deadline miss forces $\phi = u_k$.  The one-step error grows as
+  \begin{equation*}
+    e_{k+1} \leq e_k + L_f\,\|u_k - \tilde{u}_{k+1}\|.
+  \end{equation*}
+  By Assumption~\ref{asm:tau_lipschitz},
+  $\tau_{k+1} \geq \tau_k + L_\tau(e_{k+1} - e_k)
+  \geq \tau_k + L_\tau L_f \|u_k - \tilde{u}_{k+1}\|$.
+  When~\eqref{eq:cascade_cond} holds,
+  $\tau_{k+1} > \tau_k \geq T$, so step $k{+}1$ is also a miss,
+  and $e_{k+2}$ grows further.
+\end{proof}
+
+\begin{corollary}[PID Immunity]\label{cor:pid}
+  For PID, $\tau_k^{\mathrm{PID}}$ is essentially constant
+  ($L_\tau \approx 0$) since the computation is a fixed number of
+  arithmetic operations independent of $x_k$.
+  Thus~\eqref{eq:cascade_cond} is never satisfied, and PID does not
+  exhibit cascading misses.
+\end{corollary}
+
+\begin{remark}[Implications for controller selection]
+  Proposition~\ref{prop:cascade} reveals a fundamental tension:
+  MPC yields better tracking when $\tau_k \ll T$ but is \emph{fragile}
+  near the deadline boundary.  PID is suboptimal but \emph{robust}
+  to hardware constraints.  This motivates co-design: choose the most
+  complex controller the hardware can guarantee to run within~$T$.
+\end{remark}
+
+\subsection{The Co-design Optimization Problem}
+
+\begin{definition}[Co-design Problem]\label{def:codesign}
+  Given a scenario $\calS$, controller family $\{g_\theta\}$, and
+  hardware cost $C_\text{hw}$ (chip area, power), the
+  \emph{co-design problem} is
+  \begin{subequations}\label{eq:codesign}
+  \begin{align}
+    \min_{\theta \in \calG,\; h \in \calH}\;\;&
+      \Phi_{\theta,\calS}(h) \\
+    \text{s.t.}\;\;& \rho(\theta, h, \calS) \leq \rho_\text{max},\\
+    & C_\text{hw}(h) \leq C_\text{budget}.
+  \end{align}
+  \end{subequations}
+\end{definition}
+
+Problem~\eqref{eq:codesign} is intractable analytically: $\Phi$ is a
+black-box evaluated through cycle-accurate simulation.  The
+SHARC--CARLA framework provides the oracle for $\Phi$, enabling
+systematic search over $(\theta, h)$.
+
+% =============================================================
+\section{Experimental Design}\label{sec:experiments}
+
+We evaluate $\Phi_{\theta,\calS}(h)$ across a representative grid.
+
+\subsection{Driving Scenarios ($\calS$)}
+
+Table~\ref{tab:scenarios} lists six CARLA scenarios ordered by safety
+criticality.  Scenarios with smaller $T$ demand faster computation.
+
+\begin{table}[ht]
+  \centering
+  \caption{Driving scenarios.}
+  \label{tab:scenarios}
+  \footnotesize
+  \renewcommand{\arraystretch}{1.15}
+  \begin{tabular}{lp{2.5cm}c}
+    \toprule
+    \textbf{Scenario} & \textbf{Key challenge}
+      & $T$ (s) \\
+    \midrule
+    Highway cruising       & Speed tracking        & 0.25 \\
+    Lane following         & Lateral precision      & 0.25 \\
+    Adaptive cruise ctrl   & Lead-car gap           & 0.20 \\
+    Intersection crossing  & Collision avoidance    & 0.15 \\
+    Emergency braking      & Min.\ stopping dist.   & 0.10 \\
+    High-speed racing      & Stability at limit     & 0.10 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Hardware Sweep ($\calH$)}
+
+We sweep two hardware dimensions:
+\begin{enumerate}
+  \item \textbf{Clock frequency}
+    $f_\text{clk} \in \{250, 500, 625, 750, 1000, 1500, 2000\}$\,MHz.
+  \item \textbf{L1 data cache}
+    $S_\text{L1} \in \{8, 16, 32, 64, 128\}$\,kB.
+\end{enumerate}
+All other Scarab parameters are held at a baseline ARM Cortex-A
+profile.  This yields a $7 \times 5 = 35$-point grid.
+
+\subsection{Software Sweep ($\calG$)}
+
+For MPC controllers, we sweep:
+\begin{enumerate}
+  \item $N_p \in \{5, 10, 15, 20, 30\}$ (prediction horizon).
+  \item $N_c \in \{\lceil N_p/2\rceil, N_p\}$ (control horizon).
+\end{enumerate}
+PID gains are fixed; PID serves as a hardware-insensitive baseline.
+
+\subsection{Performance Metrics}
+
+\begin{definition}[Tracking Error]\label{def:rmse}
+  $J_\text{pos} := \RMSE_\text{pos} =
+  \sqrt{\frac{1}{K}\sum_{k=0}^{K-1}
+  [(p_x^k - \bar{p}_x^k)^2 + (p_y^k - \bar{p}_y^k)^2]}$.
+\end{definition}
+
+\begin{definition}[Safety Violation Count]\label{def:safety}
+  $J_\text{safe} := n_\text{col} + n_\text{lane} + n_\text{speed}$,
+  counting collisions, lane departures ($|e_y| > 1.5$\,m), and
+  speed exceedances ($v > 1.2\,v^*$).
+\end{definition}
+
+\noindent Additional metrics: $\rho$ (Def.~\ref{def:miss}),
+$\bar{\tau} := \frac{1}{K}\sum_k \tau_k$, and delay distribution
+$p(\tau_k)$.
+
+\subsection{Planned Analyses}
+
+\noindent\textbf{1.\ Delay distributions.}
+Box plots of $\tau_k$ per controller$\times$hardware, annotated with
+deadline $T$.
+
+\noindent\textbf{2.\ Hardware--performance cliff.}
+$J_\text{pos}$ vs.\ $f_\text{clk}$, identifying $f_\text{min}^*$
+(Def.~\ref{def:mvh}) for each controller.
+
+\noindent\textbf{3.\ Cascading miss dynamics.}
+Time series of $(\tau_k, e_k)$ illustrating
+Proposition~\ref{prop:cascade}.
+
+\noindent\textbf{4.\ Co-design Pareto frontier.}
+$J_\text{pos}$ vs.\ $f_\text{clk}$ for multiple $N_p$, identifying
+Pareto-optimal $(N_p, f_\text{clk})$ pairs (Problem~\eqref{eq:codesign}).
+
+\noindent\textbf{5.\ Cache sensitivity.}
+$J_\text{pos}$ vs.\ $S_\text{L1}$ at fixed clock, revealing whether
+cache is a first- or second-order effect.
+
+\noindent\textbf{6.\ Safety heatmap.}
+$J_\text{safe}$ on the $(f_\text{clk}, N_p)$ grid for emergency
+braking and intersection scenarios.
+
+% =============================================================
+\section{Results}\label{sec:results}
+
+\TODO{All experimental results are pending.  The following subsections
+  will be populated once experiments are complete.}
+
+\subsection{Delay Distributions}
+\TODO{Box plots and delay tables.}
+
+\subsection{Hardware--Performance Cliff}
+\TODO{$J_\text{pos}$ vs.\ $f_\text{clk}$ plots with cliff annotation.}
+
+\subsection{Cascading Miss Dynamics}
+\TODO{Time-series of $(\tau_k, e_k)$ per
+  Proposition~\ref{prop:cascade}.}
+
+\subsection{Co-design Pareto Analysis}
+\TODO{Pareto frontier over $(N_p, f_\text{clk})$.}
+
+\subsection{Cache Sensitivity}
+\TODO{$J_\text{pos}$ vs.\ $S_\text{L1}$ curves.}
+
+\subsection{Safety Event Analysis}
+\TODO{Heatmaps of $J_\text{safe}$ on $(f_\text{clk}, N_p)$ grid.}
+
+% =============================================================
+\section{Discussion and Conclusion}\label{sec:conclusion}
+
+\TODO{To be written after experimental results.  Key themes:
+  (1)~hardware--performance cliff characterization,
+  (2)~PID as robust fallback (Corollary~\ref{cor:pid}),
+  (3)~MPC horizon as co-design lever,
+  (4)~cache vs.\ clock importance,
+  (5)~generalizability to other CPS,
+  (6)~limitations (CARLA fidelity, single-agent),
+  (7)~future work: multi-agent, control barrier functions,
+  Bayesian optimization over $(\theta, h)$.}
+
+% =============================================================
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+\end{document}

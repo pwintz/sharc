@@ -1,27 +1,33 @@
 cmake_minimum_required(VERSION 3.16)
-project(MPC_example)
+project(PID_example)
 
-# Dimensions and horizons — overridden from the command line by controller_delegator.py.
-set(PREDICTION_HORIZON 10 CACHE STRING "Prediction Horizon")
-set(CONTROL_HORIZON     5 CACHE STRING "Control Horizon")
-set(TNX                 4 CACHE STRING "State Dimension")
-set(TNU                 2 CACHE STRING "Input Dimension")
-set(TNDU               20 CACHE STRING "Disturbance/Exogenous Input Dimension (2 * n_waypoints)")
-set(TNY                 2 CACHE STRING "Output Dimension")
+# Create arguments for PREDICTION_HORIZON and CONTROL_HORIZON, with default values defined.
+# To define values from the command line, use this:
+#    cmake -DPREDICTION_HORIZON:STRING=7 -DCONTROL_HORIZON:STRING=4
+set(PREDICTION_HORIZON 7 CACHE STRING "Prediction Horizon")
+set(CONTROL_HORIZON    4 CACHE STRING "Control Horizon")
+set(TNX              100 CACHE STRING "State Dimension")
+set(TNU              100 CACHE STRING "Input Dimension")
+set(TNDU             100 CACHE STRING "Disturbance Input Dimension")
+set(TNY              100 CACHE STRING "Output Dimension")
 set(USE_DYNAMORIO 1 CACHE BOOL OFF)
+# set(USE_EXECUTION_DRIVEN_SCARAB 0 CACHE BOOL OFF)
 
-# C++20
+# Set the C++ standard to C++ 20
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Compilers
+# Compiler settings
 set(CMAKE_CXX_COMPILER g++-11)
 set(CMAKE_C_COMPILER gcc-11)
 
-# Executable name
-set(EXECUTABLE_NAME main_controller_MPC_v1)
+# Define the executable name based on horizons
+# set(EXECUTABLE_NAME main_controller_${PREDICTION_HORIZON}_${CONTROL_HORIZON})
+set(EXECUTABLE_NAME main_controller_PID_v1)
 if(USE_DYNAMORIO)
   set(EXECUTABLE_NAME ${EXECUTABLE_NAME}_dynamorio)
+# elseif(USE_EXECUTION_DRIVEN_SCARAB)
+#   set(EXECUTABLE_NAME ${EXECUTABLE_NAME}_scarab)
 endif()
 
 message("Build parameter values:")
@@ -33,65 +39,67 @@ message("\tTNU=${TNU}")
 message("\tTNDU=${TNDU}")
 message("\tTNY=${TNY}")
 message("\tUSE_DYNAMORIO=${USE_DYNAMORIO}")
+# message("\tUSE_EXECUTION_DRIVEN_SCARAB=${USE_EXECUTION_DRIVEN_SCARAB}")
 
-# Assert environment variables
+# Define a function for asserting that an environmental variable is defined.
 function(assert_env_var var_name)
     if(NOT DEFINED ENV{${var_name}})
         message(FATAL_ERROR "${var_name} environment variable is not set")
     endif()
 endfunction()
 
+# Check that expected environmental variables are defined.
 assert_env_var(RESOURCES_DIR)
 assert_env_var(SCARAB_ROOT)
 assert_env_var(LIBMPC_DIR)
 
-# Directories
+# Define the base directories (set this to where the controllers folder is)
 set(RESOURCES_DIR $ENV{RESOURCES_DIR})
 set(CONTROLLERS_DIR ${RESOURCES_DIR}/controllers)
 set(CONTROLLERS_INC ${CONTROLLERS_DIR}/include)
 set(CONTROLLERS_SRC ${CONTROLLERS_DIR}/src)
-
+# Add source files dynamically
 message("    CONTROLLERS_DIR=${CONTROLLERS_DIR}")
 message("    CONTROLLERS_INC=${CONTROLLERS_INC}")
 message("    CONTROLLERS_SRC=${CONTROLLERS_SRC}")
+message("CONTROLLERS_SOURCES=${CONTROLLERS_SOURCES}")
 
-# Source files
-set(SOURCES ${CONTROLLERS_SRC}/CarlaKinematicMPCController.cpp
-            ${CONTROLLERS_SRC}/CarlaDynamicMPCController.cpp
-            ${CONTROLLERS_SRC}/CarCarlaMPC.cpp
+set(SOURCES ${CONTROLLERS_SRC}/PID_controller.cpp
             ${CONTROLLERS_SRC}/controller.cpp
             ${CONTROLLERS_SRC}/main_controller.cpp)
 
-# Executable
+# Add executable.
 add_executable(${EXECUTABLE_NAME} ${SOURCES})
 
 # Include directories
 target_include_directories(
-  ${EXECUTABLE_NAME}
-  PUBLIC
+  ${EXECUTABLE_NAME} # Target
+  PUBLIC             # Scope
   include
   /usr/local/include
   /usr/include/eigen3
   /usr/local/include/osqp
-  ${LIBMPC_DIR}/include/
+  ../libmpc/include/
   ${CONTROLLERS_INC}
   ${RESOURCES_DIR}/include
 )
 
 target_link_directories(
-  ${EXECUTABLE_NAME}
-  PUBLIC
+  ${EXECUTABLE_NAME} # Target
+  PUBLIC             # Scope
   /usr/local/lib
-  $ENV{DYNAMORIO_HOME}/tools/lib64/release
+  $ENV{DYNAMORIO_HOME}/tools/lib64/release 
   $ENV{DYNAMORIO_HOME}/ext/lib64/release
 )
 
 if(COMMAND cmake_policy)
-  cmake_policy(SET CMP0003 NEW)
+	cmake_policy(SET CMP0003 NEW)
 endif(COMMAND cmake_policy)
 
+# set the C++ compiler to use O3
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
 
+# Check if SCARAB_ROOT is defined and add it to include directories
 assert_env_var(SCARAB_ROOT)
 include_directories($ENV{SCARAB_ROOT}/utils)
 
@@ -105,23 +113,25 @@ add_definitions(
     -DTNU=${TNU}
     -DTNDU=${TNDU}
     -DTNY=${TNY}
-    -O3
+    -O3 # Optimize the executable. 
 )
 
 if(USE_DYNAMORIO)
   add_definitions(-DUSE_DYNAMORIO)
 endif()
+# if(USE_EXECUTION_DRIVEN_SCARAB)
+#   add_definitions(-DUSE_EXECUTION_DRIVEN_SCARAB)
+# endif()
 
 # Link libraries
-find_package(Threads REQUIRED)
 target_link_libraries(
-  ${EXECUTABLE_NAME}
+  ${EXECUTABLE_NAME} # Target
     nlopt
+    # eigen?
     osqp
-    Threads::Threads
 )
 
-# ---------- DynamoRIO ---------- #
+# Check if DYNAMORIO_HOME is defined and set DynamoRIO_DIR
 assert_env_var(DYNAMORIO_HOME)
 set(DynamoRIO_DIR $ENV{DYNAMORIO_HOME}/cmake CACHE PATH "Path to DynamoRIO")
 
@@ -141,7 +151,7 @@ find_library(libsnappy snappy)
 if (libsnappy)
   message(STATUS "Found Snappy: ${libsnappy}")
 else()
-  message(FATAL_ERROR "Snappy library not found")
+  message(FATAL_ERROR "Snappy ibrary not found")
 endif ()
 
 find_library(liblz4 lz4)
@@ -149,9 +159,10 @@ if (liblz4)
   message(STATUS "Found liblz4: ${liblz4}")
 else()
   message(FATAL_ERROR "Liblz4 library not found")
+
 endif ()
 
-# OSQP
+# Find OSQP library and headers
 find_package(osqp REQUIRED)
 if(osqp_FOUND)
     message(STATUS "Found OSQP")
@@ -159,19 +170,31 @@ else()
     message(FATAL_ERROR "Could not locate OSQP")
 endif()
 set(OSQP_INCLUDE_DIR /usr/local/include/osqp/)
+# Check that the expected folders exist.
 if(EXISTS "${OSQP_INCLUDE_DIR}")
   message(STATUS "OSQP include dir: ${OSQP_INCLUDE_DIR}")
 else()
   message(FATAL_ERROR "OSQP include dir not found at \$OSQP_INCLUDE_DIR=\"${OSQP_INCLUDE_DIR}\".")
 endif()
 
-set(EXTERN_INCLUDE_DIRS ${OSQP_INCLUDE_DIR})
+# Include the external libraries to the project
+# This is necessary to include the headers of the external libraries
+set(EXTERN_INCLUDE_DIRS ${OSQP_INCLUDE_DIR}) 
 
 configure_DynamoRIO_global(OFF ON)
 
+# Define a function to link DynamoRIO static clients to a target 
+# (This function is hard to convert to Makefile)
 function(link_DynamoRIO_clients target)
   configure_DynamoRIO_static(${target})
+
+  # use_DynamoRIO_static_client(${target} drmemtrace_static)
+
+  # Explicitly specify the path to the drmemtrace_static library
+  # target_link_libraries(${target} $ENV{DYNAMORIO_HOME}/tools/lib64/release/libdrmemtrace_static.a)
+  # For some reason following didn't work with "/usr/bin/ld: cannot find -ldrmemtrace_static", need to fix it
   use_DynamoRIO_static_client(${target} drmemtrace_static)
+
   if (ZLIB_FOUND)
     target_link_libraries(${target} ${ZLIB_LIBRARIES})
   else()
@@ -199,4 +222,5 @@ function(link_DynamoRIO_clients target)
   use_DynamoRIO_static_client(${target} drcovlib_static)
 endfunction()
 
+# Link static clients to the original executable
 link_dynamoRIO_clients(${EXECUTABLE_NAME})

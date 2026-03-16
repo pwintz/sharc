@@ -1,0 +1,50 @@
+{
+  "==== Settings ====": "Kinematic MPPI Model Configuration",
+  "label": "mppi_kinematic",
+  "dynamics_module_name": "dynamics.carla_mpc_dynamics",
+  "dynamics_class_name": "CarlaMPCDynamics",
+  "n_time_steps": 64,
+  "x0": [0, 0, 0, 0],
+  "u0": [0.0, 0.0],
+  "system_parameters": {
+    "state_dimension": 4,
+    "input_dimension": 2,
+    "exogenous_input_dimension": 80,
+    "output_dimension": 2,
+    "sample_time": 0.1,
+    "x_names": ["px", "py", "psi", "v"],
+    "u_names": ["acceleration", "steering_angle"],
+    "target_speed": 10,
+    "controller_type": "CarlaKinematicMPPIController",
+    "mpc_options": {
+      "prediction_horizon": 10,
+      "control_horizon": 10,
+      "wheelbase": 2.87,
+      "n_waypoints": 40,
+      "waypoint_spacing": 0.5,
+      "cost_weights": {
+        "q_path":  10.0,
+        "q_speed": 1.0,
+        "r_accel": 0.1,
+        "r_steer": 1.0,
+        "r_jerk_v": 0.0,
+        "r_jerk_yaw": 0.0,
+        "gamma": 1.0
+      },
+      "mppi_options": {
+        "num_rollouts": 512,
+        "lambda": 1.0,
+        "sigma_accel": 0.5,
+        "sigma_steer": 0.2,
+        "rho": 0.2,
+        "beta": 0.9
+      },
+      "input_limits": {
+        "max_accel":  0.5,
+        "min_accel": -0.5,
+        "max_steer":  0.5,
+        "min_steer": -0.5
+      }
+    }
+  }
+}
