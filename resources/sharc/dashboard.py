@@ -167,6 +167,86 @@ def extract_steps(raw: dict):
     return t_s, x_s, u_s, delays
 
 
+def load_carla_extra(sim_dir: str):
+    """
+    Aggregate NPC trajectory data and collision events from all
+    ``carla_extra.jsonl`` sidecar files produced by CarlaMPCDynamics.
+
+    Looks in *sim_dir* itself and in any immediate sub-directories
+    (batch dirs), so both serial and parallel modes are handled.
+
+    Returns
+    -------
+    npc_tracks : dict  id → {"label": str, "xs": list, "ys": list}
+    collisions  : list of dicts  {"t", "ego_x", "ego_y", "other", "intensity"}
+    """
+    # Gather candidate files (sim_dir first, then sorted sub-dirs so
+    # batches appear in chronological order).
+    files = []
+    top = os.path.join(sim_dir, 'carla_extra.jsonl')
+    if os.path.isfile(top):
+        files.append(top)
+    try:
+        for entry in sorted(os.listdir(sim_dir)):
+            sub = os.path.join(sim_dir, entry, 'carla_extra.jsonl')
+            if os.path.isfile(sub):
+                files.append(sub)
+    except OSError:
+        pass
+
+    npc_tracks = {}   # actor_id  → {"label", "xs", "ys"}
+    collisions  = []
+    npc_counter = 0
+
+    for fpath in files:
+        try:
+            with open(fpath, 'r') as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    for npc in rec.get('npcs', []):
+                        nid = npc['id']
+                        if nid not in npc_tracks:
+                            npc_counter += 1
+                            npc_tracks[nid] = {
+                                'label': f'NPC {npc_counter}',
+                                'xs': [], 'ys': [],
+                            }
+                        npc_tracks[nid]['xs'].append(npc['x'])
+                        npc_tracks[nid]['ys'].append(npc['y'])
+                    col = rec.get('collision')
+                    if col:
+                        collisions.append({
+                            't':         rec.get('t', 0),
+                            'ego_x':     rec.get('ego_x', 0),
+                            'ego_y':     rec.get('ego_y', 0),
+                            'other':     col.get('other', 'unknown'),
+                            'intensity': col.get('intensity', 0),
+                        })
+        except OSError:
+            pass
+
+    return npc_tracks, collisions
+
+
+# NPC colour palette — warm/vivid tones that stand out on the dark background
+_NPC_COLORS = [
+    '#fab387',  # peach
+    '#f9e2af',  # yellow
+    '#a6e3a1',  # green
+    '#94e2d5',  # teal
+    '#74c7ec',  # sky
+    '#cba6f7',  # mauve
+    '#f2cdcd',  # flamingo
+    '#eba0ac',  # maroon
+]
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Figure setup
 # ─────────────────────────────────────────────────────────────────────────────
@@ -260,14 +340,17 @@ class Dashboard:
                 pass
             self._status_text = None
 
-    def _update_title(self, n_steps: int, n_miss: int, sim_dir: str):
+    def _update_title(self, n_steps: int, n_miss: int, n_collisions: int, sim_dir: str):
         name  = os.path.basename(sim_dir)
-        T     = self._config_cache.get("sample_time", "?")
-        label = self._config_cache.get("label", "")
+        T     = self._config_cache.get('sample_time', '?')
+        label = self._config_cache.get('label', '')
+        collision_tag = f'  \u26a0 {n_collisions} COLLISION(S)' if n_collisions else ''
         self.fig.suptitle(
-            f"SHARC Live Dashboard  |  {label}  |  T = {T} s  "
-            f"|  step {n_steps}  |  deadline misses: {n_miss}",
-            color=_TEXT_CLR, fontsize=11, fontweight="bold",
+            f'SHARC Live Dashboard  |  {label}  |  T = {T} s  '
+            f'|  step {n_steps}  |  deadline misses: {n_miss}'
+            f'{collision_tag}',
+            color='#f38ba8' if n_collisions else _TEXT_CLR,
+            fontsize=11, fontweight='bold',
             x=0.5, y=0.97,
         )
 
@@ -354,12 +437,18 @@ class Dashboard:
                     except (json.JSONDecodeError, OSError):
                         cfg = {}
             sp  = cfg.get("system_parameters", {})
+            mpc_o = sp.get("mpc_options", {})
+            lims  = mpc_o.get("input_limits", {})
             self._config_cache = {
                 "sample_time": sp.get("sample_time", 0.1),
                 "x_names":     sp.get("x_names", ["x","y","yaw","speed","wp_x","wp_y"]),
                 "u_names":     sp.get("u_names", ["throttle","steer","brake"]),
                 "target_speed":sp.get("target_speed", None),
                 "label":       cfg.get("label", ""),
+                "mpc_opts": {
+                    "max_accel": lims.get("max_accel",  1.0),
+                    "min_accel": lims.get("min_accel", -3.0),
+                },
             }
 
         # ── 4. Extract per-step data ─────────────────────────────────────────
@@ -388,16 +477,32 @@ class Dashboard:
         wp_x  = x[:, 4] if x.shape[1] > 4 else None
         wp_y  = x[:, 5] if x.shape[1] > 5 else None
 
-        # Control columns resolved by u_names
+        # Control columns resolved by u_names.
+        # Supports two conventions:
+        #   (a) PID-style:  u = [throttle, steer, brake]     (CARLA commands, [0,1])
+        #   (b) MPC-style:  u = [acceleration, steering_angle] (physical units)
+        #       → throttle = max(a, 0) / max_accel,  brake = max(-a, 0) / |min_accel|
         def _col(name, fallback):
             try:
                 return u[:, u_names.index(name)]
             except (ValueError, IndexError):
                 return u[:, fallback] if u.shape[1] > fallback else np.zeros(n_steps)
 
-        throttle = _col("throttle", 0)
-        steer    = _col("steer",    1)
-        brake    = _col("brake",    2)
+        mpc_opts   = (self._config_cache.get("mpc_opts") or {})
+        _is_mpc    = ("acceleration" in u_names or "steering_angle" in u_names)
+
+        if _is_mpc:
+            accel = _col("acceleration",   0)
+            delta = _col("steering_angle", 1)
+            _max_a = mpc_opts.get("max_accel", 1.0)
+            _min_a = mpc_opts.get("min_accel", -3.0)
+            throttle = np.clip( accel / max(_max_a,  1e-6), 0.0, 1.0)
+            brake    = np.clip(-accel / max(-_min_a, 1e-6), 0.0, 1.0)
+            steer    = np.clip(delta, -1.0, 1.0)
+        else:
+            throttle = _col("throttle", 0)
+            steer    = _col("steer",    1)
+            brake    = _col("brake",    2)
 
         # Deadline misses
         miss_mask = (delays >= T) if len(delays) else np.zeros(n_steps, bool)
@@ -406,16 +511,72 @@ class Dashboard:
         ax = self.axes
 
         # ── 6. XY Trajectory ───────────────────────────────────────────────
-        ax["xy"].cla()
-        _style_ax(ax["xy"], "Vehicle Trajectory", "X (m)", "Y (m)")
-        ax["xy"].set_aspect("equal", adjustable="datalim")
-        ax["xy"].plot(px, py, color="#89b4fa", linewidth=1.5, label="Path")
-        ax["xy"].plot(px[-1], py[-1], "o", color="#f38ba8",
-                      markersize=7, label="Current")
+        npc_tracks, collisions = load_carla_extra(sim_dir)
+        n_collisions = len(collisions)
+
+        ax['xy'].cla()
+        title_color = '#f38ba8' if n_collisions else _TEXT_CLR
+        title_text  = ('Vehicle Trajectory'
+                       if not n_collisions
+                       else f'Vehicle Trajectory  \u26a0 {n_collisions} COLLISION(S)')
+        _style_ax(ax['xy'], title_text, 'X (m)', 'Y (m)')
+        ax['xy'].title.set_color(title_color)
+        ax['xy'].set_aspect('equal', adjustable='datalim')
+
+        # Ego path — coloured gradient (older = dimmer, newest = bright)
+        if len(px) > 1:
+            from matplotlib.collections import LineCollection
+            points  = np.array([px, py]).T.reshape(-1, 1, 2)
+            segs    = np.concatenate([points[:-1], points[1:]], axis=1)
+            alphas  = np.linspace(0.15, 1.0, len(segs))
+            for seg, a in zip(segs, alphas):
+                ax['xy'].plot(seg[:, 0], seg[:, 1],
+                              color='#89b4fa', linewidth=2.0, alpha=float(a),
+                              solid_capstyle='round')
+        elif len(px) == 1:
+            ax['xy'].plot(px, py, 'o', color='#89b4fa', markersize=5)
+
+        # Waypoints
         if wp_x is not None and wp_y is not None:
-            ax["xy"].scatter(wp_x, wp_y, c="#a6e3a1", s=10,
-                             alpha=0.4, zorder=3, label="Waypoints")
-        ax["xy"].legend(fontsize=7, facecolor=_DARK_BG, labelcolor=_TEXT_CLR)
+            ax['xy'].scatter(wp_x, wp_y, c='#a6e3a1', s=8,
+                             alpha=0.35, zorder=3, label='Waypoints')
+
+        # NPC trajectories
+        for i, (nid, track) in enumerate(npc_tracks.items()):
+            clr = _NPC_COLORS[i % len(_NPC_COLORS)]
+            xs, ys = track['xs'], track['ys']
+            if len(xs) > 1:
+                ax['xy'].plot(xs, ys, color=clr, linewidth=1.0,
+                              linestyle='--', alpha=0.55, zorder=4)
+            if xs:
+                ax['xy'].plot(xs[-1], ys[-1], 's', color=clr,
+                              markersize=5, alpha=0.9, zorder=5,
+                              label=track['label'])
+
+        # Collision markers
+        for col in collisions:
+            ax['xy'].plot(col['ego_x'], col['ego_y'],
+                          'X', color='#ff2222', markersize=13,
+                          markeredgewidth=2.0, zorder=10)
+            ax['xy'].annotate(
+                f"\u26a0 COLLISION\n"
+                f"{col['other'].split('.')[-1][:16]}\n"
+                f"{col['intensity']:.0f} N·m/s",
+                xy=(col['ego_x'], col['ego_y']),
+                xytext=(8, 8), textcoords='offset points',
+                color='#ff4444', fontsize=6.5,
+                bbox=dict(boxstyle='round,pad=0.3',
+                          facecolor='#2a0000', alpha=0.85,
+                          edgecolor='#ff4444', linewidth=0.8),
+                zorder=11,
+            )
+
+        # Ego current position (on top of everything)
+        ax['xy'].plot(px[-1], py[-1], 'o', color='#f38ba8',
+                      markersize=8, zorder=12, label='Ego')
+
+        ax['xy'].legend(fontsize=7, facecolor=_DARK_BG, labelcolor=_TEXT_CLR,
+                        framealpha=0.8, edgecolor=_GRID_CLR)
 
         # ── 7. Speed ────────────────────────────────────────────────────────
         ax["spd"].cla()
@@ -444,7 +605,10 @@ class Dashboard:
 
         # ── 9. Throttle / Brake ─────────────────────────────────────────────
         ax["tbrk"].cla()
-        _style_ax(ax["tbrk"], "Throttle / Brake", "Time (s)", "Command [0, 1]")
+        if _is_mpc:
+            _style_ax(ax["tbrk"], "Throttle / Brake (derived)", "Time (s)", "Normalised [0, 1]")
+        else:
+            _style_ax(ax["tbrk"], "Throttle / Brake", "Time (s)", "Command [0, 1]")
         ax["tbrk"].set_ylim(-0.05, 1.05)
         ax["tbrk"].plot(t, throttle, color="#a6e3a1",
                          linewidth=1.5, label="Throttle")
@@ -454,13 +618,17 @@ class Dashboard:
 
         # ── 10. Steering ────────────────────────────────────────────────────
         ax["steer"].cla()
-        _style_ax(ax["steer"], "Steering", "Time (s)", "Steer [-1, 1]")
-        ax["steer"].set_ylim(-1.1, 1.1)
+        if _is_mpc:
+            _style_ax(ax["steer"], "Steering Angle", "Time (s)", "δ (rad)")
+            ax["steer"].set_ylim(-0.55, 0.55)
+        else:
+            _style_ax(ax["steer"], "Steering", "Time (s)", "Steer [-1, 1]")
+            ax["steer"].set_ylim(-1.1, 1.1)
         ax["steer"].plot(t, steer, color="#fab387", linewidth=1.5)
         ax["steer"].axhline(0, color=_GRID_CLR, linewidth=0.8)
 
         # ── 11. Title ────────────────────────────────────────────────────────
-        self._update_title(n_steps, n_miss, sim_dir)
+        self._update_title(n_steps, n_miss, n_collisions, sim_dir)
 
         self.fig.canvas.draw_idle()
 

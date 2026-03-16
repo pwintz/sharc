@@ -20,6 +20,15 @@ class Dynamics(ABC):
     def setup_system(self):
       pass
 
+    def set_sim_dir(self, sim_dir: str):
+      """Called by plant_runner before each simulation batch starts.
+
+      Subclasses can override this to receive the current batch simulation
+      directory (e.g. to write sidecar data files alongside experiment data).
+      The default implementation is a no-op.
+      """
+      pass
+
     def teardown(self):
       """Release resources acquired in setup_system().
 

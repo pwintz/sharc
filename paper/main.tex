@@ -34,6 +34,7 @@
 \newcommand{\calH}{\mathcal{H}}
 \newcommand{\calW}{\mathcal{W}}
 \newcommand{\calT}{\mathcal{T}}
+\newcommand{\calL}{\mathcal{L}}
 \newcommand{\ZOH}{\mathrm{ZOH}}
 \newcommand{\diag}{\mathrm{diag}}
 \newcommand{\TODO}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
@@ -305,24 +306,56 @@ a black-box instantiation of the abstract~$f$. \TODO{Yash \& Malavikha: explain 
 % =============================================================
 \section{Controller Formulations}\label{sec:controllers}
 
-We evaluate a few controllers with qualitatively different
-computational profiles.
+We evaluate two controllers with qualitatively different
+computational profiles: a PID controller with constant per-step
+cost and a nonlinear MPC with obstacle-avoidance constraints whose
+per-step cost depends on the state and the traffic environment.
 
-\subsection{State and Control Representation}\label{sec:state}
+\subsection{State, Control, and Exogenous Inputs}\label{sec:state}
 
-The ego vehicle state and control input are
-\begin{align}
-  x_k &:= (p_x,\, p_y,\, \psi,\, v)^\top
-    \in \R^4, \label{eq:state}\\
-  u_k &:= (\alpha,\, \delta,\, \beta)^\top
-    \in [0,1] \times [-1,1] \times [0,1],\label{eq:control}\\
-    w_k &:= (w_x^+, w_y^+)^\top \in \R^2 \label{eq:exo}
-\end{align}
-where $(p_x, p_y)$ is position, $\psi$ is heading (yaw), $v$ is
-speed, $(w_x^+, w_y^+)$ is the next waypoint provided by CARLA from the HD map, and
-$(\alpha, \delta, \beta)$ are throttle, steering, and brake.
-The exogenous input $w_k := (w_x^+, w_y^+)^\top$ provides the
-reference waypoint to the controller at each step.
+The ego vehicle state is
+\begin{equation}\label{eq:state}
+  x_k := (p_x,\, p_y,\, \psi,\, v)^\top \in \R^4,
+\end{equation}
+where $(p_x, p_y)$ is the global position, $\psi$ the heading
+(yaw), and $v$ the longitudinal speed.
+
+\noindent\textbf{PID control input.}
+The PID controller outputs CARLA-native commands
+\begin{equation}\label{eq:control_pid}
+  u_k^{\mathrm{PID}} := (\alpha,\, \delta,\, \beta)^\top
+  \in [0,1]\times[-1,1]\times[0,1],
+\end{equation}
+with throttle $\alpha$, steering $\delta$, and brake~$\beta$.
+
+\noindent\textbf{MPC control input.}
+The MPC controller operates on physical quantities
+\begin{equation}\label{eq:control_mpc}
+  u_k^{\mathrm{MPC}} := (a,\, \delta)^\top
+  \in [a_{\min}, a_{\max}] \times [\delta_{\min}, \delta_{\max}],
+\end{equation}
+where $a$ is the longitudinal acceleration
+($\mathrm{m/s^2}$) and $\delta$ the front-wheel steering angle
+(rad).  The dynamics layer maps $(a, \delta)$ to
+CARLA's throttle/brake/steer commands before actuation.
+
+\noindent\textbf{Exogenous input.}
+At each step, the dynamics module queries a set of
+$N_w$ reference waypoints
+$\calW_k := \{w^{(i)}_k\}_{i=1}^{N_w}$ from CARLA's HD map
+and detects up to $N_o$ nearby obstacles, yielding the exogenous
+vector
+\begin{equation}\label{eq:exo}
+  w_k := \bigl(\underbrace{w_{x}^{(1)},w_{y}^{(1)},\ldots,
+    w_{x}^{(N_w)},w_{y}^{(N_w)}}_{2N_w},\;
+  \underbrace{o_1,\ldots,o_{N_o}}_{5N_o}\bigr)^\top
+  \in \R^{2N_w + 5N_o},
+\end{equation}
+where each obstacle entry
+$o_i := (o_x^i, o_y^i, \dot{o}_x^i, \dot{o}_y^i, r_i)$
+contains the position, velocity, and bounding-circle radius.
+Empty obstacle slots are marked with a sentinel value~($o_x \ge 5\!\times\!10^5$)
+so that the solver treats them as vacuously satisfied.
 
 \subsection{PID Controller}\label{sec:pid}
 
@@ -339,9 +372,9 @@ where $e_k^v := v^* - v_k$.  Throttle and brake are
 $\alpha_k = \mathrm{clip}(\sigma_k,\, 0,\, 1)$,\;
 $\beta_k = \mathrm{clip}(-\sigma_k,\, 0,\, 1)$.
 
-\noindent\textbf{Lateral.}  Steer toward the current waypoint.
+\noindent\textbf{Lateral.}  Steer toward the next waypoint.
 The heading error is
-$e_k^\psi := \mathrm{atan2}(w_y^+ - p_y,\; w_x^+ - p_x) - \psi_k$,
+$e_k^\psi := \mathrm{atan2}(w_y^{(1)} - p_y,\; w_x^{(1)} - p_x) - \psi_k$,
 and the steering command is
 \begin{equation}\label{eq:pid_lat}
   \delta_k = \mathrm{clip}\!\bigl(K_P^r\, e_k^\psi + K_I^r
@@ -351,24 +384,39 @@ and the steering command is
 PID requires a fixed number of arithmetic operations per step,
 so $\tau_k \approx \mathrm{const}$.
 
-% ---- TikZ figure: MPC waypoint tracking --------------------
+\subsection{Obstacle-Aware Model Predictive Controller}\label{sec:mpc}
+
+The MPC controller receives the reference waypoints
+$\calW_k$ and obstacle states from~\eqref{eq:exo} and solves a
+constrained nonlinear program at every sample step.
+The formulation is illustrated in
+Fig.~\ref{fig:mpc_obstacle}.
+
+% ---- TikZ figure: MPC with obstacle constraints --------------------
 \begin{figure}[t]
   \centering
-  \resizebox{0.45\textwidth}{!}{%
+  \resizebox{0.48\textwidth}{!}{%
   \begin{tikzpicture}[
       >=Stealth,
       % ---- Style definitions ----
       wp/.style={circle, fill=steelblue, draw=steelblue!60!black,
-        line width=0.5pt, inner sep=2.2pt},
+        line width=0.5pt, inner sep=2.0pt},
+      wpblocked/.style={circle, fill=steelblue!25, draw=steelblue!30,
+        line width=0.5pt, inner sep=2.0pt},
       pred/.style={circle, fill=mutedred, draw=mutedred!60!black,
-        line width=0.5pt, inner sep=2.6pt},
+        line width=0.5pt, inner sep=2.4pt},
       car/.style={rectangle, draw=black!85, line width=0.9pt,
-        fill=gray!90, minimum width=15mm, minimum height=7.5mm,
+        fill=gray!90, minimum width=14mm, minimum height=7mm,
         rounded corners=2pt},
-      dist/.style={densely dashed, mutedpurple, line width=0.75pt},
-      refpath/.style={steelblue, line width=1.6pt, opacity=0.40},
+      npc/.style={rectangle, draw=amber!80!black, line width=0.8pt,
+        fill=amber!60, minimum width=10mm, minimum height=5.5mm,
+        rounded corners=1.5pt},
+      dist/.style={densely dashed, mutedpurple, line width=0.70pt},
+      refpath/.style={steelblue, line width=1.6pt, opacity=0.35},
       predpath/.style={mutedred, line width=1.2pt, densely dotted},
-      veloc/.style={-{Stealth[length=5pt]}, line width=1.3pt, safegreen!80!black},
+      safezone/.style={mutedred, line width=0.6pt, densely dashed,
+        fill=mutedred, fill opacity=0.06},
+      lanebd/.style={black!40, line width=0.9pt, dash pattern=on 6pt off 3pt},
       refline/.style={black!35, dashed, line width=0.6pt},
       anglearc/.style={steelblue!65!black, line width=0.8pt,
         -{Stealth[length=4pt]}},
@@ -376,10 +424,29 @@ so $\tau_k \approx \mathrm{const}$.
     ]
 
     % ================================================================
-    % Reference waypoints along an S-curve
+    %  Lane boundaries (two parallel dashed lines)
+    % ================================================================
+    \draw[lanebd]
+      plot[smooth, tension=0.50] coordinates {
+        (0.0,-0.75) (1.0,-0.30) (2.0,0.33)  (3.0,0.99)
+        (4.0,1.49)  (5.0,1.73)  (6.0,1.71)
+        (7.0,1.47)  (8.0,1.09)  (9.0,0.65)};
+
+    \draw[lanebd]
+      plot[smooth, tension=0.50] coordinates {
+        (0.0,0.75)  (1.0,1.18)  (2.0,1.83)  (3.0,2.49)
+        (4.0,2.99)  (5.0,3.23)  (6.0,3.21)
+        (7.0,2.97)  (8.0,2.59)  (9.0,2.15)};
+
+    % Lane-width annotation
+    \draw[<->, black!55, line width=0.5pt]
+      (0.15,-0.70) -- (0.15,0.70)
+      node[midway, left=1pt, font=\scriptsize, black!60] {$2\,w_\ell$};
+
+    % ================================================================
+    %  Reference waypoints along an S-curve (center of lane)
     % ================================================================
     \foreach \i/\wx/\wy in {
-       % 1/0.0/0.00,   2/0.5/0.19,   3/1.0/0.44,   4/1.5/0.74,
        5/2.0/1.08,   6/2.5/1.42,   7/3.0/1.74,   8/3.5/2.02,
        9/4.0/2.24,  10/4.5/2.40,  11/5.0/2.48,  12/5.5/2.50,
       13/6.0/2.46,  14/6.5/2.36,  15/7.0/2.22,  16/7.5/2.04,
@@ -387,12 +454,21 @@ so $\tau_k \approx \mathrm{const}$.
       \node[wp] (w\i) at (\wx,\wy) {};
     }
 
-    % ---- Waypoint labels (first, middle, last) ----
-    \node[annot, steelblue!80!black, above=3pt] at (w5)  {$w^{(1)}$};
-    \node[annot, steelblue!80!black, above=3pt] at (w10) {$w^{(i)}$};
-    \node[annot, steelblue!80!black, below=3pt] at (w19) {$w^{(N_w)}$};
+    % Blocked waypoints (inside obstacle safety zone) — faded
+    \foreach \i/\wx/\wy in {
+      b1/5.8/2.48,  b2/6.0/2.46,  b3/6.2/2.43} {
+      \node[wpblocked] (\i) at (\wx,\wy) {};
+    }
 
-    % ---- Smooth reference path ----
+    % Labels
+    \node[annot, steelblue!80!black, above=3pt] at (w5)
+      {$w^{(1)}$};
+    \node[annot, steelblue!80!black, above=3pt] at (w10)
+      {$w^{(i)}$};
+    \node[annot, steelblue!80!black, below=3pt] at (w19)
+      {$w^{(N_w)}$};
+
+    % Smooth reference path (translucent)
     \draw[refpath]
       plot[smooth, tension=0.50] coordinates {
         (0.0,0.00) (0.5,0.19) (1.0,0.44) (1.5,0.74)
@@ -403,184 +479,366 @@ so $\tau_k \approx \mathrm{const}$.
       };
 
     % ================================================================
-    % Ego vehicle — heading angle 35 deg, position (0.80, 0.22)
+    %  Ego vehicle
     % ================================================================
     \node[car, rotate=20] (ego) at (0.80, 0.22) {};
 
-    % Label: state vector below the vehicle (absolute coords)
-    % \node[annot, black!70, anchor=north] at (0.80, -0.28)
-    %   {\textbf{Ego}:\; $x_k = (p_x,\,p_y,\,\psi,\,v)^\top$};
-
-    % ---- East-direction reference dashed line (for angle arc) ----
+    % Heading arc
     \draw[refline] (ego.center) -- ++(0:1.55);
-
-    % ---- Heading angle arc: 0 deg -> 35 deg, radius 1.1 ----
-    % Arc starts at (ego.center + (1.1, 0)) and sweeps to 35 deg
     \draw[anglearc]
       ($(ego.center)+(1.10,0)$) arc (0:20:1.10)
       node[midway, below right=-8pt and 1pt, annot,
         steelblue!70!black] {$\psi_k$};
 
-    % ---- Velocity vector (direction of motion, separate from arc) ----
-    % \draw[veloc] (ego.center) -- ++(35:1.55)
-    %   node[above right=1pt and 0pt, annot, safegreen!70!black] {$v_k$};
+    % ================================================================
+    %  Obstacle (NPC vehicle) with bounding circle + safety zone
+    % ================================================================
+    \node[npc, rotate=-5] (obs) at (6.0, 2.15) {};
+
+    % Bounding circle r_i (tight)
+    \draw[amber!80!black, line width=0.6pt]
+      (obs.center) circle (0.40);
+    \node[annot, amber!80!black, above right=2pt and -2pt]
+      at ($(obs.center)+(30:0.40)$) {$r_i$};
+
+    % Safety zone r_safe = r_ego + r_i + m  (larger dashed circle)
+    \draw[safezone] (obs.center) circle (1.05);
+    \node[annot, mutedred!80!black, below left=0pt and -3pt]
+      at ($(obs.center)+(210:1.05)$) {$r_{\mathrm{safe}}$};
+
+    % Velocity arrow for obstacle
+    \draw[-{Stealth[length=4pt]}, amber!70!black, line width=1.0pt]
+      (obs.center) -- ++(-10:1.0)
+      node[above right=-2pt, font=\scriptsize, amber!70!black]
+      {$\dot{o}_i$};
 
     % ================================================================
-    % MPC predicted states — offset BELOW reference path so
-    % distance lines d_{j|k} are clearly non-zero
+    %  MPC predicted states — swerving around obstacle
     % ================================================================
-    \node[pred] (p1) at (2.20, 0.75) {}; % near w5=(2.0,1.08)
-    \node[pred] (p2) at (3.35, 1.35) {}; % near w7=(3.0,1.74)
-    \node[pred] (p3) at (4.45, 1.86) {}; % near w9=(4.0,2.24)
-    \node[pred] (p4) at (5.55, 2.12) {}; % near w11=(5.0,2.48)
-    \node[pred] (p5) at (6.65, 2.05) {}; % near w13=(6.0,2.46)
+    \node[pred] (p1) at (2.10, 0.80) {};
+    \node[pred] (p2) at (3.25, 1.40) {};
+    \node[pred] (p3) at (4.40, 1.95) {};
+    \node[pred] (p4) at (5.50, 2.70) {};
+    \node[pred] (p5) at (6.60, 2.55) {};
 
-    % ---- Predicted trajectory ----
-    \draw[predpath] (ego.center) -- (p1) -- (p2) -- (p3) -- (p4) -- (p5);
+    \draw[predpath]
+      (ego.center) -- (p1) -- (p2) -- (p3) -- (p4) -- (p5);
 
-    % ---- Predicted state labels ----
-    \node[annot, mutedred, right=2pt of p1]  {$\hat{x}_{k+1|k}$};
-    \node[annot, mutedred, below=0pt of p3]  {$\hat{x}_{k+3|k}$};
-    \node[annot, mutedred, below=0pt of p5]  {$\hat{x}_{k+N_p|k}$};
+    % Labels on selected predictions
+    \node[annot, mutedred, right=2pt of p1]
+      {$\hat{x}_{1|k}$};
+    \node[annot, mutedred, above=1pt of p4]
+      {$\hat{x}_{j|k}$};
+    \node[annot, mutedred, right=2pt of p5]
+      {$\hat{x}_{N_p|k}$};
 
-    % ================================================================
-    % Distance lines to nearest waypoints
-    % ================================================================
+    % Distance lines to closest waypoints
     \draw[dist] (p1) -- (w5)
-      node[midway, above right=-2pt, annot, mutedpurple] {$d_{1|k}$};
-    \draw[dist] (p2) -- (w7)
-      % node[midway, left=3pt, annot, mutedpurple] {$d_{2|k}$};
-    \draw[dist] (p3) -- (w10)
-      node[midway, right=0pt, annot, mutedpurple] {$d_{3|k}$};
-    \draw[dist] (p4) -- (w12)
-      % node[midway, left=3pt, annot, mutedpurple] {$d_{4|k}$};
+      node[midway, above right=-2pt, annot, mutedpurple]
+      {$d_{1|k}$};
+    \draw[dist] (p3) -- (w9)
+      node[midway, right=0pt, annot, mutedpurple]
+      {$d_{3|k}$};
     \draw[dist] (p5) -- (w14)
-      node[midway, above=3pt, annot, mutedpurple] {$d_{5|k}$};
+      node[midway, above=2pt, annot, mutedpurple]
+      {$d_{5|k}$};
 
     % ================================================================
-    % Legend box (positioned below and to the right of path)
+    %  Lateral deviation indicator at one prediction step
     % ================================================================
-    \begin{scope}[shift={(6.65,-0.75)}]
+    % (from predicted state p3 perpendicularly to the reference path)
+    \draw[safegreen, line width=0.7pt, densely dotted]
+      (p4) -- (5.50, 2.50)
+      node[midway, right=1pt, font=\scriptsize, safegreen!70!black]
+      {$e_{\perp}$};
+
+    % ================================================================
+    %  Legend
+    % ================================================================
+    \begin{scope}[shift={(6.40,-0.85)}]
       \draw[black!25, rounded corners=4pt, fill=white, fill opacity=0.92]
-        (-0.25,-0.40) rectangle (3.55, 1.20);
+        (-0.25,-0.80) rectangle (3.75, 1.20);
 
-      % Row 1: waypoint
       \node[wp] at (0.10, 0.95) {};
       \node[font=\scriptsize, anchor=west] at (0.30, 0.95)
         {reference waypoint $w^{(i)}$};
 
-      % Row 2: predicted state
-      \node[pred] at (0.10, 0.60) {};
+      \node[wpblocked] at (0.10, 0.60) {};
       \node[font=\scriptsize, anchor=west] at (0.30, 0.60)
-        {predicted state $\hat{x}_{k+j|k}$};
+        {blocked waypoint (filtered)};
 
-      % Row 3: predicted trajectory
-      \draw[predpath] (0.0, 0.25) -- (0.25, 0.25);
+      \node[pred] at (0.10, 0.25) {};
       \node[font=\scriptsize, anchor=west] at (0.30, 0.25)
+        {predicted state $\hat{x}_{j|k}$};
+
+      \draw[predpath] (0.0, -0.10) -- (0.25, -0.10);
+      \node[font=\scriptsize, anchor=west] at (0.30,-0.10)
         {predicted trajectory};
 
-      % Row 4: distance to reference
-      \draw[dist] (0.0,-0.10) -- (0.25,-0.10);
-      \node[font=\scriptsize, anchor=west] at (0.30,-0.10)
-        {tracking distance $d_{j|k}$};
+      \draw[safezone] (0.12, -0.45) circle (0.12);
+      \node[font=\scriptsize, anchor=west] at (0.30,-0.45)
+        {safety zone $r_{\mathrm{safe}}$
+          (constraint~\eqref{eq:obs_constraint})};
 
-      % % Row 5: velocity vector
-      % \draw[veloc] (0.0,-0.45) -- (0.25,-0.45);
-      % \node[font=\scriptsize, anchor=west] at (0.30,-0.45)
-      %   {velocity $v_k$};
-
-      % % Row 6: heading angle
-      % \draw[anglearc] (0.18,-0.72) arc (0:45:0.18);
-      % \node[font=\scriptsize, anchor=west] at (0.30,-0.72)
-      %   {heading angle $\psi_k$};
+      \draw[lanebd] (0.0, -0.70) -- (0.25, -0.70);
+      \node[font=\scriptsize, anchor=west] at (0.30,-0.70)
+        {lane boundary (constraint~\eqref{eq:lane_constraint})};
     \end{scope}
 
   \end{tikzpicture}}
-  \caption{MPC waypoint-tracking formulation.  The ego vehicle
-    at position $(p_x, p_y)$ moves with speed $v_k$ and heading
-    $\psi_k$ (measured from east, shown as an arc).
-    Reference waypoints $\{w^{(i)}\}_{i=1}^{N_w}$ (\textcolor{steelblue}{blue})
-    define the desired path.  At each step $k$, MPC rolls out the
-    kinematic bicycle model~\eqref{eq:bicycle} to obtain
-    $N_p$ predicted states $\hat{x}_{k+j|k}$ (\textcolor{mutedred}{red})
-    and minimizes the sum of squared distances $d_{j|k}$
-    (\textcolor{mutedpurple}{purple dashed}) from each predicted
-    position to the closest waypoint~\eqref{eq:closest_wp}.}
-  \label{fig:mpc_waypoints}
+  \caption{Obstacle-aware MPC formulation.  The ego vehicle
+    (gray) tracks reference waypoints
+    $\{w^{(i)}\}$ (\textcolor{steelblue}{blue dots})
+    along the lane center while following a leading NPC
+    (\textcolor{amber}{orange}).  Each obstacle is enclosed by
+    a bounding circle of radius~$r_i$ and a safety zone of
+    radius~$r_{\mathrm{safe}} = r_{\mathrm{ego}} + r_i + m$
+    (\textcolor{mutedred}{red dashed}).  The reference path is
+    \emph{truncated} at the first blocked waypoint: all
+    subsequent waypoints collapse to the last safe position
+    (faded dots), so MPC sees no path beyond the obstacle.
+    Simultaneously, the reference speed adapts to the leading
+    vehicle's speed~\eqref{eq:adaptive_speed}.  Together, these
+    mechanisms cause MPC to decelerate and follow rather than
+    swerve.  Lane boundaries (gray dashed) enforce~\eqref{eq:lane_constraint}.}
+  \label{fig:mpc_obstacle}
 \end{figure}
 
-\subsection{Model Predictive Controller}\label{sec:mpc}
-\TODO{Tyler: Check and verify this part and make it more accurate.}
-The MPC controller receives a vector of $N_w$ reference waypoints
-$\mathcal{W} := \{w^{(i)}\}_{i=1}^{N_w}$,
-$w^{(i)} = (w_x^{(i)}, w_y^{(i)})$,
-from a route planner and solves a finite-horizon optimal control
-problem at each sample step.  The formulation is illustrated in
-Fig.~\ref{fig:mpc_waypoints}.
+\subsubsection{Prediction Model}\label{sec:bicycle}
 
-\noindent\textbf{Prediction model.}  We use a kinematic bicycle
-model for internal prediction:
+The MPC uses a kinematic bicycle model for internal prediction.
+Given the current predicted state
+$\hat{x}_{j|k} = (p_x, p_y, \psi, v)^\top$ and control
+$u_{j|k} = (a, \delta)^\top$, the next state is obtained by
+forward-Euler integration:
 \begin{equation}\label{eq:bicycle}
   \hat{x}_{j+1|k} = \hat{x}_{j|k}
-  + T \begin{bmatrix}
-    v_{j|k} \cos\psi_{j|k} \\
-    v_{j|k} \sin\psi_{j|k} \\
-    (v_{j|k} / L)\tan\delta_{j|k} \\
+  + T\!
+  \begin{bmatrix}
+    v_{j|k}\cos\psi_{j|k} \\[2pt]
+    v_{j|k}\sin\psi_{j|k} \\[2pt]
+    (v_{j|k}/L)\,\tan\delta_{j|k} \\[2pt]
     a_{j|k}
   \end{bmatrix},
 \end{equation}
-where $L$ is the wheelbase and $a_{j|k}$ is the longitudinal
-acceleration derived from throttle and brake.
+where $L$ is the wheelbase.
 
-\noindent\textbf{Cost function.}  The cost penalizes the
-Euclidean distance from each predicted position to the
-\emph{closest} waypoint, along with speed tracking and control
-effort:
-\begin{equation}\label{eq:mpc_cost}
-  J = \sum_{j=1}^{N_p} \bigl[
-    q_\ell\, d_{j|k}^2
-    + q_v\, (v_{j|k} - v^*)^2
-  \bigr]
-  + \sum_{j=0}^{N_c-1} \|u_{j|k}\|_R^2,
+\subsubsection{Reference Waypoint Truncation}
+\label{sec:wp_filter}
+
+Before each optimization, the dynamics layer constructs the
+waypoint set $\calW_k$ by querying CARLA's road network ahead
+of the ego vehicle.
+When an obstacle blocks the path, the reference is
+\emph{truncated}: the first waypoint that falls inside any
+obstacle's exclusion zone triggers replacement of \emph{all}
+subsequent waypoints with the last unblocked one.  Formally,
+define the \emph{truncation index}
+\begin{equation}\label{eq:trunc_idx}
+  i^\star := \min\bigl\{\,i \;\big|\;
+    \exists\,\ell:\;
+    \bigl\|w^{(i)}_k - o^{(\ell)}_k\bigr\|
+    < r_{\mathrm{safe}}^{(\ell)}\bigr\},
 \end{equation}
-where
+and set
+\begin{equation}\label{eq:wp_filter}
+  \tilde{w}^{(i)}_k :=
+  \begin{cases}
+    w^{(i)}_k & \text{if } i < i^\star, \\[3pt]
+    w^{(i^\star - 1)}_k & \text{if } i \ge i^\star.
+  \end{cases}
+\end{equation}
+Because every waypoint beyond the obstacle collapses to a single
+point, MPC sees no reference path past the blocked region and has
+no incentive to swerve around the obstacle.  Combined with the
+adaptive reference speed (below), this causes the controller to
+decelerate and follow the leading vehicle.
+
+\subsubsection{Adaptive Reference Speed}\label{sec:adaptive_speed}
+
+When a leading vehicle is detected, the reference speed is
+adapted to prevent the optimizer from requesting acceleration
+toward an unreachable cruise speed.  Let
+$\calL_k := \{\ell \mid (o_k^{(\ell)} - p_k)^\top
+\hat{e}_\psi > 0\}$ denote the set of obstacles ahead of the
+ego, where $\hat{e}_\psi := (\cos\psi_k, \sin\psi_k)^\top$.
+The effective reference speed is
+\begin{equation}\label{eq:adaptive_speed}
+  v^*_k := \min\!\Bigl(v^*,\;
+    \min_{\ell \in \calL_k}
+    \max\!\bigl(\dot{o}_k^{(\ell)\top} \hat{e}_\psi,\; 0\bigr)
+  \Bigr),
+\end{equation}
+where the inner product
+$\dot{o}_k^{(\ell)\top}\hat{e}_\psi$ projects the obstacle's
+velocity onto the ego heading, and the $\max(\cdot,0)$ ensures
+that oncoming traffic does not produce a negative target.
+When no obstacle is ahead ($\calL_k = \emptyset$), the nominal
+speed $v^*$ is used.
+
+\subsubsection{Obstacle Prediction}
+
+Each detected obstacle is propagated forward with a
+constant-velocity model over the prediction horizon:
+\begin{equation}\label{eq:obs_pred}
+  \hat{o}_j^{(\ell)} := o_k^{(\ell)} + j\,T\,\dot{o}_k^{(\ell)},
+  \qquad j = 1,\ldots,N_p,
+\end{equation}
+where $o_k^{(\ell)} = (o_x^\ell, o_y^\ell)^\top$ and
+$\dot{o}_k^{(\ell)} = (\dot{o}_x^\ell, \dot{o}_y^\ell)^\top$
+are the position and velocity of obstacle~$\ell$ at time~$t_k$.
+
+\subsubsection{Cost Function}
+
+The objective penalizes waypoint-tracking error, speed deviation,
+control effort, and input jerk:
+\begin{equation}\label{eq:mpc_cost}
+  J = J_{\mathrm{track}} + J_{\mathrm{speed}}
+    + J_{\mathrm{effort}} + J_{\mathrm{jerk}}.
+\end{equation}
+\textbf{Waypoint tracking.} The distance from each predicted
+position to the closest (filtered) reference waypoint is
 \begin{equation}\label{eq:closest_wp}
   d_{j|k} := \min_{i \in \{1,\ldots,N_w\}}
-  \bigl\|(p_{x,j|k},\, p_{y,j|k}) - w^{(i)}\bigr\|
+  \bigl\|(p_{x,j|k},\, p_{y,j|k})
+  - \tilde{w}^{(i)}_k\bigr\|,
 \end{equation}
-is the distance to the closest waypoint, $v^*$ is the reference
-speed, $q_\ell, q_v > 0$ are weights, and $R \succ 0$ penalizes
-control effort.
+and the tracking cost is
+$J_{\mathrm{track}} := \sum_{j=1}^{N_p}
+  \gamma^j\, q_\ell \, d_{j|k}^2$.
 
-\noindent\textbf{Optimization problem.}  At each $t_k$:
+\noindent\textbf{Speed tracking.}
+$J_{\mathrm{speed}} := \sum_{j=1}^{N_p}
+  \gamma^j\, q_v\, (v_{j|k} - v^*_k)^2$,
+where $v^*_k$ is the adaptive reference speed~\eqref{eq:adaptive_speed}.
+
+\noindent\textbf{Control effort.}
+$J_{\mathrm{effort}} := \sum_{j=0}^{N_c-1}
+  \gamma^j\bigl(r_a\,a_{j|k}^2 + r_\delta\,\delta_{j|k}^2\bigr)$.
+
+\noindent\textbf{Input jerk.}
+Penalizing successive control differences discourages abrupt
+actuator changes:
+\begin{equation}\label{eq:jerk}
+  J_{\mathrm{jerk}} :=
+  \sum_{j=0}^{N_c-1}
+  \bigl(r_{\Delta a}\,\Delta a_{j|k}^2
+  + r_{\Delta\delta}\,\Delta\delta_{j|k}^2\bigr),
+\end{equation}
+where $\Delta a_{0|k} := a_{0|k} - a_{k-1}$ and
+$\Delta a_{j|k} := a_{j|k} - a_{j-1|k}$ for $j \ge 1$
+(analogously for $\delta$), and $a_{k-1}$ is the acceleration
+applied at the previous time step.
+The discount factor $\gamma \in (0,1]$ down-weights distant
+prediction steps.
+
+\subsubsection{Hard Safety Constraints}\label{sec:constraints}
+
+Safety is enforced through inequality constraints rather than
+penalty terms, ensuring that no feasible trajectory penetrates an
+obstacle or leaves the lane.
+
+\noindent\textbf{Collision avoidance.}
+Each obstacle~$\ell$ and the ego vehicle are enclosed by
+bounding circles of radii $r_\ell$ and $r_{\mathrm{ego}}$,
+respectively.  Defining the safe radius as
+\begin{equation}\label{eq:r_safe}
+  r_{\mathrm{safe}}^{(\ell)} := r_{\mathrm{ego}} + r_\ell + m,
+\end{equation}
+with safety margin $m > 0$, the collision-avoidance constraint at
+prediction step~$j$ is
+\begin{equation}\label{eq:obs_constraint}
+  \bigl\|(p_{x,j|k},\, p_{y,j|k})
+  - \hat{o}_j^{(\ell)}\bigr\|^2
+  \ge \bigl(r_{\mathrm{safe}}^{(\ell)}\bigr)^2, \quad
+  \begin{aligned}
+    &\ell = 1,\ldots,N_o, \\
+    &j = 1,\ldots,N_p.
+  \end{aligned}
+\end{equation}
+
+\noindent\textbf{Lane keeping.}
+Let $e_{\perp,j|k}$ denote the signed perpendicular distance from
+the predicted position $(p_{x,j|k}, p_{y,j|k})$ to the closest
+segment of the reference path, computed by projecting onto the
+polyline $(\tilde{w}^{(1)},\ldots,\tilde{w}^{(N_w)})$:
+\begin{equation}\label{eq:lane_constraint}
+  e_{\perp,j|k}^{\,2} \le w_\ell^2, \qquad
+  j = 1,\ldots,N_p,
+\end{equation}
+where $w_\ell$ is half the lane width.  This enforces that the
+ego vehicle remains within the drivable corridor at every
+predicted step.
+
+\smallskip
+Constraints~\eqref{eq:obs_constraint}
+and~\eqref{eq:lane_constraint} yield
+$N_p(N_o + 1)$ scalar inequalities per optimization.
+
+\subsubsection{Optimization Problem}
+
+Collecting the above, the MPC solves at each $t_k$:
 \begin{subequations}\label{eq:mpc_opt}
 \begin{align}
-  \min_{u_{0|k},\ldots,u_{N_c-1|k}} \quad & J \\
+  \min_{u_{0|k},\ldots,u_{N_c-1|k}} \quad & J
+    \label{eq:mpc_obj}\\
   \text{s.t.} \quad
-    & \hat{x}_{j+1|k} = F(\hat{x}_{j|k}, u_{j|k}), \\
-    & \hat{x}_{0|k} = x_k, \label{eq:mpc_ic}\\
-    & u_{j|k} \in \calU, \qquad j = 0,\ldots,N_c{-}1,
+    & \hat{x}_{j+1|k} = F(\hat{x}_{j|k},\, u_{j|k}),
+    \label{eq:mpc_dyn}\\
+    & \hat{x}_{0|k} = x_k,
+    \label{eq:mpc_ic}\\
+    & u_{j|k} \in \calU, & j = 0,\ldots,N_c{-}1,
+    \label{eq:mpc_input}\\
+    & \eqref{eq:obs_constraint},\;\eqref{eq:lane_constraint},
+    & j = 1,\ldots,N_p,
+    \label{eq:mpc_safety}
 \end{align}
 \end{subequations}
-with prediction horizon $N_p$, control horizon $N_c \leq N_p$,
-and input constraint set $\calU$.  Only the first input
-$u_{0|k}$ is applied (receding horizon);
-the result becomes $\tilde{u}_{k+1}$
-in~\eqref{eq:zoh}.
+with prediction horizon $N_p$, control horizon $N_c \le N_p$,
+and input constraint set
+$\calU := [a_{\min},a_{\max}]\times[\delta_{\min},\delta_{\max}]$.
+Only the first input $u_{0|k}$ is applied (receding horizon);
+the result becomes $\tilde{u}_{k+1}$ in~\eqref{eq:zoh}.
+
+\subsubsection{Infeasibility Handling}\label{sec:infeasible}
+
+When traffic configurations render~\eqref{eq:mpc_opt}
+infeasible (e.g., a stopped vehicle fills the lane within
+$r_{\mathrm{safe}}$), the controller falls back to an emergency
+policy:
+\begin{equation}\label{eq:emergency}
+  u_k^{\mathrm{emerg}} :=
+  \begin{cases}
+    (a_{\min},\, 0) & \text{if } |v_k| \ge v_{\mathrm{thr}}, \\
+    (0,\, 0)        & \text{if } |v_k| < v_{\mathrm{thr}},
+  \end{cases}
+\end{equation}
+i.e., maximum braking until the vehicle is nearly stopped, then
+holding.  A \emph{sticky-hold} flag prevents re-acceleration
+until all obstacles are farther than $2\,r_{\mathrm{safe}}$,
+ensuring that the ego vehicle does not oscillate between braking
+and accelerating in tight traffic.
 
 \begin{remark}[State-dependent computation time]\label{rem:mpc_tau}
   The number of solver iterations, and hence $\tau_k$, depends
-  on the current state.  Near the reference, the optimization is
-  well-conditioned; after a miss, the perturbed state requires more
-  iterations.  This is the mechanism underlying the cascading
-  misses described in Remark~\ref{rem:cascade}.
+  on the current state and the obstacle configuration.  Near the
+  reference with no obstacles, the optimization is
+  well-conditioned; when obstacles activate
+  constraints~\eqref{eq:obs_constraint}, the feasible set
+  shrinks and the solver requires more iterations.  After a
+  deadline miss, the stale input drives the state further from
+  the reference, compounding difficulty.  This is the mechanism
+  underlying the cascading misses described in
+  Remark~\ref{rem:cascade}.
 \end{remark}
 
 \begin{remark}[Computational complexity ordering]
-  PID requires $O(1)$ arithmetic operations per step, whereas
-  NLMPC iteratively solves a nonconvex NLP whose size grows
-  with the prediction horizon $N_p$.  The ordering
-  $\tau_k^{\mathrm{PID}} \ll \tau_k^{\mathrm{NLMPC}}$
+  PID requires $O(1)$ arithmetic operations per step.
+  The obstacle-aware MPC iteratively solves a nonconvex NLP
+  with $2N_c$ decision variables and $N_p(N_o+1)$ inequality
+  constraints, whose cost grows with $N_p$, $N_c$, and~$N_o$.
+  The ordering
+  $\tau_k^{\mathrm{PID}} \ll \tau_k^{\mathrm{MPC}}$
   is central to our hardware sensitivity analysis.
 \end{remark}
 

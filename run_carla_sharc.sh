@@ -16,7 +16,7 @@ fi
 
 # Configuration
 IMAGE_NAME="carla-sharc"
-CONTAINER_NAME="carla-sharc"
+CONTAINER_NAME="carla-sharc-yasin5"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Colors

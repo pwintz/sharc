@@ -1,0 +1,96 @@
+// controller/CarlaObstacleMPCController.h
+// Obstacle-aware kinematic MPC controller.
+//   Proposal F (q_prog = 0): exponential repulsive barrier only
+//   Proposal E (q_prog > 0): barrier + forward-progress heading penalty
+#pragma once
+
+#ifndef CARLA_OBSTACLE_MPC_CONTROLLER_H
+#define CARLA_OBSTACLE_MPC_CONTROLLER_H
+
+#include "controller.h"
+#if TNX == 4
+
+#include <mpc/NLMPC.hpp>
+#include <mpc/Utils.hpp>
+#include <nlohmann/json.hpp>
+#include <vector>
+#include <cmath>
+#include <algorithm>
+#include <fstream>
+#include <string>
+
+using namespace mpc;
+
+class CarlaObstacleMPCController : public Controller {
+private:
+    static constexpr int Nx  = TNX;
+    static constexpr int Nu  = TNU;
+    static constexpr int Ndu = TNDU;
+    static constexpr int Ny  = TNY;
+    static constexpr int Np  = PREDICTION_HORIZON;
+    static constexpr int Nc  = CONTROL_HORIZON;
+    static constexpr int ineq_c = 0;
+    static constexpr int eq_c   = 0;
+
+    // Vehicle parameters
+    double wheelbase    = 2.87;
+    double sample_time  = 0.1;
+    double target_speed = 20.0;
+
+    // Cost weights — waypoint tracking & speed
+    double q_path     = 1.0;
+    double q_speed    = 0.5;
+    double r_accel    = 0.0;
+    double r_steer    = 0.0;
+    double r_jerk_v   = 0.1;
+    double r_jerk_yaw = 0.1;
+    double gamma      = 1.0;
+
+    // Obstacle avoidance weights
+    double q_obs      = 50.0;   // barrier amplitude
+    double sigma_obs  = 5.0;    // barrier width [m]
+    double q_prog     = 0.0;    // forward-progress weight (0 → Proposal F, >0 → Proposal E)
+    double ego_radius = 2.5;    // ego bounding-circle radius [m]
+
+    // Input limits
+    double max_accel =  3.0;
+    double min_accel = -5.0;
+    double max_steer =  0.7;
+    double min_steer = -0.7;
+
+    // Waypoints & obstacles
+    int n_waypoints = 0;
+    int n_obstacles = 0;
+
+    NLMPC<Nx, Nu, Ny, Np, Nc, ineq_c, eq_c> nlmpc;
+    Result<Nu> mpc_result;
+
+    std::vector<double> wp_x, wp_y;
+
+    struct ObstacleData { double x, y, vx, vy, radius; };
+    std::vector<ObstacleData> obstacles;
+
+    double prev_accel = 0.0;
+    double prev_steer = 0.0;
+
+    std::string experiment_dir;
+    std::string state_file;
+    void save_state() const;
+    void load_state();
+
+    double closestWaypointDistSq(double px, double py) const;
+    int    closestWaypointIndex(double px, double py) const;
+
+public:
+    CarlaObstacleMPCController(const nlohmann::json& json_data) : Controller(json_data) {
+        setup(json_data);
+    }
+
+    void calculateControl(int k, double t, const xVec& x, const wVec& w) override;
+
+protected:
+    void setup(const nlohmann::json& json_data) override;
+};
+
+#endif // TNX == 4
+#endif // CARLA_OBSTACLE_MPC_CONTROLLER_H

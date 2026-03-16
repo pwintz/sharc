@@ -54,6 +54,12 @@ def run(sim_dir: str, config_data: dict, dynamics: Dynamics, controller_interfac
                                       x0=x0, 
                                       pending_computation_prior=pending_computation0)
     
+    # Notify dynamics of the current simulation directory so it can write
+    # sidecar files (e.g. NPC trajectories, collision events) alongside the
+    # experiment data.  Uses duck-typing so non-CARLA dynamics are unaffected.
+    if hasattr(dynamics, 'set_sim_dir'):
+        dynamics.set_sim_dir(sim_dir)
+
     controller_interface.post_simulator_running() # Post the simulator status for the controller to access.
 
     simulation_time_steps = list(range(first_time_index, first_time_index + n_time_steps))
