@@ -224,7 +224,6 @@ def record_scenario(client: carla.Client, config: dict, output_dir: str) -> Dict
             npcs.append(npc)
             npc_indices.append({'index': idx, 'blueprint': vehicle_id})
     
-    # Settle # TODO: parameterize this settling ticks parameter for both npcs and ego
     settling_ticks = config.get('settling_ticks', 20)
     print(f"Settling physics for {settling_ticks} ticks...")
     for _ in range(settling_ticks):
@@ -333,6 +332,28 @@ def replay_scenario(client: carla.Client, log: Dict, output_dir: str):
         ego = world.try_spawn_actor(bp_lib.filter('model3')[0], ego_start)
     if not ego:
         raise RuntimeError("Failed to spawn ego")
+
+    # Optional ego collision tracking during replay
+    track_ego_collisions = config.get('track_ego_collisions', True)
+    save_collision_events = config.get('save_collision_events', False)
+    ego_collision_events = []
+    ego_collision_sensor = None
+    if track_ego_collisions:
+        collision_bp = bp_lib.find('sensor.other.collision')
+        ego_collision_sensor = world.spawn_actor(collision_bp, carla.Transform(), attach_to=ego)
+
+        def on_ego_collision(event):
+            impulse = event.normal_impulse
+            impulse_mag = math.sqrt(impulse.x**2 + impulse.y**2 + impulse.z**2)
+            other = event.other_actor
+            ego_collision_events.append({
+                'frame': event.frame,
+                'other_actor_id': int(other.id) if other else -1,
+                'other_actor_type': other.type_id if other else 'unknown',
+                'impulse': impulse_mag,
+            })
+
+        ego_collision_sensor.listen(on_ego_collision)
     
     # Spawn NPCs - use EXACT same vehicle types from recording
     npc_replay_mode = config.get('npc_replay_mode', 'physics')
@@ -449,6 +470,9 @@ def replay_scenario(client: carla.Client, log: Dict, output_dir: str):
         if (i + 1) % 100 == 0:
             print(f"  {i+1}/{len(log['frames'])} frames")
     
+    if ego_collision_sensor is not None:
+        ego_collision_sensor.stop()
+        ego_collision_sensor.destroy()
     ego.destroy()
     for n in npcs:
         n.destroy()
@@ -482,6 +506,7 @@ def replay_scenario(client: carla.Client, log: Dict, output_dir: str):
     print(f"{'='*60}")
     print(f"Max Error (ego):  {max_err:.2f} cm")
     print(f"Mean Error (ego): {mean_err:.2f} cm")
+    print(f"Ego collisions:   {len(ego_collision_events)}")
     print(f"Status: {'✅ Good' if max_err < 20 else '⚠ Check config'}")
     
     # ------- NPC CODE YASH ---------------
@@ -496,13 +521,24 @@ def replay_scenario(client: carla.Client, log: Dict, output_dir: str):
     print(f"{'='*60}\n")
     
     # Write machine-readable results for experiment runner
+    ego_collision_count = len(ego_collision_events)
+    ego_had_collision = ego_collision_count > 0
+    ego_collision_max_impulse = max((e['impulse'] for e in ego_collision_events), default=0.0)
+    ego_first_collision_frame = ego_collision_events[0]['frame'] if ego_collision_events else None
+
     results = {
         'ego_max_error_cm': max_err,
         'ego_mean_error_cm': mean_err,
         'num_frames': len(errors),
+        'ego_had_collision': ego_had_collision,
+        'ego_collision_count': ego_collision_count,
+        'ego_collision_max_impulse': ego_collision_max_impulse,
+        'ego_first_collision_frame': ego_first_collision_frame,
     }
     if npc_errors:
         results['npc_errors'] = {str(k): v for k, v in npc_errors.items()}
+    if save_collision_events and ego_collision_events:
+        results['ego_collision_events'] = ego_collision_events
     results_file = os.path.join(output_dir, 'results.json')
     with open(results_file, 'w') as f:
         json.dump(results, f, indent=2)
@@ -634,7 +670,7 @@ def main():
     
     # Connect to CARLA
     client = carla.Client('localhost', args.port)
-    client.set_timeout(20.0)
+    client.set_timeout(60.0)
     
     # Record
     log = record_scenario(client, config, output_dir)

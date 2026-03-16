@@ -11,7 +11,7 @@
 #            = 27 x 18 x 3 = 1,458 runs
 
 # Connection
-port: 2000
+port: 3000
 
 # ---- Decision variables (to optimize) ----
 # These are the parameters we want to find the best values for.
@@ -56,6 +56,8 @@ fixed:
   fixed_delta: 0.05
   npc_replay_mode: "teleport"
   follow_camera: false           # Disabled for batch runs (faster)
+  track_ego_collisions: true     # Attach collision sensor to ego during replay
+  save_collision_events: false   # Keep results.json compact during sweeps
   eval_npc_indices: []           # Not needed in teleport mode
   pid_target_speed: 20.0
   pid_kp: 1.0

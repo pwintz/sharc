@@ -26,6 +26,8 @@ fixed:
   fixed_delta: 0.05
   npc_replay_mode: "teleport"
   follow_camera: false
+  track_ego_collisions: true
+  save_collision_events: true
   eval_npc_indices: []
   pid_target_speed: 20.0
   pid_kp: 1.0
