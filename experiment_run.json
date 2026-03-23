@@ -1,0 +1,8 @@
+{
+    "example":        "MPC_example",
+    "config":         "obstacle_constraint.json",
+    "carla_root":     "/home/workspace/carla_0.9.16",
+    "sharc_examples": "/home/workspace/sharc/examples",
+    "timeout":        60,
+    "carla_args":     ""
+}

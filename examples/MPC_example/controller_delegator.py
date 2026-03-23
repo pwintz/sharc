@@ -6,6 +6,7 @@ control horizon, and system dimensions to CMake.
 """
 
 import os
+import subprocess
 from sharc.controller_delegator_base import CmakeControllerExecutableProvider
 import sharc.debug_levels as debug_levels
 
@@ -24,6 +25,10 @@ class ControllerExecutableProvider(CmakeControllerExecutableProvider):
         exogenous_input_dimension = build_config["system_parameters"]["exogenous_input_dimension"]
         output_dimension          = build_config["system_parameters"]["output_dimension"]
 
+        mpc_opts     = build_config["system_parameters"].get("mpc_options", {})
+        n_obstacles  = mpc_opts.get("n_obstacles", 0)
+        n_ineq       = prediction_horizon * (n_obstacles + 1) if n_obstacles > 0 else 0
+
         executable_name = "main_controller_MPC_v1"
 
         # DynamoRIO is needed only for parallel mode with real delays.
@@ -40,6 +45,7 @@ class ControllerExecutableProvider(CmakeControllerExecutableProvider):
             f"-DTNU={input_dimension}",
             f"-DTNDU={exogenous_input_dimension}",
             f"-DTNY={output_dimension}",
+            f"-DTNIEQ={n_ineq}",
         ]
 
         if use_dynamorio:
@@ -49,6 +55,17 @@ class ControllerExecutableProvider(CmakeControllerExecutableProvider):
 
         if debug_levels.debug_build_level:
             print("== Running CMake to generate build tree ==")
+
+        # Ensure the build dir exists and is writable by the current user.
+        # If a previous `docker exec` (running as root) left root-owned files,
+        # use passwordless sudo to reclaim ownership before cmake runs.
+        os.makedirs(self.build_dir, exist_ok=True)
+        cmake_cache = os.path.join(self.build_dir, "CMakeCache.txt")
+        if os.path.exists(cmake_cache) and not os.access(cmake_cache, os.W_OK):
+            subprocess.run(
+                ["sudo", "chown", "-R", f"{os.getuid()}:{os.getgid()}", self.build_dir],
+                check=True,
+            )
 
         cmake_generate_tree_args = [
             "-S", f"{self.example_dir}",

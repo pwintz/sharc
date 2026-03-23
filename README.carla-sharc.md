@@ -24,13 +24,12 @@ A combined Docker environment with CARLA 0.9.16 simulator and SHARC tools.
 newgrp docker
 
 # 1. Build the image (one time)
-# Use your host's UID/GID for full file access
 docker build \
     --build-arg USER_ID=$(id -u) \
     --build-arg GROUP_ID=$(id -g) \
     -f Dockerfile -t carla-sharc .
 
-# 2. Run the container
+# 2. Start the container
 ./run_carla_sharc.sh
 
 # 3. Inside container: start CARLA server
@@ -39,6 +38,42 @@ docker build \
 # 4. Run examples
 python /home/workspace/carla_0.9.16/PythonAPI/examples/automatic_control.py
 ```
+
+---
+
+## Headless Experiment Runner (no display required)
+
+Run a full CARLA + SHARC experiment from the **host machine** without a monitor.
+The script starts CARLA in headless mode (`-nullrhi`), waits for it to become
+ready, runs the SHARC experiment, and saves a dashboard PNG to the results folder.
+
+```bash
+# Default: MPC_example with obstacle_constraint.json
+./run_offscreen_experiment.sh
+
+# Specific example / config
+./run_offscreen_experiment.sh --example MPC_example --config obstacle_constraint.json
+
+# All options
+./run_offscreen_experiment.sh --help
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--example NAME` | `MPC_example` | Example directory name |
+| `--config FILE` | `obstacle_constraint.json` | Simulation config filename |
+| `--container NAME` | `carla-sharc-yasin5` | Docker container name |
+| `--user NAME` | `admin` | Container user to run as |
+| `--timeout SECS` | `180` | CARLA startup timeout |
+| `--log FILE` | _(none)_ | Tee all output to a file on the host |
+
+**Output:** results are written to
+`examples/<EXAMPLE>/experiments/<timestamp>--<label>/`,
+including `experiment_data.json` and `dashboard_final.png`.
+
+**Prerequisites:** the container must already be running (`./run_carla_sharc.sh`).
 
 ---
 
