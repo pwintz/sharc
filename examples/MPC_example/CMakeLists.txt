@@ -8,6 +8,7 @@ set(TNX                 4 CACHE STRING "State Dimension")
 set(TNU                 2 CACHE STRING "Input Dimension")
 set(TNDU               20 CACHE STRING "Disturbance/Exogenous Input Dimension (2 * n_waypoints)")
 set(TNY                 2 CACHE STRING "Output Dimension")
+set(TNIEQ               0 CACHE STRING "Number of inequality constraints (Np*(n_obs+1) for constraint MPC)")
 set(USE_DYNAMORIO 1 CACHE BOOL OFF)
 
 # C++20
@@ -32,6 +33,7 @@ message("\tTNX=${TNX}")
 message("\tTNU=${TNU}")
 message("\tTNDU=${TNDU}")
 message("\tTNY=${TNY}")
+message("\tTNIEQ=${TNIEQ}")
 message("\tUSE_DYNAMORIO=${USE_DYNAMORIO}")
 
 # Assert environment variables
@@ -55,9 +57,11 @@ message("    CONTROLLERS_DIR=${CONTROLLERS_DIR}")
 message("    CONTROLLERS_INC=${CONTROLLERS_INC}")
 message("    CONTROLLERS_SRC=${CONTROLLERS_SRC}")
 
-# Source files
+# Source files — all MPC controllers + common controller infra
 set(SOURCES ${CONTROLLERS_SRC}/CarlaKinematicMPCController.cpp
             ${CONTROLLERS_SRC}/CarlaDynamicMPCController.cpp
+            ${CONTROLLERS_SRC}/CarlaObstacleMPCController.cpp
+            ${CONTROLLERS_SRC}/CarlaConstraintMPCController.cpp
             ${CONTROLLERS_SRC}/controller.cpp
             ${CONTROLLERS_SRC}/main_controller.cpp)
 
@@ -72,7 +76,7 @@ target_include_directories(
   /usr/local/include
   /usr/include/eigen3
   /usr/local/include/osqp
-  ${LIBMPC_DIR}/include/
+  ../libmpc/include/
   ${CONTROLLERS_INC}
   ${RESOURCES_DIR}/include
 )
@@ -104,6 +108,7 @@ add_definitions(
     -DTNU=${TNU}
     -DTNDU=${TNDU}
     -DTNY=${TNY}
+    -DTNIEQ=${TNIEQ}
     -O3
 )
 

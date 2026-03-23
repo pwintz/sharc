@@ -55,5 +55,12 @@ fi
 # ── Fix ownership of the user's home directory ───────────────────────────────
 chown -R "$HOST_UID:$HOST_GID" "/home/$TARGET_USER" 2>/dev/null || true
 
+# ── Fix ownership of bind-mounted workspace dirs ─────────────────────────────
+# This repairs any root-owned files left by `docker exec` without -u, which
+# would otherwise block cmake/python processes running as the aligned user.
+for _dir in /home/workspace/sharc/examples /home/workspace/sharc/resources; do
+    [ -d "$_dir" ] && chown -R "$HOST_UID:$HOST_GID" "$_dir" 2>/dev/null || true
+done
+
 # ── Drop from root → TARGET_USER and exec the requested command ──────────────
 exec gosu "$TARGET_USER" "$@"

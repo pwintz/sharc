@@ -8,7 +8,9 @@ Differences from the PID-oriented CarlaDynamics:
   * Converts acceleration → CARLA throttle/brake internally.
 """
 
+import json
 import math
+import os
 import numpy as np
 from sharc.dynamics_base import Dynamics
 import carla
@@ -17,7 +19,15 @@ import pygame
 import sys
 
 
+def _has_display():
+    """Return True if a graphical display is available."""
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
 def pygame_init(w=1280, h=720):
+    if not _has_display():
+        print("[CarlaMPCDynamics] No display detected — running headless (no pygame window).")
+        return None
     pygame.init()
     display = pygame.display.set_mode((w, h), pygame.HWSURFACE | pygame.DOUBLEBUF)
     pygame.display.set_caption("CARLA Camera View — MPC")
@@ -46,6 +56,8 @@ class CameraManager:
         self.camera.listen(lambda data: self._on_image(data))
 
     def _on_image(self, image):
+        if not _has_display():
+            return
         img = np.frombuffer(image.raw_data, dtype=np.uint8)
         img = img.reshape((self.height, self.width, 4))
         img = img[:, :, :3][:, :, ::-1]
@@ -85,13 +97,17 @@ class CarlaMPCDynamics(Dynamics):
         self.n_wp     = mpc_opts.get("n_waypoints", 10)
         self.wp_spacing = mpc_opts.get("waypoint_spacing", 2.0)
 
+        # Obstacle-aware MPC options (0 disables obstacle packing)
+        self.n_obs            = mpc_opts.get("n_obstacles", 0)
+        self.detection_radius = mpc_opts.get("detection_radius", 30.0)
+
         random.seed(self.seed)
         np.random.seed(self.seed)
 
         # ---- Connect to CARLA ---------------------------------------- #
         print("[CarlaMPCDynamics] Creating CARLA session …")
         self.client = carla.Client("localhost", 2000)
-        self.client.set_timeout(10.0)
+        self.client.set_timeout(60.0)   # generous timeout; nullrhi can be slow to settle
         self.world = self.client.get_world()
 
         # Reset to async mode first (in case previous run left sync on)
@@ -153,19 +169,105 @@ class CarlaMPCDynamics(Dynamics):
         self.npc_vehicles = self._spawn_npc_vehicles(bp_lib, spawn_points, ego_spawn_idx, n_vehicles)
         self.npc_walkers, self.npc_walker_controllers = self._spawn_npc_walkers(bp_lib, n_walkers)
 
-        # ---- Pygame + camera ----------------------------------------- #
+        # ---- Force all traffic lights to stay green ------------------- #
+        for tl in self.world.get_actors().filter('traffic.traffic_light'):
+            tl.set_state(carla.TrafficLightState.Green)
+            tl.freeze(True)
+
+        # ---- Collision sensor ---------------------------------------- #
+        self._collision_events = []
+        collision_bp = bp_lib.find('sensor.other.collision')
+        self._collision_sensor = self.world.spawn_actor(
+            collision_bp, carla.Transform(), attach_to=self.vehicle)
+        self._collision_sensor.listen(self._on_collision)
+
+        # ---- Sidecar file state -------------------------------------- #
+        self._sim_dir   = None
+        self._extra_fh  = None
+
+        # ---- Pygame + camera (skip in headless mode) ----------------------- #
         self.display = pygame_init()
-        self.camera_manager = CameraManager(self.world, self.vehicle)
+        if _has_display():
+            self.camera_manager = CameraManager(self.world, self.vehicle)
+        else:
+            self.camera_manager = None
+            print("[CarlaMPCDynamics] Headless mode — camera window disabled.")
 
         # Cache the CARLA map for waypoint queries
         self._carla_map = self.world.get_map()
+
+    # ------------------------------------------------------------------ #
+    #  Sidecar / collision helpers                                        #
+    # ------------------------------------------------------------------ #
+
+    def set_sim_dir(self, sim_dir: str):
+        """Called by plant_runner at the start of each batch."""
+        self._sim_dir = sim_dir if sim_dir.endswith('/') else sim_dir + '/'
+        # Open a fresh sidecar file for this batch (one file per batch dir).
+        if self._extra_fh is not None:
+            try:
+                self._extra_fh.close()
+            except Exception:
+                pass
+        try:
+            self._extra_fh = open(
+                os.path.join(self._sim_dir, 'carla_extra.jsonl'), 'w', buffering=1)
+        except OSError:
+            self._extra_fh = None
+
+    def _on_collision(self, event):
+        """CARLA collision sensor callback."""
+        impulse = event.normal_impulse
+        intensity = math.sqrt(impulse.x**2 + impulse.y**2 + impulse.z**2)
+        self._collision_events.append({
+            'other': event.other_actor.type_id,
+            'intensity': round(intensity, 2),
+        })
+
+    def _write_extra(self, tf: float, x: np.ndarray):
+        """Append one JSON record (NPC positions + collisions) to the sidecar."""
+        if self._extra_fh is None:
+            return
+        npc_data = []
+        for actor in self.world.get_actors():
+            if actor.id == self.vehicle.id:
+                continue
+            if not actor.type_id.startswith('vehicle.'):
+                continue
+            loc = actor.get_transform().location
+            npc_data.append({'id': actor.id,
+                             'x': round(loc.x, 2),
+                             'y': round(loc.y, 2)})
+        col_events = self._collision_events[:]
+        self._collision_events.clear()
+        record = {
+            't':         round(tf, 3),
+            'ego_x':     round(float(x[0, 0]), 2),
+            'ego_y':     round(float(x[1, 0]), 2),
+            'npcs':      npc_data,
+            'collision': col_events[0] if col_events else None,
+        }
+        try:
+            self._extra_fh.write(json.dumps(record) + '\n')
+        except OSError:
+            pass
 
     # ------------------------------------------------------------------ #
     #  Exogenous input: dense waypoints                                   #
     # ------------------------------------------------------------------ #
 
     def get_exogenous_input(self, t):
-        """Return N_w dense waypoints as w ∈ ℝ^{2·N_w} column vector."""
+        """Return waypoints (+ optional obstacle data) as w column vector.
+
+        Layout:
+          w[0 .. 2*N_w - 1]                     = waypoints  (wx1, wy1, …)
+          w[2*N_w + 5*i + 0..4]  (if n_obs > 0) = obstacle i (x, y, vx, vy, radius)
+        Sentinel for empty obstacle slot: x = 1e6, y = 1e6, vx = vy = radius = 0.
+
+        Waypoints that fall inside the safety exclusion zone of any in-lane
+        obstacle are replaced by the last safe waypoint, so the MPC has a
+        collision-free reference trajectory even when an obstacle blocks the road.
+        """
         transform = self.vehicle.get_transform()
         wp = self._carla_map.get_waypoint(transform.location)
         waypoints = []
@@ -178,43 +280,198 @@ class CarlaMPCDynamics(Dynamics):
             wp = nxt[0]
             waypoints.append((wp.transform.location.x, wp.transform.location.y))
 
-        # Pack [wx1, wy1, wx2, wy2, …]
-        w = np.zeros((2 * self.n_wp, 1), dtype=float)
+        # ---- Filter blocked waypoints --------------------------------- #
+        # Fetch in-lane obstacles (same filtering as in _get_nearby_obstacles).
+        # Any waypoint whose distance to an obstacle centroid is less than
+        # ego_radius + obs_radius + safe_margin is replaced by the last
+        # safe waypoint, keeping the reference path out of blocked zones.
+        if self.n_obs > 0:
+            mpc_opts   = self.config["system_parameters"]["mpc_options"]
+            weights    = mpc_opts.get("cost_weights", {})
+            ego_r      = weights.get("ego_radius",  2.5)
+            safe_margin= weights.get("safe_margin",  1.5)
+            obs_data   = self._get_nearby_obstacles()   # already lateral-filtered
+
+            if obs_data:
+                last_safe = None
+                truncated = False
+                for i, (wx, wy) in enumerate(waypoints):
+                    if truncated:
+                        # All waypoints after the first blocked one are
+                        # replaced, so MPC sees no path beyond the obstacle.
+                        if last_safe is not None:
+                            waypoints[i] = last_safe
+                        continue
+                    blocked = False
+                    for ox, oy, _ovx, _ovy, obs_r in obs_data:
+                        r_safe = ego_r + obs_r + safe_margin
+                        if math.sqrt((wx - ox)**2 + (wy - oy)**2) < r_safe:
+                            blocked = True
+                            break
+                    if blocked:
+                        truncated = True
+                        if last_safe is not None:
+                            waypoints[i] = last_safe
+                    else:
+                        last_safe = (wx, wy)
+
+        dim = 2 * self.n_wp + 5 * self.n_obs
+        w = np.zeros((dim, 1), dtype=float)
+
+        # Pack waypoints
         for i, (wx, wy) in enumerate(waypoints):
             w[2 * i]     = wx
             w[2 * i + 1] = wy
+
+        # Pack obstacles (if configured)
+        if self.n_obs > 0:
+            obs_data = self._get_nearby_obstacles()
+            offset = 2 * self.n_wp
+            for i in range(self.n_obs):
+                if i < len(obs_data):
+                    ox, oy, ovx, ovy, r = obs_data[i]
+                    w[offset + 5 * i + 0] = ox
+                    w[offset + 5 * i + 1] = oy
+                    w[offset + 5 * i + 2] = ovx
+                    w[offset + 5 * i + 3] = ovy
+                    w[offset + 5 * i + 4] = r
+                else:
+                    # Sentinel: no obstacle in this slot
+                    w[offset + 5 * i + 0] = 1e6
+                    w[offset + 5 * i + 1] = 1e6
+
         return w
+
+    # ------------------------------------------------------------------ #
+    #  Obstacle detection                                                 #
+    # ------------------------------------------------------------------ #
+
+    def _get_nearby_obstacles(self):
+        """Return up to N_obs closest dynamic actors within detection_radius.
+
+        Only includes obstacles whose lateral offset from the ego's forward
+        direction is within ~2.5 m (roughly one lane width), so adjacent-lane
+        traffic is filtered out.
+
+        Returns list of (x, y, vx, vy, bounding_radius) tuples sorted by
+        ascending distance to the ego vehicle.
+        """
+        ego_tf  = self.vehicle.get_transform()
+        ego_loc = ego_tf.location
+        ego_yaw = math.radians(ego_tf.rotation.yaw)
+        ego_id  = self.vehicle.id
+
+        # Unit vectors: forward and rightward
+        fwd_x =  math.cos(ego_yaw)
+        fwd_y =  math.sin(ego_yaw)
+
+        LATERAL_FILTER = 2.5  # metres — discard obstacles farther sideways
+
+        candidates = []
+        for actor in self.world.get_actors():
+            if actor.id == ego_id:
+                continue
+            if not (actor.type_id.startswith('vehicle.') or
+                    actor.type_id.startswith('walker.')):
+                continue
+
+            loc  = actor.get_transform().location
+            dx   = loc.x - ego_loc.x
+            dy   = loc.y - ego_loc.y
+            dist = math.sqrt(dx * dx + dy * dy)
+            if dist > self.detection_radius:
+                continue
+
+            # Lateral offset relative to ego heading (cross-product magnitude)
+            lat_offset = abs(-dx * fwd_y + dy * fwd_x)
+            if lat_offset > LATERAL_FILTER:
+                continue  # skip adjacent-lane traffic
+
+            vel  = actor.get_velocity()
+            ext  = actor.bounding_box.extent
+            # Top-down bounding circle radius
+            radius = math.sqrt(ext.x ** 2 + ext.y ** 2)
+
+            candidates.append((dist, loc.x, loc.y, vel.x, vel.y, radius))
+
+        candidates.sort(key=lambda c: c[0])
+        return [(ox, oy, ovx, ovy, r)
+                for (_, ox, oy, ovx, ovy, r) in candidates[:self.n_obs]]
+
+    # ------------------------------------------------------------------ #
+    #  Visualization                                                       #
+    # ------------------------------------------------------------------ #
+
+    def _draw_trajectory(self, x0, metadata, w):
+        """Draw waypoints (blue), MPC predicted trajectory (red), and
+        detected obstacles (orange) as 3D CARLA world debug primitives."""
+        if self.world is None:
+            return
+        debug = self.world.debug
+        ego_loc = self.vehicle.get_location()
+        z = ego_loc.z + 0.5  # slightly above ground to avoid z-fighting
+        life_time = max(0.1, self.time_step + 0.05)
+
+        # 1. Waypoints — blue dots (first 2*n_wp entries of w)
+        for i in range(self.n_wp):
+            try:
+                wx = float(w[2 * i])
+                wy = float(w[2 * i + 1])
+            except (IndexError, TypeError):
+                break
+            debug.draw_point(
+                carla.Location(x=wx, y=wy, z=z),
+                size=0.1,
+                color=carla.Color(0, 128, 255),
+                life_time=life_time,
+            )
+
+        # 2. MPC predicted trajectory — red dots from metadata
+        if metadata and isinstance(metadata, dict):
+            tx = metadata.get("traj_x")
+            ty = metadata.get("traj_y")
+            if tx is not None and ty is not None:
+                for i in range(len(tx)):
+                    debug.draw_point(
+                        carla.Location(x=float(tx[i]), y=float(ty[i]), z=z),
+                        size=0.12,
+                        color=carla.Color(255, 0, 0),
+                        life_time=life_time,
+                    )
+
+        # 3. Detected obstacles — orange center + radius ring
+        if self.n_obs > 0:
+            offset = 2 * self.n_wp
+            for i in range(self.n_obs):
+                try:
+                    ox = float(w[offset + 5 * i + 0])
+                    oy = float(w[offset + 5 * i + 1])
+                except (IndexError, TypeError):
+                    break
+                if ox > 1e5:  # sentinel — empty slot
+                    continue
+                r = float(w[offset + 5 * i + 4])
+                # Center dot
+                debug.draw_point(
+                    carla.Location(x=ox, y=oy, z=z),
+                    size=0.2,
+                    color=carla.Color(255, 165, 0),
+                    life_time=life_time,
+                )
+                # Radius ring (12 points)
+                for j in range(12):
+                    theta = j * math.pi / 6
+                    debug.draw_point(
+                        carla.Location(x=ox + r * math.cos(theta),
+                                       y=oy + r * math.sin(theta), z=z),
+                        size=0.05,
+                        color=carla.Color(255, 165, 0),
+                        life_time=life_time,
+                    )
 
     # ------------------------------------------------------------------ #
     #  State evolution                                                    #
     # ------------------------------------------------------------------ #
-
-    def _draw_trajectory(self, x, metadata, waypoints):
-        """Draw waypoints (blue) and MPC trajectory (red) in the 3D CARLA world."""
-        if self.world is None: return
-        
-        debug = self.world.debug
-        ego_loc = self.vehicle.get_location()
-        z = ego_loc.z + 0.5  # Slightly above ground to avoid z-fighting
-        
-        life_time = max(0.1, self.time_step + 0.05) # ensure it lasts until next frame
-        
-        # 1. Draw waypoints (blue dots)
-        if waypoints is not None:
-            # waypoints is [wx1, wy1, wx2, wy2, ...]
-            for i in range(len(waypoints) // 2):
-                wx = float(waypoints[2*i])
-                wy = float(waypoints[2*i+1])
-                debug.draw_point(carla.Location(x=wx, y=wy, z=z), size=0.1, color=carla.Color(0, 1, 255), life_time=life_time)
-        
-        # 2. Draw MPC planned trajectory (red dots)
-        if metadata and "traj_x" in metadata and "traj_y" in metadata:
-            tx = metadata["traj_x"]
-            ty = metadata["traj_y"]
-            for i in range(len(tx)):
-                px = float(tx[i])
-                py = float(ty[i])
-                debug.draw_point(carla.Location(x=px, y=py, z=z), size=0.1, color=carla.Color(255, 0, 0), life_time=life_time)
 
     def evolve_state(self, t0, x0, u, w, tf, metadata=None):
         """Apply control u = (a, delta) to CARLA and return x = (px, py, psi, v)."""
@@ -230,6 +487,7 @@ class CarlaMPCDynamics(Dynamics):
             brake    = min(-accel, 1.0)  # normalise by |min_accel|
 
         # Map steering angle → CARLA steer in [-1, 1]
+        # CARLA expects steer in [-1, 1]; max physical angle ≈ 0.7 rad
         steer = max(-1.0, min(1.0, delta))
 
         steps = max(1, math.floor((tf - t0) / self.time_step))
@@ -241,14 +499,14 @@ class CarlaMPCDynamics(Dynamics):
                 brake=brake
             ))
 
-            # Render camera view
-            if self.camera_manager.surface is not None:
-                self.display.blit(self.camera_manager.surface, (0, 0))
-            
-            # Draw waypoints and trajectory overlay
-            self._draw_trajectory(x0, metadata, w)
-            
-            pygame.display.flip()
+            # Render camera view (skip when headless)
+            if self.display is not None and self.camera_manager is not None:
+                if self.camera_manager.surface is not None:
+                    self.display.blit(self.camera_manager.surface, (0, 0))
+                self._draw_trajectory(x0, metadata, w.flatten())
+                pygame.display.flip()
+            else:
+                self._draw_trajectory(x0, metadata, w.flatten())
 
             # Logging
             vel = self.vehicle.get_velocity()
@@ -267,14 +525,12 @@ class CarlaMPCDynamics(Dynamics):
         transform = self.vehicle.get_transform()
         velocity  = self.vehicle.get_velocity()
         yaw_rad   = math.radians(transform.rotation.yaw)
-        
-        # Transform global velocity to local (body) frame
-        v_x_global = velocity.x
-        v_y_global = velocity.y
-        v_x_local = v_x_global * math.cos(yaw_rad) + v_y_global * math.sin(yaw_rad)
-        v_y_local = -v_x_global * math.sin(yaw_rad) + v_y_global * math.cos(yaw_rad)
-        
-        # Read angular velocity (CARLA returns deg/s)
+
+        # Project global velocity into body frame
+        v_x_local = velocity.x * math.cos(yaw_rad) + velocity.y * math.sin(yaw_rad)
+        v_y_local = -velocity.x * math.sin(yaw_rad) + velocity.y * math.cos(yaw_rad)
+
+        # Angular velocity: CARLA returns deg/s, convert to rad/s
         ang_vel = self.vehicle.get_angular_velocity()
         r_rad_s = math.radians(ang_vel.z)
 
@@ -295,6 +551,7 @@ class CarlaMPCDynamics(Dynamics):
                 [r_rad_s],
             ], dtype=float)
 
+        self._write_extra(tf, x)
         return tf, x
 
     # ------------------------------------------------------------------ #
@@ -303,13 +560,26 @@ class CarlaMPCDynamics(Dynamics):
 
     def teardown(self):
         print("[CarlaMPCDynamics] Tearing down …")
+        # Close sidecar file
+        if getattr(self, '_extra_fh', None) is not None:
+            try:
+                self._extra_fh.close()
+            except Exception:
+                pass
+            self._extra_fh = None
+        # Stop and destroy collision sensor first (stops the sensor stream)
+        if getattr(self, '_collision_sensor', None) is not None:
+            try:
+                self._collision_sensor.stop()
+                self._collision_sensor.destroy()
+                print("[CarlaMPCDynamics] Collision sensor stopped and destroyed.")
+            except Exception as e:
+                print(f"[CarlaMPCDynamics] Warning: collision sensor cleanup: {e}")
+            self._collision_sensor = None
         try:
             for ctrl in getattr(self, 'npc_walker_controllers', []):
                 try: ctrl.stop()
                 except Exception: pass
-
-            if hasattr(self, 'world') and self.world is not None:
-                self.world.tick()
 
             if hasattr(self, 'camera_manager') and self.camera_manager is not None:
                 self.camera_manager.destroy()
@@ -338,7 +608,13 @@ class CarlaMPCDynamics(Dynamics):
             if hasattr(self, 'traffic_manager'):
                 self.traffic_manager.set_synchronous_mode(False)
 
-            pygame.quit()
+            if _has_display():
+                pygame.quit()
+
+            # Give CARLA time to flush sensor streams and settle before the
+            # next session connects (avoids "Invalid session: no stream" spam)
+            import time as _time; _time.sleep(2.0)
+            print("[CarlaMPCDynamics] Teardown complete.")
         except Exception as e:
             print(f"[CarlaMPCDynamics] cleanup error: {e}")
 
@@ -350,7 +626,14 @@ class CarlaMPCDynamics(Dynamics):
         if count == 0:
             return []
         vehicle_bps = sorted(bp_lib.filter('vehicle.*'), key=lambda bp: bp.id)
+
+        # Sort available spawn points by distance to ego so NPCs spawn
+        # at the nearest locations, creating meaningful proximate traffic.
+        ego_loc = self.vehicle.get_location()
         available = [sp for i, sp in enumerate(spawn_points) if i != ego_idx]
+        available.sort(
+            key=lambda sp: (sp.location.x - ego_loc.x) ** 2 + (sp.location.y - ego_loc.y) ** 2
+        )
         count = min(count, len(available))
         vehicles = []
         for i in range(count):

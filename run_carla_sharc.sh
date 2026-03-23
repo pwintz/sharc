@@ -16,7 +16,7 @@ fi
 
 # Configuration
 IMAGE_NAME="carla-sharc"
-CONTAINER_NAME="carla-sharc"
+CONTAINER_NAME="carla-sharc-yasin5"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Colors
@@ -107,5 +107,7 @@ docker run -it \
     -v /tmp/.X11-unix:/tmp/.X11-unix \
     -v "$SCRIPT_DIR/resources":/home/workspace/sharc/resources \
     -v "$SCRIPT_DIR/examples":/home/workspace/sharc/examples \
+    -v "$SCRIPT_DIR/run_offscreen_experiment.sh":/home/workspace/sharc/run_offscreen_experiment.sh \
+    -v "$SCRIPT_DIR/experiment_run.json":/home/workspace/sharc/experiment_run.json \
     "$IMAGE_NAME" 
 
