@@ -73,8 +73,6 @@ ready, runs the SHARC experiment, and saves a dashboard PNG to the results folde
 `examples/<EXAMPLE>/experiments/<timestamp>--<label>/`,
 including `experiment_data.json` and `dashboard_final.png`.
 
-**Prerequisites:** the container must already be running (`./run_carla_sharc.sh`).
-
 ---
 
 ## Running the Container
