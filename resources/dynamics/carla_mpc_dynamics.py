@@ -6,11 +6,22 @@ Differences from the PID-oriented CarlaDynamics:
   * Input  u = (a, delta)        ∈ ℝ²    (acceleration + steering)
   * Exogenous input w  = dense waypoint array  ∈ ℝ^{2·N_w}
   * Converts acceleration → CARLA throttle/brake internally.
+
+Batch replay support:
+  Every CARLA ``world.tick()`` is logged together with the
+  ``VehicleControl`` that was applied immediately before it.  When SHARC
+  detects a missed-computation deadline and rolls back to an earlier
+  time-step, ``prepare_for_batch()`` destroys all actors, respawns them
+  with identical parameters, and fast-forwards the CARLA world by
+  re-applying the logged controls — yielding a world state that matches
+  the original run to within CARLA's intrinsic physics tolerance
+  (typically < 0.1 m for batch-sized fast-forwards of ~8–64 steps).
 """
 
 import json
 import math
 import os
+import time as _time
 import numpy as np
 from sharc.dynamics_base import Dynamics
 import carla
@@ -127,15 +138,23 @@ class CarlaMPCDynamics(Dynamics):
                 [carla.command.DestroyActor(aid) for aid in stale_ids], True
             )
             print(f"[CarlaMPCDynamics] Removed {len(stale_ids)} leftover actor(s).")
-        import time; time.sleep(0.5)  # let CARLA settle
+        _time.sleep(0.5)  # let CARLA settle
 
         # Synchronous mode
         settings = self.world.get_settings()
         settings.synchronous_mode = True
         settings.fixed_delta_seconds = self.time_step
+        # Guard: ensure substep settings are valid (invalid values permanently
+        # corrupt CARLA physics, requiring a server restart).
+        if settings.max_substeps < 1 or settings.max_substeps > 16:
+            print(f"[CarlaMPCDynamics] WARNING: invalid max_substeps={settings.max_substeps}, resetting to 10")
+            settings.max_substeps = 10
+        if settings.max_substep_delta_time <= 0 or settings.max_substep_delta_time > 0.05:
+            print(f"[CarlaMPCDynamics] WARNING: invalid max_substep_delta_time={settings.max_substep_delta_time}, resetting to 0.01")
+            settings.max_substep_delta_time = 0.01
         self.world.apply_settings(settings)
 
-        self.traffic_manager = self.client.get_trafficmanager(8000)
+        self.traffic_manager = self.client.get_trafficmanager(8100)
         self.traffic_manager.set_synchronous_mode(True)
         self.traffic_manager.set_random_device_seed(self.seed)
         self.world.tick()
@@ -148,10 +167,12 @@ class CarlaMPCDynamics(Dynamics):
 
         # Try preferred spawn point first, then others if it fails
         self.vehicle = None
+        actual_ego_idx = None
         for offset in range(len(spawn_points)):
             idx = (ego_spawn_idx + offset) % len(spawn_points)
             self.vehicle = self.world.try_spawn_actor(vehicle_bp, spawn_points[idx])
             if self.vehicle is not None:
+                actual_ego_idx = idx
                 print(f"[CarlaMPCDynamics] Spawned ego at spawn-point index {idx}")
                 break
         if self.vehicle is None:
@@ -162,11 +183,14 @@ class CarlaMPCDynamics(Dynamics):
         self.m = self.config["system_parameters"]["input_dimension"]
         self.p = self.config["system_parameters"]["output_dimension"]
 
+        # Cache the CARLA map for waypoint queries (needed by NPC road spawning)
+        self._carla_map = self.world.get_map()
+
         # ---- NPC spawning -------------------------------------------- #
         npc_cfg = carla_cfg.get("npcs", {})
         n_vehicles = npc_cfg.get("n_vehicles", 0)
         n_walkers  = npc_cfg.get("n_walkers", 0)
-        self.npc_vehicles = self._spawn_npc_vehicles(bp_lib, spawn_points, ego_spawn_idx, n_vehicles)
+        self.npc_vehicles = self._spawn_npc_vehicles(bp_lib, spawn_points, actual_ego_idx, n_vehicles)
         self.npc_walkers, self.npc_walker_controllers = self._spawn_npc_walkers(bp_lib, n_walkers)
 
         # ---- Force all traffic lights to stay green ------------------- #
@@ -193,8 +217,79 @@ class CarlaMPCDynamics(Dynamics):
             self.camera_manager = None
             print("[CarlaMPCDynamics] Headless mode — camera window disabled.")
 
-        # Cache the CARLA map for waypoint queries
-        self._carla_map = self.world.get_map()
+        # ---- Batch replay state -------------------------------------- #
+        # Every world.tick() is logged with the VehicleControl that was
+        # applied beforehand. prepare_for_batch() uses this to reset and
+        # fast-forward the world when a batch rolls back.
+        self._tick_log = []          # list of carla.VehicleControl per tick
+        self._npc_tick_log = []      # list of [carla.VehicleControl, ...] per tick (one per NPC)
+        self._walker_tick_log = []   # list of [carla.WalkerControl, ...] per tick
+        self._tick_count = 0         # total CARLA ticks driven so far
+        # Map time-step index → tick index at the START of that step.
+        # Used to find how far to fast-forward after a rollback.
+        self._step_to_tick = {}
+        self._current_step = 0       # current time-step index
+
+        # Remember spawn parameters for deterministic respawn.
+        self._ego_spawn_idx = actual_ego_idx
+        self._n_npc_vehicles = npc_cfg.get("n_vehicles", 0)
+        self._n_npc_walkers = npc_cfg.get("n_walkers", 0)
+        self._road_npc_count = 0  # set by _spawn_npc_vehicles
+        # Optimal settle ticks for determinism.  Validated via a comprehensive
+        # parameter sweep (determinism_sweep.py / determinism_sweep_v2.py):
+        #   - settle_ticks=1 is best (non-monotonic: 2-5 are *worse*).
+        #   - Warmup reset + tick-by-tick replay achieves 0.000 m deviation.
+        #   - Independent sessions (no replay) show 0.5–5 m at 1024 steps.
+        self._n_settle_ticks = 1
+
+        # ---- Warm-up reset ------------------------------------------- #
+        # A single destroy-respawn cycle before the first real batch
+        # eliminates the "first-reset divergence" observed in benchmarks.
+        # Validated: safety-critical scenarios achieve 0.000 m ego deviation
+        # over 512 steps with warmup + replay.
+        self._do_warmup_reset()
+
+    def _do_warmup_reset(self):
+        """Perform one dummy reset cycle to stabilise CARLA's internal state."""
+        print("[CarlaMPCDynamics] Warm-up reset …")
+        self._reset_world()
+        print("[CarlaMPCDynamics] Warm-up reset complete.")
+
+    # ------------------------------------------------------------------ #
+    #  Initial state                                                      #
+    # ------------------------------------------------------------------ #
+
+    def get_initial_state(self):
+        """Return the ego vehicle's current CARLA state as a column vector.
+
+        Called by plant_runner to override config ``x0`` with the actual
+        simulator spawn position so the MPC planner starts from the
+        correct location.
+        """
+        transform = self.vehicle.get_transform()
+        velocity  = self.vehicle.get_velocity()
+        yaw_rad   = math.radians(transform.rotation.yaw)
+        v_x_local = velocity.x * math.cos(yaw_rad) + velocity.y * math.sin(yaw_rad)
+
+        if self.n == 4:
+            return np.array([
+                [transform.location.x],
+                [transform.location.y],
+                [yaw_rad],
+                [v_x_local],
+            ], dtype=float)
+        else:
+            v_y_local = -velocity.x * math.sin(yaw_rad) + velocity.y * math.cos(yaw_rad)
+            ang_vel = self.vehicle.get_angular_velocity()
+            r_rad_s = math.radians(ang_vel.z)
+            return np.array([
+                [transform.location.x],
+                [transform.location.y],
+                [yaw_rad],
+                [v_x_local],
+                [v_y_local],
+                [r_rad_s],
+            ], dtype=float)
 
     # ------------------------------------------------------------------ #
     #  Sidecar / collision helpers                                        #
@@ -215,6 +310,273 @@ class CarlaMPCDynamics(Dynamics):
         except OSError:
             self._extra_fh = None
 
+    # ------------------------------------------------------------------ #
+    #  Batch replay (reset + fast-forward)                                #
+    # ------------------------------------------------------------------ #
+
+    def prepare_for_batch(self, first_time_index: int, sim_config: dict):
+        """Reset and fast-forward CARLA when a batch rolls back.
+
+        Called by ``plant_runner`` before each batch begins.  If
+        *first_time_index* is behind the dynamics' current position (a
+        rollback after a missed-computation deadline), the method:
+
+        1. destroys all actors and respawns them deterministically,
+        2. replays the logged ``VehicleControl`` sequence from tick 0
+           up to the tick that corresponds to *first_time_index*.
+
+        If *first_time_index* matches the current position (no rollback,
+        normal continuation), the method is a no-op.
+        """
+        target_tick = self._step_to_tick.get(first_time_index)
+
+        if first_time_index == 0 and self._tick_count == 0:
+            # Very first batch — nothing to replay.
+            self._current_step = 0
+            return
+
+        if target_tick is not None and target_tick == self._tick_count:
+            # Normal continuation — dynamics is already at the right state.
+            self._current_step = first_time_index
+            return
+
+        if target_tick is None:
+            # first_time_index was never reached yet.  This shouldn't happen
+            # in normal operation but guard against it.
+            print(f"[CarlaMPCDynamics] WARNING: step {first_time_index} not in "
+                  f"tick map (keys: {sorted(self._step_to_tick.keys())}). "
+                  f"Skipping replay.")
+            self._current_step = first_time_index
+            return
+
+        # ── Rollback detected ─────────────────────────────────────────
+        print(f"[CarlaMPCDynamics] Rollback detected: dynamics at tick "
+              f"{self._tick_count} but batch starts at step "
+              f"{first_time_index} (tick {target_tick}).  "
+              f"Resetting and fast-forwarding …")
+
+        self._reset_world()
+        self._fast_forward(target_tick)
+
+        # Trim the tick log and step map to discard the invalidated future.
+        self._tick_log = self._tick_log[:target_tick]
+        self._npc_tick_log = self._npc_tick_log[:target_tick]
+        self._walker_tick_log = self._walker_tick_log[:target_tick]
+        self._tick_count = target_tick
+        invalidated = [k for k in self._step_to_tick if k > first_time_index]
+        for k in invalidated:
+            del self._step_to_tick[k]
+        self._current_step = first_time_index
+
+        print(f"[CarlaMPCDynamics] Fast-forward complete.  "
+              f"Dynamics now at tick {self._tick_count}, "
+              f"step {self._current_step}.")
+
+    def _reset_world(self):
+        """Destroy all actors and respawn ego + NPCs deterministically."""
+
+        # ---- Stop collision sensor stream ----------------------------- #
+        if getattr(self, '_collision_sensor', None) is not None:
+            try:
+                self._collision_sensor.stop()
+                self._collision_sensor.destroy()
+            except Exception:
+                pass
+            self._collision_sensor = None
+
+        # ---- Stop walker controllers ---------------------------------- #
+        for ctrl in getattr(self, 'npc_walker_controllers', []):
+            try:
+                ctrl.stop()
+            except Exception:
+                pass
+
+        # ---- Destroy camera ------------------------------------------- #
+        if getattr(self, 'camera_manager', None) is not None:
+            self.camera_manager.destroy()
+            self.camera_manager = None
+
+        # ---- Disable autopilot BEFORE destroy (avoids TM warnings) ---- #
+        tm_port = self.traffic_manager.get_port()
+        for npc in getattr(self, 'npc_vehicles', []):
+            try:
+                if npc.is_alive:
+                    npc.set_autopilot(False, tm_port)
+            except Exception:
+                pass
+
+        # ---- Batch destroy all managed actors ------------------------- #
+        destroy_ids = []
+        for ctrl in getattr(self, 'npc_walker_controllers', []):
+            destroy_ids.append(ctrl.id)
+        for walker in getattr(self, 'npc_walkers', []):
+            destroy_ids.append(walker.id)
+        for npc in getattr(self, 'npc_vehicles', []):
+            destroy_ids.append(npc.id)
+        if getattr(self, 'vehicle', None) is not None:
+            destroy_ids.append(self.vehicle.id)
+        if destroy_ids:
+            self.client.apply_batch_sync(
+                [carla.command.DestroyActor(aid) for aid in destroy_ids], True)
+        _time.sleep(0.5)
+
+        # ---- Reset TM seed ------------------------------------------- #
+        self.traffic_manager.set_synchronous_mode(False)
+        self.traffic_manager = self.client.get_trafficmanager(8100)
+        self.traffic_manager.set_synchronous_mode(True)
+        self.traffic_manager.set_random_device_seed(self.seed)
+
+        # ---- Respawn ego --------------------------------------------- #
+        random.seed(self.seed)
+        np.random.seed(self.seed)
+
+        bp_lib = self.world.get_blueprint_library()
+        vehicle_bp = bp_lib.find("vehicle.tesla.model3")
+        spawn_points = self.world.get_map().get_spawn_points()
+        self.vehicle = self.world.try_spawn_actor(
+            vehicle_bp, spawn_points[self._ego_spawn_idx])
+        if self.vehicle is None:
+            raise RuntimeError(
+                f"Failed to respawn ego at index {self._ego_spawn_idx}")
+
+        # ---- Respawn NPCs -------------------------------------------- #
+        self.npc_vehicles = self._spawn_npc_vehicles(
+            bp_lib, spawn_points, self._ego_spawn_idx, self._n_npc_vehicles)
+        self._npcs_stop_commanded = False
+        self.npc_walkers, self.npc_walker_controllers = self._spawn_npc_walkers(
+            bp_lib, self._n_npc_walkers)
+
+        # ---- Freeze traffic lights ----------------------------------- #
+        for tl in self.world.get_actors().filter('traffic.traffic_light'):
+            tl.set_state(carla.TrafficLightState.Green)
+            tl.freeze(True)
+
+        # ---- Re-attach collision sensor ------------------------------ #
+        self._collision_events = []
+        collision_bp = bp_lib.find('sensor.other.collision')
+        self._collision_sensor = self.world.spawn_actor(
+            collision_bp, carla.Transform(), attach_to=self.vehicle)
+        self._collision_sensor.listen(self._on_collision)
+
+        # ---- Re-attach camera (if display available) ----------------- #
+        if _has_display():
+            self.camera_manager = CameraManager(self.world, self.vehicle)
+
+        # ---- Settle ticks -------------------------------------------- #
+        for _ in range(self._n_settle_ticks):
+            self.world.tick()
+
+    def _fast_forward(self, target_tick):
+        """Replay logged ego + NPC controls from tick 0 to *target_tick*."""
+        n = min(target_tick, len(self._tick_log))
+        if n == 0:
+            return
+        print(f"[CarlaMPCDynamics] Fast-forwarding {n} ticks …")
+
+        # Disable TM autopilot and walker AI so we can apply logged controls
+        tm_port = self.traffic_manager.get_port()
+        for npc in self.npc_vehicles:
+            try:
+                if npc.is_alive:
+                    npc.set_autopilot(False, tm_port)
+            except Exception:
+                pass
+        for ctrl in self.npc_walker_controllers:
+            try:
+                ctrl.stop()
+            except Exception:
+                pass
+
+        for i in range(n):
+            self.vehicle.apply_control(self._tick_log[i])
+            # Apply logged NPC vehicle controls
+            if i < len(self._npc_tick_log):
+                for j, npc in enumerate(self.npc_vehicles):
+                    if j < len(self._npc_tick_log[i]) and self._npc_tick_log[i][j] is not None:
+                        try:
+                            if npc.is_alive:
+                                npc.apply_control(self._npc_tick_log[i][j])
+                        except Exception:
+                            pass
+            # Apply logged walker controls
+            if i < len(self._walker_tick_log):
+                for j, walker in enumerate(self.npc_walkers):
+                    if j < len(self._walker_tick_log[i]) and self._walker_tick_log[i][j] is not None:
+                        try:
+                            if walker.is_alive:
+                                walker.apply_control(self._walker_tick_log[i][j])
+                        except Exception:
+                            pass
+            self.world.tick()
+
+        # Re-enable TM autopilot and walker AI for ongoing simulation
+        for npc in self.npc_vehicles:
+            try:
+                if npc.is_alive:
+                    npc.set_autopilot(True, tm_port)
+            except Exception:
+                pass
+        self._configure_road_npcs_tm()
+        for ctrl in self.npc_walker_controllers:
+            try:
+                ctrl.start()
+                dest = self.world.get_random_location_from_navigation()
+                if dest is not None:
+                    ctrl.go_to_location(dest)
+                ctrl.set_max_speed(1.4)
+            except Exception:
+                pass
+
+    # ------------------------------------------------------------------ #
+    #  Tick logging helpers                                               #
+    # ------------------------------------------------------------------ #
+
+    def _log_tick(self, control: 'carla.VehicleControl'):
+        """Record ego + NPC controls for a single CARLA tick."""
+        self._tick_log.append(carla.VehicleControl(
+            throttle=control.throttle,
+            steer=control.steer,
+            brake=control.brake,
+            hand_brake=control.hand_brake,
+            reverse=control.reverse,
+            manual_gear_shift=control.manual_gear_shift,
+            gear=control.gear,
+        ))
+        # Log NPC vehicle controls (read what TM actually applied)
+        npc_ctrls = []
+        for npc in getattr(self, 'npc_vehicles', []):
+            try:
+                if npc.is_alive:
+                    c = npc.get_control()
+                    npc_ctrls.append(carla.VehicleControl(
+                        throttle=c.throttle, steer=c.steer, brake=c.brake,
+                        hand_brake=c.hand_brake, reverse=c.reverse,
+                        manual_gear_shift=c.manual_gear_shift, gear=c.gear))
+                else:
+                    npc_ctrls.append(None)
+            except Exception:
+                npc_ctrls.append(None)
+        self._npc_tick_log.append(npc_ctrls)
+        # Log walker controls
+        walker_ctrls = []
+        for walker in getattr(self, 'npc_walkers', []):
+            try:
+                if walker.is_alive:
+                    wc = walker.get_control()
+                    walker_ctrls.append(carla.WalkerControl(
+                        direction=wc.direction, speed=wc.speed, jump=wc.jump))
+                else:
+                    walker_ctrls.append(None)
+            except Exception:
+                walker_ctrls.append(None)
+        self._walker_tick_log.append(walker_ctrls)
+        self._tick_count += 1
+
+    def _register_step_start(self, time_step_index: int):
+        """Map a time-step index to the current tick count."""
+        if time_step_index not in self._step_to_tick:
+            self._step_to_tick[time_step_index] = self._tick_count
+
     def _on_collision(self, event):
         """CARLA collision sensor callback."""
         impulse = event.normal_impulse
@@ -228,16 +590,21 @@ class CarlaMPCDynamics(Dynamics):
         """Append one JSON record (NPC positions + collisions) to the sidecar."""
         if self._extra_fh is None:
             return
+        # Use the managed NPC list (sorted by actor ID for stable ordering)
+        # instead of scanning world.get_actors(), which may include stale
+        # actors or miss NPCs during batch transitions.
         npc_data = []
-        for actor in self.world.get_actors():
-            if actor.id == self.vehicle.id:
-                continue
-            if not actor.type_id.startswith('vehicle.'):
-                continue
-            loc = actor.get_transform().location
-            npc_data.append({'id': actor.id,
-                             'x': round(loc.x, 2),
-                             'y': round(loc.y, 2)})
+        for npc in sorted(getattr(self, 'npc_vehicles', []),
+                          key=lambda a: a.id):
+            try:
+                if not npc.is_alive:
+                    continue
+                loc = npc.get_transform().location
+                npc_data.append({'id': npc.id,
+                                 'x': round(loc.x, 2),
+                                 'y': round(loc.y, 2)})
+            except Exception:
+                pass
         col_events = self._collision_events[:]
         self._collision_events.clear()
         record = {
@@ -473,8 +840,35 @@ class CarlaMPCDynamics(Dynamics):
     #  State evolution                                                    #
     # ------------------------------------------------------------------ #
 
+    def _update_npc_speed(self, t):
+        """Command road NPCs to stop per config schedule."""
+        npc_cfg = self.config.get("carla", {}).get("npcs", {})
+        stop_after = npc_cfg.get("road_stop_after_s")
+        if stop_after is None or t < stop_after:
+            return
+        if getattr(self, '_npcs_stop_commanded', False):
+            return
+        self._npcs_stop_commanded = True
+        for npc in getattr(self, 'npc_vehicles', []):
+            try:
+                if npc.is_alive:
+                    self.traffic_manager.vehicle_percentage_speed_difference(
+                        npc, 100)
+            except Exception:
+                pass
+        print(f"[CarlaMPCDynamics] t={t:.2f}s: Commanded NPCs to stop "
+              f"(road_stop_after_s={stop_after})")
+
     def evolve_state(self, t0, x0, u, w, tf, metadata=None):
         """Apply control u = (a, delta) to CARLA and return x = (px, py, psi, v)."""
+        # Infer the time-step index from t0 and register the tick mapping.
+        step_index = round(t0 / self.time_step)
+        self._current_step = step_index
+        self._register_step_start(step_index)
+
+        # Update NPC behavior (e.g., scheduled stop)
+        self._update_npc_speed(t0)
+
         accel  = float(u[0])  # longitudinal acceleration [m/s^2]
         delta  = float(u[1])  # steering angle [rad]  (-1..+1)
 
@@ -490,14 +884,13 @@ class CarlaMPCDynamics(Dynamics):
         # CARLA expects steer in [-1, 1]; max physical angle ≈ 0.7 rad
         steer = max(-1.0, min(1.0, delta))
 
+        control = carla.VehicleControl(
+            throttle=throttle, steer=steer, brake=brake)
+
         steps = max(1, math.floor((tf - t0) / self.time_step))
 
         for step in range(steps):
-            self.vehicle.apply_control(carla.VehicleControl(
-                throttle=throttle,
-                steer=steer,
-                brake=brake
-            ))
+            self.vehicle.apply_control(control)
 
             # Render camera view (skip when headless)
             if self.display is not None and self.camera_manager is not None:
@@ -519,7 +912,16 @@ class CarlaMPCDynamics(Dynamics):
             sys.__stdout__.write(log_msg)
             sys.__stdout__.flush()
 
+            # Log the tick BEFORE world.tick() so replay reproduces exactly.
+            self._log_tick(control)
             self.world.tick()
+
+        # Register the tick position after this evolve_state completes.
+        # If tf lands on a full step boundary, this records the start tick
+        # for the NEXT time step — needed when a subsequent batch rolls
+        # back to that step.
+        next_step = round(tf / self.time_step)
+        self._register_step_start(next_step)
 
         # Read state
         transform = self.vehicle.get_transform()
@@ -613,7 +1015,7 @@ class CarlaMPCDynamics(Dynamics):
 
             # Give CARLA time to flush sensor streams and settle before the
             # next session connects (avoids "Invalid session: no stream" spam)
-            import time as _time; _time.sleep(2.0)
+            _time.sleep(2.0)
             print("[CarlaMPCDynamics] Teardown complete.")
         except Exception as e:
             print(f"[CarlaMPCDynamics] cleanup error: {e}")
@@ -624,29 +1026,131 @@ class CarlaMPCDynamics(Dynamics):
 
     def _spawn_npc_vehicles(self, bp_lib, spawn_points, ego_idx, count):
         if count == 0:
+            self._road_npc_count = 0
             return []
         vehicle_bps = sorted(bp_lib.filter('vehicle.*'), key=lambda bp: bp.id)
 
-        # Sort available spawn points by distance to ego so NPCs spawn
-        # at the nearest locations, creating meaningful proximate traffic.
-        ego_loc = self.vehicle.get_location()
-        available = [sp for i, sp in enumerate(spawn_points) if i != ego_idx]
-        available.sort(
-            key=lambda sp: (sp.location.x - ego_loc.x) ** 2 + (sp.location.y - ego_loc.y) ** 2
-        )
-        count = min(count, len(available))
+        npc_cfg = self.config.get("carla", {}).get("npcs", {})
+        road_count = min(npc_cfg.get("road_vehicles", 0), count)
+        road_spacing = npc_cfg.get("road_spacing", 25.0)
+        road_speed_pct = npc_cfg.get("road_speed_pct", 60)
+
         vehicles = []
-        for i in range(count):
-            bp = vehicle_bps[i % len(vehicle_bps)]
-            if bp.has_attribute('color'):
-                colors = bp.get_attribute('color').recommended_values
-                bp.set_attribute('color', colors[i % len(colors)])
-            npc = self.world.try_spawn_actor(bp, available[i])
-            if npc is not None:
-                npc.set_autopilot(True, self.traffic_manager.get_port())
-                vehicles.append(npc)
-        print(f"[CarlaMPCDynamics] Spawned {len(vehicles)}/{count} NPC vehicles.")
+        tm_port = self.traffic_manager.get_port()
+        spawned_road = 0
+
+        # Use the known spawn-point location instead of querying the vehicle
+        # actor.  In CARLA synchronous mode, get_location() returns the
+        # default position (near origin) until the next world.tick().
+        ego_spawn_loc = spawn_points[ego_idx].location
+
+        # ---- Phase 1: Spawn NPCs on the ego's road ahead ------------ #
+        if road_count > 0:
+            ego_wp = self._carla_map.get_waypoint(
+                ego_spawn_loc,
+                project_to_road=True,
+                lane_type=carla.LaneType.Driving)
+            print(f"[CarlaMPCDynamics] Ego spawn loc: "
+                  f"({ego_spawn_loc.x:.1f}, {ego_spawn_loc.y:.1f}), "
+                  f"ego waypoint: ({ego_wp.transform.location.x:.1f}, "
+                  f"{ego_wp.transform.location.y:.1f}), "
+                  f"road_id={ego_wp.road_id}, lane_id={ego_wp.lane_id}")
+            ego_road_id = ego_wp.road_id
+            ego_lane_id = ego_wp.lane_id
+            current_wp = ego_wp
+            for i in range(road_count):
+                nxt = current_wp.next(road_spacing)
+                if not nxt:
+                    print(f"[CarlaMPCDynamics] WARNING: next({road_spacing}) "
+                          f"returned empty at step {i}")
+                    break
+                # At junctions, prefer the branch that stays on the same
+                # road or at least the same lane direction.
+                best = nxt[0]
+                if len(nxt) > 1:
+                    for w in nxt:
+                        if w.road_id == ego_road_id and w.lane_id == ego_lane_id:
+                            best = w
+                            break
+                    # Fallback: pick the closest one geometrically
+                    else:
+                        best = min(nxt, key=lambda w: (
+                            (w.transform.location.x - current_wp.transform.location.x) ** 2 +
+                            (w.transform.location.y - current_wp.transform.location.y) ** 2))
+                current_wp = best
+                npc_loc = current_wp.transform.location
+                dx = npc_loc.x - ego_spawn_loc.x
+                dy = npc_loc.y - ego_spawn_loc.y
+                geom_dist = math.sqrt(dx * dx + dy * dy)
+                print(f"[CarlaMPCDynamics] NPC road wp {i}: "
+                      f"({npc_loc.x:.1f}, {npc_loc.y:.1f}), "
+                      f"road_id={current_wp.road_id}, "
+                      f"lane_id={current_wp.lane_id}, "
+                      f"geom_dist={geom_dist:.1f}m")
+
+                bp = vehicle_bps[i % len(vehicle_bps)]
+                if bp.has_attribute('color'):
+                    colors = bp.get_attribute('color').recommended_values
+                    bp.set_attribute('color', colors[i % len(colors)])
+                spawn_tf = current_wp.transform
+                spawn_tf.location.z += 0.3
+                npc = self.world.try_spawn_actor(bp, spawn_tf)
+                if npc is not None:
+                    npc.set_autopilot(True, tm_port)
+                    self.traffic_manager.vehicle_percentage_speed_difference(
+                        npc, road_speed_pct)
+                    self.traffic_manager.auto_lane_change(npc, False)
+                    self.traffic_manager.distance_to_leading_vehicle(npc, 5.0)
+                    vehicles.append(npc)
+                    spawned_road += 1
+                else:
+                    print(f"[CarlaMPCDynamics] WARNING: try_spawn_actor "
+                          f"failed for road NPC {i}")
+            if spawned_road > 0:
+                print(f"[CarlaMPCDynamics] Road NPCs: {spawned_road}/{road_count} "
+                      f"(spacing={road_spacing}m, speed_pct={road_speed_pct})")
+
+        # ---- Phase 2: Spawn remaining NPCs at nearest spawn points --- #
+        remaining = count - len(vehicles)
+        if remaining > 0:
+            ego_loc = ego_spawn_loc
+            available = [sp for i, sp in enumerate(spawn_points) if i != ego_idx]
+            available.sort(
+                key=lambda sp: (sp.location.x - ego_loc.x) ** 2
+                             + (sp.location.y - ego_loc.y) ** 2)
+            for i in range(min(remaining, len(available))):
+                bp_idx = (len(vehicles) + i) % len(vehicle_bps)
+                bp = vehicle_bps[bp_idx]
+                if bp.has_attribute('color'):
+                    colors = bp.get_attribute('color').recommended_values
+                    bp.set_attribute('color',
+                                     colors[(len(vehicles) + i) % len(colors)])
+                npc = self.world.try_spawn_actor(bp, available[i])
+                if npc is not None:
+                    npc.set_autopilot(True, tm_port)
+                    vehicles.append(npc)
+
+        self._road_npc_count = spawned_road
+        print(f"[CarlaMPCDynamics] Spawned {len(vehicles)}/{count} NPC vehicles "
+              f"({spawned_road} on road).")
         return vehicles
+
+    def _configure_road_npcs_tm(self):
+        """Re-apply TM settings for road NPCs after autopilot re-enable."""
+        if not hasattr(self, '_road_npc_count') or self._road_npc_count == 0:
+            return
+        npc_cfg = self.config.get("carla", {}).get("npcs", {})
+        road_speed_pct = npc_cfg.get("road_speed_pct", 60)
+        for i in range(min(self._road_npc_count, len(self.npc_vehicles))):
+            npc = self.npc_vehicles[i]
+            try:
+                if npc.is_alive:
+                    self.traffic_manager.vehicle_percentage_speed_difference(
+                        npc, road_speed_pct)
+                    self.traffic_manager.auto_lane_change(npc, False)
+                    self.traffic_manager.distance_to_leading_vehicle(npc, 5.0)
+            except Exception:
+                pass
 
     def _spawn_npc_walkers(self, bp_lib, count):
         if count == 0:

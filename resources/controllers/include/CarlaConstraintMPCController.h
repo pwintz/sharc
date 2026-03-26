@@ -79,8 +79,6 @@ private:
 
     double prev_accel = 0.0;
     double prev_steer = 0.0;
-    bool   sticky_hold = false;   // Once stopped near obstacles, stay stopped
-    double min_clear_dist = 0.0;  // 2 * r_safe — release hold when all obs this far
 
     std::string experiment_dir;
     std::string state_file;

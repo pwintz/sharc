@@ -113,6 +113,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     x264 \
     python3-tk \
     libxerces-c-dev \
+    # === Headless GPU rendering (Xvfb) ===
+    xvfb \
     && rm -rf /var/lib/apt/lists/*
 
 #───────────────────────────────────────────────────────────────────────────────
@@ -339,6 +341,12 @@ RUN if [ -f "$RESOURCES_DIR/sharc/requirements.txt" ]; then \
         $CONDA_DIR/envs/carla/bin/pip install -r $RESOURCES_DIR/sharc/requirements.txt; \
     fi
 
+# Copy runner scripts to a well-known location
+COPY --chown=$USERNAME:$USERNAME run_offscreen_experiment.sh $WORKSPACE_ROOT/sharc/run_offscreen_experiment.sh
+COPY --chown=$USERNAME:$USERNAME run_scenario_leaderboard.sh $WORKSPACE_ROOT/sharc/run_scenario_leaderboard.sh
+RUN chmod +x $WORKSPACE_ROOT/sharc/run_offscreen_experiment.sh \
+             $WORKSPACE_ROOT/sharc/run_scenario_leaderboard.sh
+
 #═══════════════════════════════════════════════════════════════════════════════
 #  STAGE 7: Final Configuration
 #═══════════════════════════════════════════════════════════════════════════════
@@ -368,6 +376,8 @@ RUN echo "═══════════════════════�
     test -e $RESOURCES_DIR && echo "✓ SHARC Resources" && \
     test -e $EXAMPLES_DIR && echo "✓ SHARC Examples" && \
     test -e $SCENARIO_RUNNER_ROOT && echo "✓ Scenario Runner" && \
+    which xvfb-run && echo "✓ Xvfb (headless GPU rendering)" && \
+    which ffmpeg && echo "✓ FFmpeg (video recording)" && \
     $CONDA_DIR/envs/carla/bin/python -c "import carla; print('✓ CARLA Python API')" && \
     echo "═══════════════════════════════════════════════════════" && \
     echo "  All components installed successfully!" && \
@@ -416,7 +426,8 @@ CMD ["/bin/bash", "-l"]
 #  /home/admin/                    <- User home (WORKSPACE_ROOT)
 #  ├── sharc/
 #  │   ├── resources/              <- SHARC Python code & controllers
-#  │   └── examples/               <- ACC example, cartpole, etc.
+#  │   ├── examples/               <- MPC_example, ACC example, etc.
+#  │   └── run_offscreen_experiment.sh <- Main experiment runner
 #  └── scenario_runner/            <- CARLA Scenario Runner
 #
 #  /home/carla/                    <- CARLA installation (from base image)

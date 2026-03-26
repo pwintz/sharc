@@ -16,6 +16,7 @@ Usage
 
 import argparse
 import json
+import math
 import os
 import signal
 import sys
@@ -137,20 +138,23 @@ def extract_steps(raw: dict):
     x      : np.ndarray shape (N, 6) -- state [pos_x, pos_y, yaw, speed, wp_x, wp_y]
     u      : np.ndarray shape (N, 3) -- control [throttle, steer, brake] per u_names
     delays : np.ndarray shape (N,)   -- computation delay in seconds
+    w      : np.ndarray shape (N, D) -- exogenous input (waypoints + obstacles)
     """
     k_arr  = raw.get("k", [])
     t_arr  = raw.get("t", [])
     x_arr  = raw.get("x", [])
     u_arr  = raw.get("u", [])
+    w_arr  = raw.get("w", [])
     pc_arr = raw.get("pending_computations", [])
 
     if not k_arr:
-        return (np.array([]),) * 4
+        return (np.array([]),) * 5
 
     # Take every other entry starting at index 1
     t_s  = np.asarray(t_arr[1::2],  dtype=float)
     x_s  = np.asarray(x_arr[1::2],  dtype=float)
     u_s  = np.asarray(u_arr[1::2],  dtype=float)
+    w_s  = np.asarray(w_arr[1::2],  dtype=float) if w_arr else np.array([])
     pc_s = pc_arr[1::2] if pc_arr else []
 
     delays = np.asarray(
@@ -163,8 +167,10 @@ def extract_steps(raw: dict):
         x_s = x_s.reshape(1, -1)
     if u_s.ndim == 1:
         u_s = u_s.reshape(1, -1)
+    if w_s.ndim == 1 and w_s.size > 0:
+        w_s = w_s.reshape(1, -1)
 
-    return t_s, x_s, u_s, delays
+    return t_s, x_s, u_s, delays, w_s
 
 
 def load_carla_extra(sim_dir: str):
@@ -180,14 +186,20 @@ def load_carla_extra(sim_dir: str):
     npc_tracks : dict  id → {"label": str, "xs": list, "ys": list}
     collisions  : list of dicts  {"t", "ego_x", "ego_y", "other", "intensity"}
     """
-    # Gather candidate files (sim_dir first, then sorted sub-dirs so
-    # batches appear in chronological order).
+    # Gather candidate files (sim_dir first, then sub-dirs sorted
+    # *numerically* by batch index so batches appear in chronological order).
+    # Lexicographic sort puts batch10 before batch1 — we need batch0, batch1, ..., batch10.
+    import re as _re
+    def _batch_sort_key(name):
+        m = _re.search(r'batch(\d+)', name)
+        return int(m.group(1)) if m else float('inf')
+
     files = []
     top = os.path.join(sim_dir, 'carla_extra.jsonl')
     if os.path.isfile(top):
         files.append(top)
     try:
-        for entry in sorted(os.listdir(sim_dir)):
+        for entry in sorted(os.listdir(sim_dir), key=_batch_sort_key):
             sub = os.path.join(sim_dir, entry, 'carla_extra.jsonl')
             if os.path.isfile(sub):
                 files.append(sub)
@@ -253,17 +265,19 @@ _NPC_COLORS = [
 
 def _build_figure():
     """Create the dashboard figure and return (fig, axes_dict)."""
-    fig = plt.figure(figsize=(15, 9))
+    fig = plt.figure(figsize=(18, 9))
     fig.patch.set_facecolor("#1e1e2e")
 
-    gs = fig.add_gridspec(2, 3, hspace=0.50, wspace=0.38,
-                          left=0.07, right=0.97, top=0.91, bottom=0.09)
+    gs = fig.add_gridspec(2, 4, hspace=0.50, wspace=0.38,
+                          left=0.05, right=0.97, top=0.91, bottom=0.09,
+                          width_ratios=[1.2, 1, 1, 0.8])
 
     ax_xy    = fig.add_subplot(gs[:, 0])   # trajectory (tall column)
     ax_spd   = fig.add_subplot(gs[0, 1])   # speed
     ax_dly   = fig.add_subplot(gs[0, 2])   # computation delay
     ax_tbrk  = fig.add_subplot(gs[1, 1])   # throttle + brake
     ax_steer = fig.add_subplot(gs[1, 2])   # steering
+    ax_met   = fig.add_subplot(gs[:, 3])   # metrics panel (tall column)
 
     _style_ax(ax_xy,    "Vehicle Trajectory",        "X (m)",      "Y (m)")
     _style_ax(ax_spd,   "Speed",                     "Time (s)",   "Speed (km/h)")
@@ -275,7 +289,16 @@ def _build_figure():
     ax_tbrk.set_ylim(-0.05, 1.05)
     ax_steer.set_ylim(-1.1, 1.1)
 
-    return fig, dict(xy=ax_xy, spd=ax_spd, dly=ax_dly, tbrk=ax_tbrk, steer=ax_steer)
+    # Metrics panel: text-only, no axes
+    ax_met.set_facecolor(_DARK_BG)
+    ax_met.set_title("Metrics", color=_TEXT_CLR, fontsize=9, fontweight="bold")
+    ax_met.set_xticks([])
+    ax_met.set_yticks([])
+    for spine in ax_met.spines.values():
+        spine.set_edgecolor(_GRID_CLR)
+
+    return fig, dict(xy=ax_xy, spd=ax_spd, dly=ax_dly, tbrk=ax_tbrk, steer=ax_steer,
+                     met=ax_met)
 
 
 _DARK_BG   = "#1e1e2e"
@@ -448,11 +471,13 @@ class Dashboard:
                 "mpc_opts": {
                     "max_accel": lims.get("max_accel",  1.0),
                     "min_accel": lims.get("min_accel", -3.0),
+                    "n_waypoints": mpc_o.get("n_waypoints", 0),
+                    "n_obstacles": mpc_o.get("n_obstacles", 0),
                 },
             }
 
         # ── 4. Extract per-step data ─────────────────────────────────────────
-        t, x, u, delays = extract_steps(raw)
+        t, x, u, delays, w_arr = extract_steps(raw)
         n_steps = len(t)
 
         if n_steps == 0:
@@ -536,18 +561,60 @@ class Dashboard:
         elif len(px) == 1:
             ax['xy'].plot(px, py, 'o', color='#89b4fa', markersize=5)
 
-        # Waypoints
-        if wp_x is not None and wp_y is not None:
+        # Waypoints from w array (MPC mode) or state columns (PID mode)
+        n_wp  = mpc_opts.get("n_waypoints", 0)
+        n_obs = mpc_opts.get("n_obstacles", 0)
+        if n_wp > 0 and w_arr.size > 0 and w_arr.shape[1] >= 2 * n_wp:
+            # Show waypoints for the LATEST step (current reference path)
+            latest_w = w_arr[-1]
+            wp_xs = latest_w[0:2*n_wp:2]
+            wp_ys = latest_w[1:2*n_wp:2]
+            ax['xy'].scatter(wp_xs, wp_ys, c='#a6e3a1', s=12,
+                             alpha=0.6, zorder=7, marker='.', label='Waypoints')
+            # Draw waypoint path as a thin green line
+            ax['xy'].plot(wp_xs, wp_ys, color='#a6e3a1', linewidth=0.8,
+                          alpha=0.4, zorder=6)
+        elif wp_x is not None and wp_y is not None:
             ax['xy'].scatter(wp_x, wp_y, c='#a6e3a1', s=8,
                              alpha=0.35, zorder=3, label='Waypoints')
 
-        # NPC trajectories
+        # Obstacles from w array (MPC mode)
+        if n_obs > 0 and n_wp > 0 and w_arr.size > 0:
+            latest_w = w_arr[-1]
+            offset = 2 * n_wp
+            for oi in range(n_obs):
+                base = offset + 5 * oi
+                if base + 4 < len(latest_w):
+                    ox = latest_w[base + 0]
+                    oy = latest_w[base + 1]
+                    orad = latest_w[base + 4]
+                    if ox > 1e5:
+                        continue  # sentinel — empty slot
+                    circle = plt.Circle((ox, oy), orad, color='#fab387',
+                                        fill=False, linewidth=1.5, alpha=0.8,
+                                        zorder=8)
+                    ax['xy'].add_patch(circle)
+                    ax['xy'].plot(ox, oy, 'o', color='#fab387', markersize=4,
+                                  alpha=0.9, zorder=9)
+            # Add a single legend entry for obstacles
+            ax['xy'].plot([], [], 'o', color='#fab387', markersize=4,
+                          label='Obstacles')
+
+        # NPC trajectories (with segment-length filter to prevent long jumps)
+        _MAX_NPC_JUMP = 15.0  # max plausible single-step NPC displacement (m)
         for i, (nid, track) in enumerate(npc_tracks.items()):
             clr = _NPC_COLORS[i % len(_NPC_COLORS)]
             xs, ys = track['xs'], track['ys']
             if len(xs) > 1:
-                ax['xy'].plot(xs, ys, color=clr, linewidth=1.0,
-                              linestyle='--', alpha=0.55, zorder=4)
+                # Draw segments individually, skipping impossibly long jumps
+                for j in range(len(xs) - 1):
+                    dx = xs[j+1] - xs[j]
+                    dy = ys[j+1] - ys[j]
+                    if dx*dx + dy*dy > _MAX_NPC_JUMP * _MAX_NPC_JUMP:
+                        continue  # skip teleport artifact
+                    ax['xy'].plot([xs[j], xs[j+1]], [ys[j], ys[j+1]],
+                                  color=clr, linewidth=1.0,
+                                  linestyle='--', alpha=0.55, zorder=4)
             if xs:
                 ax['xy'].plot(xs[-1], ys[-1], 's', color=clr,
                               markersize=5, alpha=0.9, zorder=5,
@@ -627,7 +694,123 @@ class Dashboard:
         ax["steer"].plot(t, steer, color="#fab387", linewidth=1.5)
         ax["steer"].axhline(0, color=_GRID_CLR, linewidth=0.8)
 
-        # ── 11. Title ────────────────────────────────────────────────────────
+        # ── 11. Metrics panel ────────────────────────────────────────────────
+        ax["met"].cla()
+        ax["met"].set_facecolor(_DARK_BG)
+        ax["met"].set_title("Metrics", color=_TEXT_CLR, fontsize=9, fontweight="bold")
+        ax["met"].set_xticks([])
+        ax["met"].set_yticks([])
+        for spine in ax["met"].spines.values():
+            spine.set_edgecolor(_GRID_CLR)
+        ax["met"].set_xlim(0, 1)
+        ax["met"].set_ylim(0, 1)
+
+        # Compute live metrics from current data
+        # -- MPC cost from pending_computations metadata
+        pc_arr = raw.get("pending_computations", [])
+        pc_step = pc_arr[1::2] if pc_arr else []
+        mpc_costs = []
+        feas_count, solve_count = 0, 0
+        seen_ks = set()
+        for pc in pc_step:
+            if not isinstance(pc, dict):
+                continue
+            meta = pc.get("metadata", {})
+            if not meta:
+                continue
+            mk = meta.get("k")
+            if mk is not None and mk in seen_ks:
+                continue
+            if mk is not None:
+                seen_ks.add(mk)
+            c = meta.get("cost")
+            if c is not None:
+                mpc_costs.append(c)
+            if "is_feasible" in meta:
+                solve_count += 1
+                if meta["is_feasible"]:
+                    feas_count += 1
+
+        # -- Path tracking RMSE
+        path_errs = []
+        if w_arr.size > 0 and n_wp > 0:
+            for si in range(min(n_steps, len(w_arr))):
+                ew = w_arr[si]
+                wpx = ew[0:2*n_wp:2]
+                wpy = ew[1:2*n_wp:2]
+                d2 = (wpx - px[si])**2 + (wpy - py[si])**2
+                path_errs.append(float(np.sqrt(np.min(d2))))
+
+        # -- Speed RMSE
+        spd_rmse = None
+        if tgt_spd is not None:
+            spd_rmse = float(np.sqrt(np.mean((speed - tgt_spd)**2)))
+
+        # -- Min obstacle distance from NPC tracks vs ego position
+        min_obs = float('inf')
+        for _, track in npc_tracks.items():
+            for j in range(min(len(track['xs']), n_steps)):
+                d = math.sqrt((track['xs'][j] - float(px[j]))**2 +
+                              (track['ys'][j] - float(py[j]))**2)
+                min_obs = min(min_obs, d)
+
+        # -- Total distance
+        _total_dist = None
+        if len(px) > 1:
+            _total_dist = float(np.sum(np.sqrt(np.diff(px)**2 + np.diff(py)**2)))
+
+        # Build metrics text lines
+        lines = []
+        if n_collisions:
+            lines.append(("Collision", f"⚠ {n_collisions}", "#f38ba8"))
+        else:
+            lines.append(("Collision", "✓ None", "#a6e3a1"))
+
+        lines.append(("Steps", f"{n_steps}", _TEXT_CLR))
+
+        if mpc_costs:
+            lines.append(("", "", ""))  # spacer
+            lines.append(("Avg MPC Cost", f"{np.mean(mpc_costs):.1f}", "#89dceb"))
+            lines.append(("Min / Max", f"{np.min(mpc_costs):.1f} / {np.max(mpc_costs):.1f}", "#89dceb"))
+        if solve_count > 0:
+            frate = feas_count / solve_count * 100
+            clr = "#a6e3a1" if frate >= 95 else "#fab387" if frate >= 80 else "#f38ba8"
+            lines.append(("Feasibility", f"{frate:.0f}%", clr))
+
+        if path_errs:
+            lines.append(("", "", ""))  # spacer
+            prmse = float(np.sqrt(np.mean(np.array(path_errs)**2)))
+            lines.append(("Path RMSE", f"{prmse:.3f} m", "#cba6f7"))
+            lines.append(("Path Max Err", f"{max(path_errs):.3f} m", "#cba6f7"))
+        if spd_rmse is not None:
+            lines.append(("Speed RMSE", f"{spd_rmse:.1f} km/h", "#cba6f7"))
+
+        if min_obs < float('inf'):
+            lines.append(("", "", ""))  # spacer
+            clr = "#f38ba8" if min_obs < 3.0 else "#fab387" if min_obs < 5.0 else "#a6e3a1"
+            lines.append(("Min NPC Dist", f"{min_obs:.1f} m", clr))
+        if _total_dist is not None:
+            lines.append(("Total Dist", f"{_total_dist:.1f} m", _TEXT_CLR))
+        if len(speed) > 0:
+            lines.append(("Final Speed", f"{speed[-1]:.1f} km/h", _TEXT_CLR))
+        if len(delays):
+            lines.append(("Avg Delay", f"{np.mean(delays)*1000:.0f} ms", _TEXT_CLR))
+
+        # Render text lines
+        y_pos = 0.92
+        for label, value, color in lines:
+            if label == "" and value == "":
+                y_pos -= 0.025  # spacer
+                continue
+            ax["met"].text(0.05, y_pos, label, fontsize=8, color="#a6adc8",
+                           va="top", transform=ax["met"].transAxes,
+                           fontfamily="monospace")
+            ax["met"].text(0.95, y_pos, value, fontsize=8, color=color,
+                           va="top", ha="right", transform=ax["met"].transAxes,
+                           fontfamily="monospace", fontweight="bold")
+            y_pos -= 0.055
+
+        # ── 12. Title ────────────────────────────────────────────────────────
         self._update_title(n_steps, n_miss, n_collisions, sim_dir)
 
         self.fig.canvas.draw_idle()
