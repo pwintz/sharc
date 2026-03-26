@@ -1,8 +1,26 @@
 #!/bin/bash
 # CARLA + SHARC Headless Experiment Runner
 # Run from the HOST machine — no monitor or X display required.
+# Starts a fresh CARLA server (ensuring deterministic physics), runs the
+# experiment, optionally records a video, and saves a dashboard image.
+#
 # Usage: ./run_offscreen_experiment.sh [--example NAME] [--config FILE]
-#        [--container NAME] [--user NAME] [--timeout SECS] [--log FILE]
+#        [--video] [--highres] [--container NAME] [--user NAME] [--timeout SECS] [--log FILE]
+#
+# Examples:
+#   ./run_offscreen_experiment.sh --config obstacle_constraint.json --video
+#   ./run_offscreen_experiment.sh --config leaderboard_dense_traffic.json --video
+#   ./run_offscreen_experiment.sh --config leaderboard_lead_vehicle_braking.json --video
+#   ./run_offscreen_experiment.sh --config leaderboard_pedestrian_crossing.json --video
+#   ./run_offscreen_experiment.sh --config leaderboard_vehicle_cutin.json --video
+#   ./run_offscreen_experiment.sh --config leaderboard_high_speed_avoidance.json --video
+#
+# Leaderboard scenarios (in examples/MPC_example/simulation_configs/):
+#   leaderboard_dense_traffic.json          - 20 vehicles, 5 walkers, heavy obstruction
+#   leaderboard_lead_vehicle_braking.json   - Lead vehicle hard braking, long horizon
+#   leaderboard_pedestrian_crossing.json    - 10 walkers, slow cautious driving
+#   leaderboard_vehicle_cutin.json          - 15 vehicles, lane-change cut-ins
+#   leaderboard_high_speed_avoidance.json   - High-speed obstacle avoidance, 25 m/s target
 
 set -euo pipefail
 
@@ -13,6 +31,8 @@ CONFIG_NAME="obstacle_constraint.json"
 CARLA_PORT=2000
 TIMEOUT=180
 LOG_FILE=""
+RECORD_VIDEO=0
+HIGHRES=0
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -24,8 +44,10 @@ while [[ $# -gt 0 ]]; do
         --user)      CONTAINER_USER="$2"; shift 2 ;;
         --timeout)   TIMEOUT="$2";        shift 2 ;;
         --log)       LOG_FILE="$2";       shift 2 ;;
+        --video)     RECORD_VIDEO=1;      shift ;;
+        --highres)   HIGHRES=1;            shift ;;
         -h|--help)
-            sed -n '2,5p' "$0" | sed 's/^# \?//'
+            sed -n '2,22p' "$0" | sed 's/^# \?//'
             exit 0 ;;
         *) die "Unknown option: $1" ;;
     esac
@@ -38,21 +60,27 @@ docker inspect "$CONTAINER" --format '{{.State.Running}}' 2>/dev/null | grep -q 
 
 echo "==> Container: $CONTAINER (user: $CONTAINER_USER)"
 echo "==> Example:   $EXAMPLE_NAME / $CONFIG_NAME"
+echo "==> Video:     $([ $RECORD_VIDEO -eq 1 ] && echo 'ENABLED (GPU)' || echo 'disabled')$([ $HIGHRES -eq 1 ] && echo ' [HIGH-RES 1280x720]' || true)"
 echo ""
 
 docker exec -i \
     -u "$CONTAINER_USER" \
     -e DISPLAY= \
-    -e SDL_VIDEODRIVER=offscreen \
     -e _EXP_EXAMPLE="$EXAMPLE_NAME" \
     -e _EXP_CONFIG="$CONFIG_NAME" \
     -e _EXP_PORT="$CARLA_PORT" \
     -e _EXP_TIMEOUT="$TIMEOUT" \
+    -e _EXP_VIDEO="$RECORD_VIDEO" \
+    -e _EXP_HIGHRES="$HIGHRES" \
     "$CONTAINER" bash -s <<'CONTAINER_SCRIPT'
 set -euo pipefail
 
 CARLA_ROOT=/home/workspace/carla_0.9.16
-EXAMPLE_DIR="/home/workspace/sharc/examples/${_EXP_EXAMPLE}"
+if [ ! -f "$CARLA_ROOT/CarlaUE4.sh" ]; then
+    CARLA_ROOT=/workspace
+fi
+SHARC_ROOT=/home/workspace/sharc
+EXAMPLE_DIR="${SHARC_ROOT}/examples/${_EXP_EXAMPLE}"
 CARLA_LOG="${EXAMPLE_DIR}/carla_server.log"
 
 source /opt/conda/etc/profile.d/conda.sh 2>/dev/null || true
@@ -60,42 +88,133 @@ conda activate carla 2>/dev/null || true
 
 echo "Running as: $(whoami)"
 
-# Kill stale CARLA
-pkill -f CarlaUE4 2>/dev/null || true
-sleep 2
-
-# [1/3] Start CARLA
+# ═══════════════════════════════════════════════════════════════════════
+# [1/5] Kill stale CARLA — fresh restart guarantees clean physics state
+#       (invalid substep settings from prior runs permanently corrupt
+#       CARLA's PhysX engine; only a restart fixes it)
+# ═══════════════════════════════════════════════════════════════════════
 echo ""
-echo "=== [1/3] Starting CARLA (headless, -nullrhi) ==="
-"$CARLA_ROOT/CarlaUE4.sh" -nullrhi -RenderOffScreen -nosound \
-    -carla-rpc-port="${_EXP_PORT}" > "$CARLA_LOG" 2>&1 &
+echo "=== [1/5] Stopping any existing CARLA instance ==="
+pkill -9 -f CarlaUE4 2>/dev/null || true
+pkill -9 -f Xvfb 2>/dev/null || true
+sleep 5
+# Ensure port is free
+elapsed_kill=0
+while python3 -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('localhost',${_EXP_PORT})); s.close()" 2>/dev/null; do
+    sleep 2; elapsed_kill=$((elapsed_kill+2))
+    if [ $elapsed_kill -ge 30 ]; then
+        echo "WARNING: Port ${_EXP_PORT} still in use after 30s"
+        break
+    fi
+    echo "  Waiting for port ${_EXP_PORT} to be released..."
+done
+
+# ═══════════════════════════════════════════════════════════════════════
+# [2/5] Start CARLA
+#   --video mode: xvfb-run + RenderOffScreen (GPU rendering for cameras)
+#   default:      -nullrhi (physics only, faster startup)
+# ═══════════════════════════════════════════════════════════════════════
+echo ""
+if [ "${_EXP_VIDEO}" = "1" ]; then
+    echo "=== [2/5] Starting CARLA (GPU via Xvfb — video recording enabled) ==="
+    xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24 +extension GLX" \
+        "$CARLA_ROOT/CarlaUE4.sh" -RenderOffScreen -nosound \
+        -carla-rpc-port="${_EXP_PORT}" > "$CARLA_LOG" 2>&1 &
+else
+    echo "=== [2/5] Starting CARLA (headless, -nullrhi) ==="
+    DISPLAY= "$CARLA_ROOT/CarlaUE4.sh" -nullrhi -RenderOffScreen -nosound \
+        -carla-rpc-port="${_EXP_PORT}" > "$CARLA_LOG" 2>&1 &
+fi
 CARLA_PID=$!
 echo "CARLA PID: $CARLA_PID | log: $CARLA_LOG"
 
-trap 'echo "Stopping CARLA..."; kill "$CARLA_PID" 2>/dev/null; pkill -f CarlaUE4 2>/dev/null; wait "$CARLA_PID" 2>/dev/null' EXIT INT TERM
+trap 'echo "Stopping CARLA..."; kill "$CARLA_PID" 2>/dev/null; pkill -f CarlaUE4 2>/dev/null; pkill -f Xvfb 2>/dev/null; wait "$CARLA_PID" 2>/dev/null' EXIT INT TERM
 
-# [2/3] Wait for RPC port
+# ═══════════════════════════════════════════════════════════════════════
+# [3/5] Wait for CARLA RPC port + GPU warmup
+# ═══════════════════════════════════════════════════════════════════════
 echo ""
-echo "=== [2/3] Waiting for CARLA on port ${_EXP_PORT} (timeout ${_EXP_TIMEOUT}s) ==="
+echo "=== [3/5] Waiting for CARLA on port ${_EXP_PORT} (timeout ${_EXP_TIMEOUT}s) ==="
 elapsed=0
 until python3 -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('localhost',${_EXP_PORT})); s.close()" 2>/dev/null; do
-    kill -0 "$CARLA_PID" 2>/dev/null || { echo "ERROR: CARLA died. Log:"; tail -40 "$CARLA_LOG"; exit 1; }
-    [[ $elapsed -lt $_EXP_TIMEOUT ]] || { echo "ERROR: Timeout after ${_EXP_TIMEOUT}s. Log:"; tail -40 "$CARLA_LOG"; exit 1; }
+    # Check if CARLA process tree is still alive (xvfb-run -> CarlaUE4.sh -> CarlaUE4-Linux-Shipping)
+    if ! kill -0 "$CARLA_PID" 2>/dev/null && ! pgrep -f CarlaUE4 >/dev/null 2>&1; then
+        echo "ERROR: CARLA died. Log:"
+        tail -40 "$CARLA_LOG"
+        exit 1
+    fi
+    if [ $elapsed -ge $_EXP_TIMEOUT ]; then
+        echo "ERROR: Timeout after ${_EXP_TIMEOUT}s. Log:"
+        tail -40 "$CARLA_LOG"
+        exit 1
+    fi
     sleep 3; elapsed=$((elapsed+3)); echo "  ${elapsed}s..."
 done
 echo "CARLA ready (${elapsed}s)"
 
-# [3/3] Run SHARC
+# GPU warmup: compile shaders + cache textures so first experiment run is deterministic
+if [ "${_EXP_VIDEO}" = "1" ]; then
+    echo "  Running GPU warmup..."
+    python3 "${EXAMPLE_DIR}/warmup_carla.py" </dev/null 2>&1 || echo "  (warmup skipped)"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════
+# [4/5] Run SHARC experiment
+# ═══════════════════════════════════════════════════════════════════════
 echo ""
-echo "=== [3/3] Running SHARC: ${_EXP_CONFIG} ==="
+echo "=== [4/5] Running SHARC: ${_EXP_CONFIG} ==="
 cd "$EXAMPLE_DIR"
-sharc --config_filename "${_EXP_CONFIG}"
+sharc --config_filename "${_EXP_CONFIG}" </dev/null
 
 echo ""
 echo "=== Saving dashboard image ==="
-python3 -m sharc.dashboard --save "$EXAMPLE_DIR"
+python3 -m sharc.dashboard --save "$EXAMPLE_DIR" </dev/null
+
+# ═══════════════════════════════════════════════════════════════════════
+# [4b] Compute experiment metrics
+# ═══════════════════════════════════════════════════════════════════════
+echo ""
+echo "=== Computing experiment metrics ==="
+LATEST_DIR="$EXAMPLE_DIR/latest"
+if [ -L "$LATEST_DIR" ]; then
+    METRICS_RESULT_DIR="$(readlink -f "$LATEST_DIR")"
+    # Find the sim sub-directory (serial-with-scarab, etc.)
+    METRICS_SIM_DIR="$(find "$METRICS_RESULT_DIR" -name 'experiment_data.json' -printf '%h\n' 2>/dev/null | head -1)"
+    if [ -n "$METRICS_SIM_DIR" ]; then
+        python3 "$EXAMPLE_DIR/compute_metrics.py" "$METRICS_SIM_DIR" </dev/null
+    else
+        echo "WARNING: No experiment_data.json found for metrics"
+    fi
+else
+    echo "WARNING: No 'latest' symlink — skipping metrics"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════
+# [5/5] Record video (if --video enabled)
+# ═══════════════════════════════════════════════════════════════════════
+if [ "${_EXP_VIDEO}" = "1" ]; then
+    echo ""
+    echo "=== [5/5] Recording experiment video ==="
+    LATEST_DIR="$EXAMPLE_DIR/latest"
+    if [ -L "$LATEST_DIR" ]; then
+        RESULT_DIR="$(readlink -f "$LATEST_DIR")"
+        VIDEO_ARGS="--fps 20"
+        if [ "${_EXP_HIGHRES}" = "1" ]; then
+            VIDEO_ARGS="$VIDEO_ARGS --highres"
+        fi
+        python3 "${EXAMPLE_DIR}/record_experiment_video.py" "$RESULT_DIR" \
+            $VIDEO_ARGS </dev/null 2>&1 || echo "WARNING: Video recording failed"
+    else
+        echo "WARNING: No 'latest' symlink found — skipping video"
+    fi
+else
+    echo ""
+    echo "=== [5/5] Video recording skipped (use --video to enable) ==="
+fi
 
 echo ""
 echo "=== DONE ==="
-[[ -L latest ]] && echo "Results: $EXAMPLE_DIR/$(readlink latest)"
+if [ -L latest ]; then
+    echo "Results: $(readlink -f latest)"
+fi
 CONTAINER_SCRIPT

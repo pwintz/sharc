@@ -204,61 +204,10 @@ void CarlaConstraintMPCController::calculateControl(int k, double t,
 
     state = x;
 
-    // --- Adapt reference speed to closest leading vehicle ----------------
+    // Reference speed: always use configured target.
+    // The hard collision-avoidance constraints force the MPC to
+    // decelerate naturally when an obstacle blocks the path.
     effective_target_speed = target_speed;
-    {
-        double px = x(0), py = x(1), psi = x(2);
-        double cos_psi = std::cos(psi), sin_psi = std::sin(psi);
-        for (int i = 0; i < n_obstacles; ++i) {
-            if (obstacles[i].x > SENTINEL_THRESHOLD) continue;
-            double dx = obstacles[i].x - px;
-            double dy = obstacles[i].y - py;
-            double lon = dx * cos_psi + dy * sin_psi;  // ahead if > 0
-            if (lon > 0) {
-                // Project obstacle velocity onto ego heading
-                double obs_fwd_speed = obstacles[i].vx * cos_psi
-                                     + obstacles[i].vy * sin_psi;
-                effective_target_speed = std::min(effective_target_speed,
-                                                  std::max(obs_fwd_speed, 0.0));
-            }
-        }
-    }
-
-    // --- Sticky hold: once stopped near obstacles, stay stopped -----------
-    if (sticky_hold) {
-        bool all_clear = true;
-        double px = x(0), py = x(1);
-        for (int i = 0; i < n_obstacles; ++i) {
-            if (obstacles[i].x > SENTINEL_THRESHOLD) continue;
-            double dx = px - obstacles[i].x;
-            double dy = py - obstacles[i].y;
-            double dist = std::sqrt(dx * dx + dy * dy);
-            double r_safe = ego_radius + obstacles[i].radius + safe_margin;
-            if (dist < 2.0 * r_safe) { all_clear = false; break; }
-        }
-        if (all_clear) {
-            sticky_hold = false;
-        } else {
-            control(0) = 0.0;
-            control(1) = 0.0;
-            int active_obs = 0;
-            for (int i = 0; i < n_obstacles; ++i)
-                if (obstacles[i].x < SENTINEL_THRESHOLD) ++active_obs;
-            std::cout << "[CarlaConstraintMPC] k=" << k
-                      << " STICKY_HOLD v=" << x(3)
-                      << " obs=" << active_obs << "/" << n_obstacles
-                      << std::endl;
-            latest_metadata.clear();
-            latest_metadata["k"] = k;
-            latest_metadata["controller"] = "CarlaConstraintMPCController";
-            latest_metadata["is_feasible"] = false;
-            latest_metadata["sticky_hold"] = true;
-            prev_accel = 0.0;
-            prev_steer = 0.0;
-            if (!state_file.empty()) save_state();
-            return;
-        }
-    }
 
     mpc_result = nlmpc.optimize(state, control);
 
@@ -271,10 +220,9 @@ void CarlaConstraintMPCController::calculateControl(int k, double t,
     if (!mpc_result.is_feasible) {
         double v = x(3);
         if (std::abs(v) < 0.1) {
-            // Already (nearly) stopped — hold position, engage sticky hold
+            // Already (nearly) stopped — hold position
             control(0) = 0.0;
             control(1) = 0.0;
-            if (active_obs > 0) sticky_hold = true;
         } else {
             // Still moving — hard brake
             control(0) = min_accel;
@@ -326,7 +274,7 @@ void CarlaConstraintMPCController::save_state() const {
     nlohmann::json s;
     s["prev_accel"]  = prev_accel;
     s["prev_steer"]  = prev_steer;
-    s["sticky_hold"] = sticky_hold;
+
     std::ofstream f(state_file);
     if (f.is_open()) f << s.dump(2);
 }
@@ -339,7 +287,7 @@ void CarlaConstraintMPCController::load_state() {
         f >> s;
         prev_accel   = s.value("prev_accel", 0.0);
         prev_steer   = s.value("prev_steer", 0.0);
-        sticky_hold  = s.value("sticky_hold", false);
+
     } catch (...) {}
 }
 
