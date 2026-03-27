@@ -261,7 +261,7 @@ class ScarabStatsReader:
 class ExecutionDrivenScarabRunner:
 
   def __init__(self, sim_dir='.'):
-    self.instruction_limit = int(1e9)
+    self.instruction_limit = int(1e11)
     self.heartbeat_interval = int(1e8) # How often to print progress (increased from 1e6 to reduce I/O overhead).
     self.sim_dir         = os.path.abspath(sim_dir)
     self.params_src_file = os.path.join(self.sim_dir, 'PARAMS.generated')

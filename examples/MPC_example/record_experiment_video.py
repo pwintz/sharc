@@ -430,7 +430,8 @@ def record_video(experiment_list_dir, fps=20, width=640, height=360,
     print(f"  Resolution: {width}x{height}")
 
     # ── Connect to CARLA ──────────────────────────────────────────────
-    client = carla.Client('localhost', 2000)
+    port = int(os.getenv('_EXP_PORT',  2010))
+    client = carla.Client('localhost', port)
     client.set_timeout(30.0)
     world = client.get_world()
 

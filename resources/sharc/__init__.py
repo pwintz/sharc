@@ -603,6 +603,10 @@ def run(example_dir:str, config_filename:str, fail_fast = False):
   assertFileExists(example_dir)
   
   experiment_list = ExperimentList(example_dir, config_filename, fail_fast)
+  run_dir_file = os.environ.get("SHARC_RUN_DIR_FILE")
+  if run_dir_file:
+    with open(run_dir_file, "w") as f:
+      f.write(experiment_list.experiment_list_dir + "\n")
   #----- CONFIGURE DEBUGGING LEVELS -----#
   debug_levels.set_from_dictionary(experiment_list.base_config["==== Debgugging Levels ===="])
 
