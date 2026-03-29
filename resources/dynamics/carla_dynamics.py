@@ -5,9 +5,18 @@ import carla
 import random
 import pygame
 import sys
+import os
+
+
+def _has_display():
+    """Return True if a graphical display is available."""
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
 
 
 def pygame_init(w=1280, h=720):
+    if not _has_display():
+        print("[CarlaDynamics] No display detected — running headless (no pygame window).")
+        return None
     pygame.init()
     display = pygame.display.set_mode((w, h), pygame.HWSURFACE | pygame.DOUBLEBUF)
     pygame.display.set_caption("CARLA Camera View")
@@ -42,6 +51,8 @@ class CameraManager:
         self.camera.listen(lambda data: self._on_image(data))
 
     def _on_image(self, image):
+        if not _has_display():
+            return
         # Convert raw BGRA -> RGB array for pygame
         img = np.frombuffer(image.raw_data, dtype=np.uint8)
         img = img.reshape((self.height, self.width, 4))
@@ -142,9 +153,13 @@ class CarlaDynamics(Dynamics):
             bp_lib, n_walkers
         )
 
-        # ---- Pygame display & camera --------------------------------- #
+        # ---- Pygame display & camera (skip in headless mode) ----------- #
         self.display = pygame_init()
-        self.camera_manager = CameraManager(self.world, self.vehicle)
+        if _has_display():
+            self.camera_manager = CameraManager(self.world, self.vehicle)
+        else:
+            self.camera_manager = None
+            print("[CarlaDynamics] Headless mode — camera window disabled.")
 
     def teardown(self):
         """Destroy all CARLA actors (NPCs, ego, camera) and quit pygame.
@@ -197,7 +212,8 @@ class CarlaDynamics(Dynamics):
             if hasattr(self, 'traffic_manager'):
                 self.traffic_manager.set_synchronous_mode(False)
 
-            pygame.quit()
+            if _has_display():
+                pygame.quit()
         except Exception as e:
             print(f"[CarlaDynamics] cleanup error: {e}")
 
@@ -322,10 +338,11 @@ class CarlaDynamics(Dynamics):
                 brake=brake
             ))
 
-            # --- NEW: Render camera frame ----------------------------------------
-            if self.camera_manager.surface is not None:
-                self.display.blit(self.camera_manager.surface, (0, 0))
-            pygame.display.flip()
+            # --- NEW: Render camera frame (skip when headless) ---------------
+            if self.display is not None and self.camera_manager is not None:
+                if self.camera_manager.surface is not None:
+                    self.display.blit(self.camera_manager.surface, (0, 0))
+                pygame.display.flip()
 
             # Logging Information (Bypassing stdout redirection to log file)
             log_msg = (

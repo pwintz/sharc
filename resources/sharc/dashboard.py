@@ -682,6 +682,12 @@ def main():
         default=1000,
         help="Plot refresh interval in milliseconds (default: 1000)",
     )
+    parser.add_argument(
+        "--save",
+        action="store_true",
+        help="Render the final dashboard and save it to the experiment directory "
+             "without opening a window (works headless).",
+    )
     args = parser.parse_args()
 
     example_dir = os.path.abspath(args.example_dir)
@@ -689,7 +695,7 @@ def main():
         print(f"[dashboard] ERROR: directory not found: {example_dir}", file=sys.stderr)
         sys.exit(1)
 
-    if not _HAS_DISPLAY:
+    if not _HAS_DISPLAY and not args.save:
         print("[dashboard] No display available (headless). Dashboard disabled.")
         sys.exit(0)
 
@@ -707,7 +713,12 @@ def main():
         sim_dir_override=args.sim_dir,
         interval_ms=args.interval,
     )
-    dash.run()
+
+    if args.save:
+        dash.update(0)          # render one frame from the completed experiment
+        dash.save_final_image()
+    else:
+        dash.run()
 
 
 if __name__ == "__main__":

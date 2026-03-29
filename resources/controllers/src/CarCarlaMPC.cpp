@@ -14,10 +14,11 @@
 #include <Eigen/Dense>
 
 
+
 static inline double wrapAngle(double a) {
     // wrap to [-pi, pi]
-    while (a >  M_PI) a -= 2.0*M_PI;
-    while (a < -M_PI) a += 2.0*M_PI;
+    while (a > M_PI) a -= 2.0 * M_PI;
+    while (a < -M_PI) a += 2.0 * M_PI;
     return a;
 }
 
@@ -109,9 +110,9 @@ static inline double distPointToSegSq(
 int CarCarlaMPC::closestIdxInWindow(const std::vector<Eigen::Vector2d>& wps,
         double px, double py,
         int last_idx) const
-    {
+{
     constexpr int W = 20; // search window (+/- W indices)
-    const int n = (int)wps.size();
+    const int n = static_cast<int>(wps.size());
     if (n == 0) return 0;
 
     last_idx = std::max(0, std::min(last_idx, n-1));
@@ -121,13 +122,18 @@ int CarCarlaMPC::closestIdxInWindow(const std::vector<Eigen::Vector2d>& wps,
     double best = 1e18;
     int best_i = last_idx;
     for (int i = i0; i <= i1; ++i) {
-    const double dx = px - wps[i].x();
-    const double dy = py - wps[i].y();
-    const double d2 = dx*dx + dy*dy;
-    if (d2 < best) { best = d2; best_i = i; }
+        const double dx = px - wps[i].x();
+        const double dy = py - wps[i].y();
+        const double d2 = dx*dx + dy*dy;
+        if (d2 < best) {
+            best = d2;
+            best_i = i;
+        }
     }
+
     return best_i;
 }
+
 double CarCarlaMPC::trackingObjfunc(
     const mpc::mat<prediction_horizon + 1, Tnx>& X,
     const mpc::mat<prediction_horizon + 1, Tnu>& U,
@@ -142,7 +148,7 @@ double CarCarlaMPC::trackingObjfunc(
     const int Nc = std::min<int>(CONTROL_HORIZON, Np); // use your compile-time constant
 
     const double q_e   = Q(0);
-    const double q_v   = Q(3);
+    const double q_v   = Q(3);  // velocity weight is Q[3] for [px, py, psi, v]
     const double v_ref = this->termVelocity;
 
     // copy waypoints thread-safely
@@ -171,7 +177,7 @@ double CarCarlaMPC::trackingObjfunc(
             A.x(), A.y(),
             B.x(), B.y());
 
-        const double ev = X(j,3) - v_ref;
+        const double ev = X(j,3) - v_ref;  // use velocity component
         J += q_e * ey2 + q_v * (ev * ev);
     }
 
@@ -200,8 +206,23 @@ void CarCarlaMPC::setup(const nlohmann::json &json_data){
     this->lr = json_data.at("system_parameters").at("lr").get<double>();
     this->lf = json_data.at("system_parameters").at("lf").get<double>();
     this->sample_time = json_data.at("system_parameters").at("sample_time").get<double>();
-    this-> termVelocity = json_data.at("controller_parameters").at("TerminalVelocity").get<double>();
-    n_waypoints = json_data.at("system_parameters").at("mpc_options").at("n_waypoints").get<int>();
+    this->termVelocity = json_data.at("controller_parameters").at("TerminalVelocity").get<double>();
+
+    // n_waypoints is provided by mpc_options; fallback to exogenous_input_dimension/2 when missing.
+    const auto &mpc_opts = json_data.at("system_parameters").at("mpc_options");
+    if (mpc_opts.contains("n_waypoints")) {
+        n_waypoints = mpc_opts.at("n_waypoints").get<int>();
+    } else if (json_data.at("system_parameters").contains("exogenous_input_dimension")) {
+        const int exo_dim = json_data.at("system_parameters").at("exogenous_input_dimension").get<int>();
+        n_waypoints = exo_dim / 2;
+        if (n_waypoints * 2 != exo_dim) {
+            throw std::runtime_error("exogenous_input_dimension is not even; cannot infer n_waypoints.");
+        }
+    } else {
+        throw std::runtime_error("n_waypoints missing in mpc_options and exogenous_input_dimension missing in system_parameters.");
+    }
+
+
     if (Tndu != 2 * n_waypoints) {
         std::ostringstream oss;
         oss << "TNDU must equal 2 * n_waypoints for CarCarlaMPC, got TNDU=" << Tndu
@@ -230,6 +251,12 @@ void CarCarlaMPC::setup(const nlohmann::json &json_data){
     auto jR  = jc.at("Rdiag");
     auto jRd = jc.at("Rd");
 
+    if (jQ.size() != Tnx) {
+        std::ostringstream oss;
+        oss << "controller_parameters.Q must have exactly " << Tnx << " elements, got " << jQ.size();
+        throw std::runtime_error(oss.str());
+    }
+
     for (int i=0; i<Tnx; ++i) {
         Q(i)  = jQ.at(i).get<double>();
     }
@@ -238,19 +265,21 @@ void CarCarlaMPC::setup(const nlohmann::json &json_data){
         Rd(i)    = jRd.at(i).get<double>();
     }
 
-    // nlmpc.setLoggerLevel(mpc::Logger::log_level::NORMAL);
-    nlmpc.setLoggerLevel(mpc::Logger::log_level::ALERT);
+    // nlmpc.setLoggerLevel(mpc::Logger::LogLevel::NORMAL);
+    nlmpc.setLoggerLevel(mpc::Logger::LogLevel::ALERT);
 
-    // nlmpc.setLoggerLevel(mpc::Logger::log_level::DEEP);
+    // nlmpc.setLoggerLevel(mpc::Logger::LogLevel::DEEP);
     nlmpc.setDiscretizationSamplingTime(this->sample_time);
 
     // Dynamics differential equation
-    // Evolve [ego_x, ego_y, psi, v]; waypoint states are exogenous.
+    // State vector: [x, y, psi, v]
+    //   x(0)=x, x(1)=y, x(2)=psi, x(3)=v
+    // The last entry is heading, the second to last is speed.
     nlmpc.setStateSpaceFunction(
         [this](mpc::cvec<Tnx>& dx,
-               const mpc::cvec<Tnx>& x,
-               const mpc::cvec<Tnu>& u,
-               const unsigned int&) {
+            const mpc::cvec<Tnx>& x,
+            const mpc::cvec<Tnu>& u,
+            const unsigned int&) {
             assert(u.size() == Tnu && "Control vector u has wrong dimension");
 
             if (!x.allFinite() || !u.allFinite()) {
@@ -266,10 +295,10 @@ void CarCarlaMPC::setup(const nlohmann::json &json_data){
             const double a    = u(0);
             const double beta = u(1);
 
-            dx(0) = v * std::cos(psi + beta);         // Ẋ
-            dx(1) = v * std::sin(psi + beta);         // Ẏ
-            dx(2) = (v / this->lr) * std::sin(beta);  // ψ̇
-            dx(3) = a;                                // v̇
+            dx(0) = v * std::cos(psi + beta);         // x_dot
+            dx(1) = v * std::sin(psi + beta);         // y_dot
+            dx(2) = (v / this->lr) * std::sin(beta);  // psi_dot
+            dx(3) = a;                                // v_dot
         });
 
     nlmpc.setObjectiveFunction(
@@ -279,7 +308,7 @@ void CarCarlaMPC::setup(const nlohmann::json &json_data){
             const mpc::mat<prediction_horizon + 1, Tnu>& U,
             const double& /*t*/)
         {
-            return this->trackingObjfunc(X, U, Q, Rdiag, Rd);
+            return this->paperObjfunc(X, U, Q, Rdiag, Rd);
             
         });
 
@@ -289,7 +318,6 @@ void CarCarlaMPC::setup(const nlohmann::json &json_data){
     });
 
     // --- pull MPC options -
-    const auto& mpc_opts = json_data.at("system_parameters").at("mpc_options");
     const int PRED_H = mpc_opts.at("prediction_horizon").get<int>();
     const int CTRL_H = mpc_opts.at("control_horizon").get<int>();
 
@@ -321,12 +349,12 @@ void CarCarlaMPC::setup(const nlohmann::json &json_data){
     auto require_size = [](const std::vector<double>& v,
             std::size_t expected,
             const std::string& name)
-        {
+    {
         if (v.size() != expected) {
-        std::ostringstream oss;
-        oss << "JSON vector '" << name << "' has size "
-        << v.size() << ", expected " << expected;
-        throw std::runtime_error(oss.str());
+            std::ostringstream oss;
+            oss << "JSON vector '" << name << "' has size "
+                << v.size() << ", expected " << expected;
+            throw std::runtime_error(oss.str());
         }
     };
     require_size(v_umin, Tnu, "constraints.umin");
@@ -352,31 +380,36 @@ void CarCarlaMPC::setup(const nlohmann::json &json_data){
     params.enable_warm_start  = mpc_opts.value("warm_start", true);
 
     nlmpc.setOptimizerParameters(params);
-
 }
 
-// double CarCarlaMPC::PIDVelocityControl(double curVel) {
-//     const double dt = sample_time;
-//     const double tarVel = termVelocity;
 
-//     const double error = tarVel - curVel;
-//     integral_error += error * dt;
-//     const double derivative_error = (error - prev_error) / dt;
 
-//     const double control_out = Kp * error + Ki * integral_error + Kd * derivative_error;
-//     prev_error = error;
-
-//     return control_out;
-// }
-
-void CarCarlaMPC::calculateControl(int k, double t, const xVec &x, const wVec &w){
+void CarCarlaMPC::calculateControl(int k, double t, const xVec &x, const wVec &w) {
+    // Use the spawned vehicle state, NOT any X0 from config file
     state = x;
-    if (control.size()!=Tnu) { control.resize(Tnu); control.setZero(); }
+
+    // Initialize control vector if needed
+    if (control.size() != Tnu) {
+        control.resize(Tnu);
+        control.setZero();
+    }
 
     // simple guards
-    auto finite = [](const auto& v){ for (int i=0;i<v.size();++i) if(!std::isfinite(v(i))) return false; return true; };
-    if (!finite(state))  throw std::runtime_error("state has NaN/Inf");
-    if (!finite(control)) std::cerr << "[warn] control had NaN/Inf, zeroed.\n";
+    auto finite = [](const auto& v) {
+        for (int i = 0; i < v.size(); ++i) {
+            if (!std::isfinite(v(i))) return false;
+        }
+        return true;
+    };
+
+    if (!finite(state)) {
+        throw std::runtime_error("state has NaN/Inf");
+    }
+
+    if (!finite(control)) {
+        std::cerr << "[warn] control had NaN/Inf, zeroed.\n";
+    }
+
     if (w.size() != Tndu) {
         std::ostringstream oss;
         oss << "waypoint vector has size " << w.size() << ", expected " << Tndu;
@@ -401,13 +434,19 @@ void CarCarlaMPC::calculateControl(int k, double t, const xVec &x, const wVec &w
     }
 
 
-     // one-line summaries
-     if (debug_level_ >= 1) {
-        auto v2s = [](const auto& v){
-            std::ostringstream oss; oss.setf(std::ios::fixed); oss<<std::setprecision(6);
-            for (int i=0;i<v.size();++i){ if(i) oss<<','; oss<<v(i); } return oss.str();
+    // one-line summaries
+    if (debug_level_ >= 1) {
+        auto v2s = [](const auto& v) {
+            std::ostringstream oss;
+            oss.setf(std::ios::fixed);
+            oss << std::setprecision(6);
+            for (int i = 0; i < v.size(); ++i) {
+                if (i) oss << ',';
+                oss << v(i);
+            }
+            return oss.str();
         };
-    
+
         std::cerr << "[NLMPC] state=" << v2s(state) << " control=" << v2s(control) << "\n";
     }
 
@@ -417,6 +456,7 @@ void CarCarlaMPC::calculateControl(int k, double t, const xVec &x, const wVec &w
         std::cerr << "[NLMPC] optimize() threw: " << e.what() << "\n";
         throw;
     }
+
 
     control = nlmpc_step_result.cmd;
 
@@ -432,17 +472,23 @@ void CarCarlaMPC::calculateControl(int k, double t, const xVec &x, const wVec &w
 
     // control(0) = PIDVelocityControl(x(2));
     latest_metadata.clear();
+    auto resultStatusToString = [](mpc::ResultStatus s) -> std::string {
+        switch (s) {
+            case mpc::ResultStatus::SUCCESS:       return "SUCCESS";
+            case mpc::ResultStatus::MAX_ITERATION: return "MAX_ITERATION";
+            case mpc::ResultStatus::INFEASIBLE:    return "INFEASIBLE";
+            case mpc::ResultStatus::ERROR:         return "ERROR";
+            default:                               return "UNKNOWN";
+        }
+    };
     latest_metadata["k"]                 = k;
     latest_metadata["t"]                 = t;
     latest_metadata["controller"]        = "CarCarlaMPC";
-    latest_metadata["iterations"]        = nlmpc_step_result.num_iterations;
     latest_metadata["solver_status"]     = nlmpc_step_result.solver_status;
     latest_metadata["solver_status_msg"] = nlmpc_step_result.solver_status_msg;
     latest_metadata["is_feasible"]       = nlmpc_step_result.is_feasible;
     latest_metadata["cost"]              = nlmpc_step_result.cost;
-    latest_metadata["constraint_error"]  = nlmpc_step_result.primal_residual;
-    latest_metadata["dual_residual"]     = nlmpc_step_result.dual_residual;
-    latest_metadata["status"]            = mpc::SolutionStats::resultStatusToString(nlmpc_step_result.status);
+    latest_metadata["status"]            = resultStatusToString(nlmpc_step_result.status);
 
     auto opt_seq = nlmpc.getOptimalSequence();
     std::vector<double> traj_x, traj_y;
@@ -456,6 +502,12 @@ void CarCarlaMPC::calculateControl(int k, double t, const xVec &x, const wVec &w
     latest_metadata["traj_y"] = traj_y;
 }
 
+// void CarCarlaMPC::logDebugInfo() const {
+//     std::cerr << "[DEBUG] Control inputs: a=" << control(0) << ", delta=" << control(1) << "\n";
+//     std::cerr << "[DEBUG] Optimization status: " << resultStatusToString(nlmpc_step_result.status) << "\n";
+//     std::cerr << "[DEBUG] Solver feasible: " << nlmpc_step_result.is_feasible << "\n";
+//     std::cerr << "[DEBUG] Cost: " << nlmpc_step_result.cost << "\n";
+// }
 
 // Register the controller
 REGISTER_CONTROLLER("CarCarlaMPC", CarCarlaMPC)

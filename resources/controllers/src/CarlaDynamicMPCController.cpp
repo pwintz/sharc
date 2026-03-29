@@ -146,11 +146,13 @@ void CarlaDynamicMPCController::setup(const nlohmann::json& json_data) {
 
 void CarlaDynamicMPCController::calculateControl(int k, double t,
                                            const xVec& x, const wVec& w) {
+    // Use the spawned vehicle state, NOT any X0 from config file
+    state = x;
+
     for (int i = 0; i < n_waypoints; ++i) {
         wp_x[i] = w(2 * i);
         wp_y[i] = w(2 * i + 1);
     }
-    state = x;
 
     mpc_result = nlmpc.optimize(state, control);
     control    = mpc_result.cmd;

@@ -19,7 +19,15 @@ import pygame
 import sys
 
 
+def _has_display():
+    """Return True if a graphical display is available."""
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
 def pygame_init(w=1280, h=720):
+    if not _has_display():
+        print("[CarlaMPCDynamics] No display detected — running headless (no pygame window).")
+        return None
     pygame.init()
     display = pygame.display.set_mode((w, h), pygame.HWSURFACE | pygame.DOUBLEBUF)
     pygame.display.set_caption("CARLA Camera View — MPC")
@@ -48,6 +56,8 @@ class CameraManager:
         self.camera.listen(lambda data: self._on_image(data))
 
     def _on_image(self, image):
+        if not _has_display():
+            return
         img = np.frombuffer(image.raw_data, dtype=np.uint8)
         img = img.reshape((self.height, self.width, 4))
         img = img[:, :, :3][:, :, ::-1]
@@ -97,7 +107,7 @@ class CarlaMPCDynamics(Dynamics):
         # ---- Connect to CARLA ---------------------------------------- #
         print("[CarlaMPCDynamics] Creating CARLA session …")
         self.client = carla.Client("localhost", 2000)
-        self.client.set_timeout(10.0)
+        self.client.set_timeout(60.0)   # generous timeout; nullrhi can be slow to settle
         self.world = self.client.get_world()
 
         # Reset to async mode first (in case previous run left sync on)
@@ -175,9 +185,17 @@ class CarlaMPCDynamics(Dynamics):
         self._sim_dir   = None
         self._extra_fh  = None
 
+<<<<<<< HEAD
         # ---- Pygame + camera ----------------------------------------- #
+=======
+        # ---- Pygame + camera (skip in headless mode) ----------------------- #
+>>>>>>> e0d1012975309ceebbb1c9c9acc5d6d10bd81911
         self.display = pygame_init()
-        self.camera_manager = CameraManager(self.world, self.vehicle)
+        if _has_display():
+            self.camera_manager = CameraManager(self.world, self.vehicle)
+        else:
+            self.camera_manager = None
+            print("[CarlaMPCDynamics] Headless mode — camera window disabled.")
 
         # Cache the CARLA map for waypoint queries
         self._carla_map = self.world.get_map()
@@ -485,12 +503,23 @@ class CarlaMPCDynamics(Dynamics):
                 brake=brake
             ))
 
+<<<<<<< HEAD
             # Render camera view
             if self.camera_manager.surface is not None:
                 self.display.blit(self.camera_manager.surface, (0, 0))
             # Draw waypoints + MPC trajectory + obstacles in CARLA 3D world
             self._draw_trajectory(x0, metadata, w.flatten())
             pygame.display.flip()
+=======
+            # Render camera view (skip when headless)
+            if self.display is not None and self.camera_manager is not None:
+                if self.camera_manager.surface is not None:
+                    self.display.blit(self.camera_manager.surface, (0, 0))
+                self._draw_trajectory(x0, metadata, w.flatten())
+                pygame.display.flip()
+            else:
+                self._draw_trajectory(x0, metadata, w.flatten())
+>>>>>>> e0d1012975309ceebbb1c9c9acc5d6d10bd81911
 
             # Logging
             vel = self.vehicle.get_velocity()
@@ -551,21 +580,28 @@ class CarlaMPCDynamics(Dynamics):
             except Exception:
                 pass
             self._extra_fh = None
+<<<<<<< HEAD
         # Stop and destroy collision sensor
+=======
+        # Stop and destroy collision sensor first (stops the sensor stream)
+>>>>>>> e0d1012975309ceebbb1c9c9acc5d6d10bd81911
         if getattr(self, '_collision_sensor', None) is not None:
             try:
                 self._collision_sensor.stop()
                 self._collision_sensor.destroy()
+<<<<<<< HEAD
             except Exception:
                 pass
+=======
+                print("[CarlaMPCDynamics] Collision sensor stopped and destroyed.")
+            except Exception as e:
+                print(f"[CarlaMPCDynamics] Warning: collision sensor cleanup: {e}")
+>>>>>>> e0d1012975309ceebbb1c9c9acc5d6d10bd81911
             self._collision_sensor = None
         try:
             for ctrl in getattr(self, 'npc_walker_controllers', []):
                 try: ctrl.stop()
                 except Exception: pass
-
-            if hasattr(self, 'world') and self.world is not None:
-                self.world.tick()
 
             if hasattr(self, 'camera_manager') and self.camera_manager is not None:
                 self.camera_manager.destroy()
@@ -594,7 +630,13 @@ class CarlaMPCDynamics(Dynamics):
             if hasattr(self, 'traffic_manager'):
                 self.traffic_manager.set_synchronous_mode(False)
 
-            pygame.quit()
+            if _has_display():
+                pygame.quit()
+
+            # Give CARLA time to flush sensor streams and settle before the
+            # next session connects (avoids "Invalid session: no stream" spam)
+            import time as _time; _time.sleep(2.0)
+            print("[CarlaMPCDynamics] Teardown complete.")
         except Exception as e:
             print(f"[CarlaMPCDynamics] cleanup error: {e}")
 
