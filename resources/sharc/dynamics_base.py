@@ -29,6 +29,19 @@ class Dynamics(ABC):
       """
       pass
 
+    def prepare_for_batch(self, first_time_index: int, sim_config: dict):
+      """Called by plant_runner before each batch begins.
+
+      Gives the dynamics a chance to adjust internal state when the batch's
+      starting time-step differs from the dynamics' current position (e.g.
+      after a rollback due to a missed computation deadline).
+
+      For purely mathematical dynamics this is a no-op.  Simulator-backed
+      dynamics (e.g. CARLA) override this to reset the world and fast-forward
+      the simulation to the requested time-step.
+      """
+      pass
+
     def teardown(self):
       """Release resources acquired in setup_system().
 

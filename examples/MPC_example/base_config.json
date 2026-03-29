@@ -193,7 +193,11 @@
         "seed": 30,
         "npcs": {
             "n_vehicles": 0,
-            "n_walkers": 0
+            "n_walkers": 0,
+            "road_vehicles": 0,
+            "road_spacing": 25.0,
+            "road_speed_pct": 50,
+            "road_stop_after_s": null
         }
     },
     "PARAMS_base_file": "PARAMS.base",
