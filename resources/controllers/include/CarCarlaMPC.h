@@ -10,6 +10,7 @@ using namespace mpc;
 
 #include "nlohmann/json.hpp"
 #include <mutex>
+#include <string>
 #include <vector>
 
 // This code requires the following preprocessor variables to be defined:
@@ -46,8 +47,11 @@ private:
     double input_cost_weight;
     int debug_level_ = 0;
     double termVelocity;
+    std::string objective_mode_ = "paper";
     // MPC Computation Result
     Result<Tnu> nlmpc_step_result;
+    uVec last_feasible_control_ = uVec::Zero();
+    bool has_last_feasible_control_ = false;
 
     NLMPC<Tnx, Tnu, Tny, prediction_horizon, control_horizon, ineq_c, eq_c> nlmpc;
 

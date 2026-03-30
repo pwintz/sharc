@@ -26,8 +26,8 @@ set -euo pipefail
 
 CONTAINER="carla-sharc-yasin5"
 CONTAINER_USER="admin"
-EXAMPLE_NAME="MPC_example"
-CONFIG_NAME="obstacle_constraint.json"
+EXAMPLE_NAME="CarCarlaMPC_example"
+CONFIG_NAME="base_config.json"
 CARLA_PORT=2000
 TIMEOUT=180
 LOG_FILE=""
@@ -81,7 +81,13 @@ if [ ! -f "$CARLA_ROOT/CarlaUE4.sh" ]; then
 fi
 SHARC_ROOT=/home/workspace/sharc
 EXAMPLE_DIR="${SHARC_ROOT}/examples/${_EXP_EXAMPLE}"
-CARLA_LOG="${EXAMPLE_DIR}/carla_server.log"
+CARLA_LOG="/tmp/carla_server.log"
+
+# Verify the example directory exists
+if [ ! -d "$EXAMPLE_DIR" ]; then
+    echo "ERROR: Example directory does not exist: $EXAMPLE_DIR"
+    exit 1
+fi
 
 source /opt/conda/etc/profile.d/conda.sh 2>/dev/null || true
 conda activate carla 2>/dev/null || true
@@ -116,6 +122,11 @@ done
 # ═══════════════════════════════════════════════════════════════════════
 echo ""
 if [ "${_EXP_VIDEO}" = "1" ]; then
+    if ! command -v xvfb-run >/dev/null 2>&1; then
+        echo "ERROR: --video requires 'xvfb-run', but it is not installed in the container."
+        echo "Install package 'xvfb' inside ${CONTAINER}, then rerun this command."
+        exit 1
+    fi
     echo "=== [2/5] Starting CARLA (GPU via Xvfb — video recording enabled) ==="
     xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24 +extension GLX" \
         "$CARLA_ROOT/CarlaUE4.sh" -RenderOffScreen -nosound \

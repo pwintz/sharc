@@ -18,6 +18,7 @@ fi
 IMAGE_NAME="carla-sharc"
 CONTAINER_NAME="carla-sharc-yasin5"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+EXPECTED_EXAMPLES_MOUNT="$SCRIPT_DIR/examples"
 
 # Colors
 GREEN='\033[0;32m'
@@ -50,16 +51,41 @@ else
     echo -e "  If you are on a remote server, use 'ssh -X' or 'ssh -Y'."
 fi
 
+recreate_container() {
+    local reason="$1"
+    echo -e "${YELLOW}Container '$CONTAINER_NAME' needs recreation: $reason${NC}"
+    echo -e "${YELLOW}Stopping and removing stale container...${NC}"
+    docker rm -f "$CONTAINER_NAME" > /dev/null
+    echo -e "${GREEN}✓${NC} Stale container removed."
+}
+
+check_mount_mismatch() {
+    local actual_mount
+    actual_mount="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/home/workspace/sharc/examples"}}{{.Source}}{{end}}{{end}}' "$CONTAINER_NAME" 2>/dev/null || true)"
+    if [ -n "$actual_mount" ] && [ "$actual_mount" != "$EXPECTED_EXAMPLES_MOUNT" ]; then
+        recreate_container "examples mount points to '$actual_mount' instead of '$EXPECTED_EXAMPLES_MOUNT'"
+        return 0
+    fi
+    return 1
+}
+
 # Check if container exists and is running
 if docker ps -q -f name="$CONTAINER_NAME" | grep -q .; then
+    if check_mount_mismatch; then
+        echo ""
+    else
     echo -e "${YELLOW}Container '$CONTAINER_NAME' is already running. Attaching to it...${NC}"
     echo ""
     docker exec -it -u "$(id -u):$(id -g)" "$CONTAINER_NAME" /bin/bash
     exit 0
+    fi
 fi
 
 # Check if container exists but is stopped
 if docker ps -aq -f name="$CONTAINER_NAME" | grep -q .; then
+    if check_mount_mismatch; then
+        echo ""
+    else
     echo -e "${YELLOW}Container '$CONTAINER_NAME' exists but is stopped. Starting it...${NC}"
     docker start "$CONTAINER_NAME" > /dev/null
     echo -e "${GREEN}✓${NC} Container started."
@@ -67,6 +93,7 @@ if docker ps -aq -f name="$CONTAINER_NAME" | grep -q .; then
     echo ""
     docker exec -it -u "$(id -u):$(id -g)" "$CONTAINER_NAME" /bin/bash
     exit 0
+    fi
 fi
 
 # Container doesn't exist, create a new one
@@ -110,4 +137,3 @@ docker run -it \
     -v "$SCRIPT_DIR/run_offscreen_experiment.sh":/home/workspace/sharc/run_offscreen_experiment.sh \
     -v "$SCRIPT_DIR/experiment_run.json":/home/workspace/sharc/experiment_run.json \
     "$IMAGE_NAME" 
-

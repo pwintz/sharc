@@ -1,0 +1,32 @@
+{
+  "label": "restore-mar25-style",
+  "u0": [5, 0],
+  "system_parameters": {
+    "lr": 1.738,
+    "lf": 1.738,
+    "constraints": {
+      "umin": [-2.0, -0.5],
+      "umax": [2.0, 0.5],
+      "xmin": [-1000000.0, -1000000.0, -1000000.0, 0.0],
+      "xmax": [1000000.0, 1000000.0, 1000000.0, 40.0]
+    },
+    "mpc_options": {
+      "prediction_horizon": 20,
+      "control_horizon": 10,
+      "n_waypoints": 40,
+      "warm_start": true,
+      "params.maximum_iteration": 500,
+      "params.relative_ftol": 0.05,
+      "params.relative_xtol": 0.05,
+      "params.absolute_ftol": 0.05,
+      "params.absolute_xtol": 0.05,
+      "params.hard_constraints": true
+    }
+  },
+  "controller_parameters": {
+    "TerminalVelocity": 12,
+    "Q": [50, 0, 0, 20],
+    "Rdiag": [0.1, 0.05],
+    "Rd": [4, 100]
+  }
+}

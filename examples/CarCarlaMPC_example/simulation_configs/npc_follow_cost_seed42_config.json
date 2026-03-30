@@ -1,0 +1,76 @@
+{
+  "label": "npc-follow-cost-seed42",
+  "system_parameters": {
+    "controller_type": "CarlaNPCFollowMPCController",
+    "exogenous_input_dimension": 95,
+    "target_speed": 10.0,
+    "w_names": [
+      "wp_x_1","wp_y_1","wp_x_2","wp_y_2","wp_x_3","wp_y_3",
+      "wp_x_4","wp_y_4","wp_x_5","wp_y_5","wp_x_6","wp_y_6",
+      "wp_x_7","wp_y_7","wp_x_8","wp_y_8","wp_x_9","wp_y_9",
+      "wp_x_10","wp_y_10","wp_x_11","wp_y_11","wp_x_12","wp_y_12",
+      "wp_x_13","wp_y_13","wp_x_14","wp_y_14","wp_x_15","wp_y_15",
+      "wp_x_16","wp_y_16","wp_x_17","wp_y_17","wp_x_18","wp_y_18",
+      "wp_x_19","wp_y_19","wp_x_20","wp_y_20","wp_x_21","wp_y_21",
+      "wp_x_22","wp_y_22","wp_x_23","wp_y_23","wp_x_24","wp_y_24",
+      "wp_x_25","wp_y_25","wp_x_26","wp_y_26","wp_x_27","wp_y_27",
+      "wp_x_28","wp_y_28","wp_x_29","wp_y_29","wp_x_30","wp_y_30",
+      "wp_x_31","wp_y_31","wp_x_32","wp_y_32","wp_x_33","wp_y_33",
+      "wp_x_34","wp_y_34","wp_x_35","wp_y_35","wp_x_36","wp_y_36",
+      "wp_x_37","wp_y_37","wp_x_38","wp_y_38","wp_x_39","wp_y_39",
+      "wp_x_40","wp_y_40",
+      "obs1_x","obs1_y","obs1_vx","obs1_vy","obs1_r",
+      "obs2_x","obs2_y","obs2_vx","obs2_vy","obs2_r",
+      "obs3_x","obs3_y","obs3_vx","obs3_vy","obs3_r"
+    ],
+    "mpc_options": {
+      "prediction_horizon": 15,
+      "control_horizon": 10,
+      "wheelbase": 2.87,
+      "n_waypoints": 40,
+      "waypoint_spacing": 1.0,
+      "warm_start": true,
+      "n_obstacles": 3,
+      "detection_radius": 30.0,
+      "cost_weights": {
+        "q_path": 1.0,
+        "q_speed": 4.0,
+        "q_follow_gap": 2.0,
+        "r_accel": 0.35,
+        "r_steer": 3.0,
+        "r_jerk_v": 2.5,
+        "r_jerk_yaw": 80.0,
+        "gamma": 0.95,
+        "ego_radius": 2.5,
+        "safe_margin": 1.75,
+        "lane_half_width": 2.0,
+        "follow_time_gap": 0.0,
+        "min_follow_distance": 5.0,
+        "target_speed_alpha": 0.4,
+        "lead_engage_distance": 30.0
+      },
+      "input_limits": {
+        "max_accel": 1.5,
+        "min_accel": -3.0,
+        "max_steer": 0.35,
+        "min_steer": -0.35
+      }
+    }
+  },
+  "controller_parameters": {
+    "cost_function": "npc_follow_constraint",
+    "TerminalVelocity": 10.0,
+    "TerminalVelocityUnits": "mps"
+  },
+  "carla": {
+    "seed": 40,
+    "npcs": {
+      "n_vehicles": 1,
+      "n_walkers": 0,
+      "road_vehicles": 1,
+      "road_spacing": 22.0,
+      "road_speed_pct": 40,
+      "road_stop_after_s": 999.0
+    }
+  }
+}

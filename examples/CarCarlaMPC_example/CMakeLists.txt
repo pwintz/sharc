@@ -63,6 +63,7 @@ set(SOURCES ${CONTROLLERS_SRC}/CarCarlaMPC.cpp
             ${CONTROLLERS_SRC}/CarlaDynamicMPCController.cpp
             ${CONTROLLERS_SRC}/CarlaObstacleMPCController.cpp
             ${CONTROLLERS_SRC}/CarlaConstraintMPCController.cpp
+            ${CONTROLLERS_SRC}/CarlaNPCFollowMPCController.cpp
             ${CONTROLLERS_SRC}/controller.cpp
             ${CONTROLLERS_SRC}/main_controller.cpp)
 

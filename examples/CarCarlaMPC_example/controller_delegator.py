@@ -24,6 +24,8 @@ class ControllerExecutableProvider(CmakeControllerExecutableProvider):
         input_dimension = build_config["system_parameters"]["input_dimension"]
         exogenous_input_dimension = build_config["system_parameters"]["exogenous_input_dimension"]
         output_dimension = build_config["system_parameters"]["output_dimension"]
+        n_obstacles = mpc_options.get("n_obstacles", 0)
+        n_ineq = prediction_horizon * (n_obstacles + 1) if n_obstacles > 0 else 0
 
         executable_name = "main_controller_CarCarlaMPC_v1"
 
@@ -40,6 +42,7 @@ class ControllerExecutableProvider(CmakeControllerExecutableProvider):
             f"-DTNU={input_dimension}",
             f"-DTNDU={exogenous_input_dimension}",
             f"-DTNY={output_dimension}",
+            f"-DTNIEQ={n_ineq}",
             f"-DUSE_DYNAMORIO={'ON' if use_dynamorio else 'OFF'}",
         ]
 

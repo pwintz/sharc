@@ -95,6 +95,88 @@ class CarlaMPCDynamics(Dynamics):
     def __init__(self, config):
         super().__init__(config)
 
+    @staticmethod
+    def _wrap_angle(angle_rad):
+        while angle_rad > math.pi:
+            angle_rad -= 2.0 * math.pi
+        while angle_rad < -math.pi:
+            angle_rad += 2.0 * math.pi
+        return angle_rad
+
+    def _choose_reference_successor(self, wp, candidates):
+        """Choose a deterministic successor when CARLA offers multiple branches."""
+        if not candidates:
+            return None
+        if len(candidates) == 1:
+            return candidates[0]
+
+        current_tf = wp.transform
+        current_yaw = math.radians(current_tf.rotation.yaw)
+        current_loc = current_tf.location
+
+        def candidate_key(candidate):
+            tf = candidate.transform
+            yaw = math.radians(tf.rotation.yaw)
+            heading_error = abs(self._wrap_angle(yaw - current_yaw))
+            same_lane_penalty = 0 if candidate.lane_id == wp.lane_id else 1
+            same_road_penalty = 0 if candidate.road_id == wp.road_id else 1
+            lateral_offset = abs(
+                -(tf.location.x - current_loc.x) * math.sin(current_yaw) +
+                (tf.location.y - current_loc.y) * math.cos(current_yaw)
+            )
+            return (
+                same_lane_penalty,
+                same_road_penalty,
+                heading_error,
+                lateral_offset,
+                tf.location.x,
+                tf.location.y,
+            )
+
+        return min(candidates, key=candidate_key)
+
+    def _build_reference_route(self):
+        """Precompute a stable forward route from the ego spawn lane."""
+        start_wp = self._carla_map.get_waypoint(
+            self.vehicle.get_transform().location,
+            project_to_road=True,
+            lane_type=carla.LaneType.Driving,
+        )
+        if start_wp is None:
+            raise RuntimeError("Failed to build reference route: ego vehicle is not on a driving lane.")
+
+        route_len = max(self.n_wp * 25, 1000)
+        route = [(start_wp.transform.location.x, start_wp.transform.location.y)]
+        wp = start_wp
+
+        for _ in range(route_len - 1):
+            nxt = self._choose_reference_successor(wp, wp.next(self.wp_spacing))
+            if nxt is None:
+                route.append(route[-1])
+                continue
+            wp = nxt
+            route.append((wp.transform.location.x, wp.transform.location.y))
+
+        self._reference_route = route
+        self._reference_route_idx = 0
+
+    def _closest_reference_route_index(self, location):
+        if not getattr(self, "_reference_route", None):
+            return 0
+
+        best_idx = 0
+        best_dist_sq = float("inf")
+        for i, (wx, wy) in enumerate(self._reference_route):
+            dx = location.x - wx
+            dy = location.y - wy
+            dist_sq = dx * dx + dy * dy
+            if dist_sq < best_dist_sq:
+                best_dist_sq = dist_sq
+                best_idx = i
+
+        self._reference_route_idx = best_idx
+        return best_idx
+
     # ------------------------------------------------------------------ #
     #  Lifecycle                                                          #
     # ------------------------------------------------------------------ #
@@ -209,11 +291,7 @@ class CarlaMPCDynamics(Dynamics):
         self._sim_dir   = None
         self._extra_fh  = None
 
-<<<<<<< HEAD
-        # ---- Pygame + camera ----------------------------------------- #
-=======
         # ---- Pygame + camera (skip in headless mode) ----------------------- #
->>>>>>> e0d1012975309ceebbb1c9c9acc5d6d10bd81911
         self.display = pygame_init()
         if _has_display():
             self.camera_manager = CameraManager(self.world, self.vehicle)
@@ -252,6 +330,7 @@ class CarlaMPCDynamics(Dynamics):
         # Validated: safety-critical scenarios achieve 0.000 m ego deviation
         # over 512 steps with warmup + replay.
         self._do_warmup_reset()
+        self._build_reference_route()
 
     def _do_warmup_reset(self):
         """Perform one dummy reset cycle to stabilise CARLA's internal state."""
@@ -640,23 +719,30 @@ class CarlaMPCDynamics(Dynamics):
         collision-free reference trajectory even when an obstacle blocks the road.
         """
         transform = self.vehicle.get_transform()
-        wp = self._carla_map.get_waypoint(transform.location)
+        route_idx = self._closest_reference_route_index(transform.location)
         waypoints = []
-        for _ in range(self.n_wp):
-            nxt = wp.next(self.wp_spacing)
-            if not nxt:
-                # Road ends — repeat last known waypoint
-                waypoints.append((wp.transform.location.x, wp.transform.location.y))
-                continue
-            wp = nxt[0]
-            waypoints.append((wp.transform.location.x, wp.transform.location.y))
+        for offset in range(1, self.n_wp + 1):
+            idx = min(route_idx + offset, len(self._reference_route) - 1)
+            waypoints.append(self._reference_route[idx])
 
         # ---- Filter blocked waypoints --------------------------------- #
+        # The generic obstacle-avoidance controller benefits from a truncated
+        # path once the lane ahead is blocked. The follow-MPC variant needs
+        # the unmodified centerline so it can still project the lead vehicle
+        # onto the route and regulate following distance instead of treating
+        # the lead as "off path".
+        controller_type = (
+            self.config.get("system_parameters", {}).get("controller_type", "")
+        )
+        should_truncate_waypoints = (
+            self.n_obs > 0 and controller_type != "CarlaNPCFollowMPCController"
+        )
+
         # Fetch in-lane obstacles (same filtering as in _get_nearby_obstacles).
         # Any waypoint whose distance to an obstacle centroid is less than
         # ego_radius + obs_radius + safe_margin is replaced by the last
         # safe waypoint, keeping the reference path out of blocked zones.
-        if self.n_obs > 0:
+        if should_truncate_waypoints:
             mpc_opts   = self.config["system_parameters"]["mpc_options"]
             weights    = mpc_opts.get("cost_weights", {})
             ego_r      = weights.get("ego_radius",  2.5)
@@ -718,25 +804,28 @@ class CarlaMPCDynamics(Dynamics):
     # ------------------------------------------------------------------ #
 
     def _get_nearby_obstacles(self):
-        """Return up to N_obs closest dynamic actors within detection_radius.
+        """Return up to N_obs nearby actors along the ego reference route.
 
-        Only includes obstacles whose lateral offset from the ego's forward
-        direction is within ~2.5 m (roughly one lane width), so adjacent-lane
-        traffic is filtered out.
+        Vehicles do not need to be moving to count as obstacles. Actors are
+        filtered by distance to the future route corridor instead of only the
+        ego's instantaneous heading, which makes stopped lead vehicles much
+        more stable to detect on curves and during yaw transients.
 
         Returns list of (x, y, vx, vy, bounding_radius) tuples sorted by
-        ascending distance to the ego vehicle.
+        route progress ahead of the ego.
         """
         ego_tf  = self.vehicle.get_transform()
         ego_loc = ego_tf.location
-        ego_yaw = math.radians(ego_tf.rotation.yaw)
         ego_id  = self.vehicle.id
+        route_idx = self._closest_reference_route_index(ego_loc)
+        route_window_end = min(route_idx + max(self.n_wp * 2, 40),
+                               len(self._reference_route) - 1)
+        route_window = self._reference_route[route_idx:route_window_end + 1]
 
-        # Unit vectors: forward and rightward
-        fwd_x =  math.cos(ego_yaw)
-        fwd_y =  math.sin(ego_yaw)
+        if len(route_window) < 2:
+            return []
 
-        LATERAL_FILTER = 2.5  # metres — discard obstacles farther sideways
+        corridor_half_width = 3.5
 
         candidates = []
         for actor in self.world.get_actors():
@@ -753,21 +842,43 @@ class CarlaMPCDynamics(Dynamics):
             if dist > self.detection_radius:
                 continue
 
-            # Lateral offset relative to ego heading (cross-product magnitude)
-            lat_offset = abs(-dx * fwd_y + dy * fwd_x)
-            if lat_offset > LATERAL_FILTER:
-                continue  # skip adjacent-lane traffic
+            best_idx = None
+            best_lat = float("inf")
+            for i in range(len(route_window) - 1):
+                ax, ay = route_window[i]
+                bx, by = route_window[i + 1]
+                abx = bx - ax
+                aby = by - ay
+                ab2 = abx * abx + aby * aby
+                if ab2 < 1e-9:
+                    continue
+                apx = loc.x - ax
+                apy = loc.y - ay
+                tau = max(0.0, min(1.0, (apx * abx + apy * aby) / ab2))
+                proj_x = ax + tau * abx
+                proj_y = ay + tau * aby
+                lat = math.hypot(loc.x - proj_x, loc.y - proj_y)
+                if lat < best_lat:
+                    best_lat = lat
+                    best_idx = i
+
+            if best_idx is None or best_lat > corridor_half_width:
+                continue
+
+            route_progress = route_idx + best_idx
+            if route_progress < route_idx:
+                continue
 
             vel  = actor.get_velocity()
             ext  = actor.bounding_box.extent
             # Top-down bounding circle radius
             radius = math.sqrt(ext.x ** 2 + ext.y ** 2)
 
-            candidates.append((dist, loc.x, loc.y, vel.x, vel.y, radius))
+            candidates.append((route_progress, best_lat, dist, loc.x, loc.y, vel.x, vel.y, radius))
 
-        candidates.sort(key=lambda c: c[0])
+        candidates.sort(key=lambda c: (c[0], c[1], c[2]))
         return [(ox, oy, ovx, ovy, r)
-                for (_, ox, oy, ovx, ovy, r) in candidates[:self.n_obs]]
+                for (_, _, _, ox, oy, ovx, ovy, r) in candidates[:self.n_obs]]
 
     # ------------------------------------------------------------------ #
     #  Visualization                                                       #
@@ -896,14 +1007,6 @@ class CarlaMPCDynamics(Dynamics):
         for step in range(steps):
             self.vehicle.apply_control(control)
 
-<<<<<<< HEAD
-            # Render camera view
-            if self.camera_manager.surface is not None:
-                self.display.blit(self.camera_manager.surface, (0, 0))
-            # Draw waypoints + MPC trajectory + obstacles in CARLA 3D world
-            self._draw_trajectory(x0, metadata, w.flatten())
-            pygame.display.flip()
-=======
             # Render camera view (skip when headless)
             if self.display is not None and self.camera_manager is not None:
                 if self.camera_manager.surface is not None:
@@ -912,7 +1015,6 @@ class CarlaMPCDynamics(Dynamics):
                 pygame.display.flip()
             else:
                 self._draw_trajectory(x0, metadata, w.flatten())
->>>>>>> e0d1012975309ceebbb1c9c9acc5d6d10bd81911
 
             # Logging
             vel = self.vehicle.get_velocity()
@@ -982,23 +1084,14 @@ class CarlaMPCDynamics(Dynamics):
             except Exception:
                 pass
             self._extra_fh = None
-<<<<<<< HEAD
-        # Stop and destroy collision sensor
-=======
         # Stop and destroy collision sensor first (stops the sensor stream)
->>>>>>> e0d1012975309ceebbb1c9c9acc5d6d10bd81911
         if getattr(self, '_collision_sensor', None) is not None:
             try:
                 self._collision_sensor.stop()
                 self._collision_sensor.destroy()
-<<<<<<< HEAD
-            except Exception:
-                pass
-=======
                 print("[CarlaMPCDynamics] Collision sensor stopped and destroyed.")
             except Exception as e:
                 print(f"[CarlaMPCDynamics] Warning: collision sensor cleanup: {e}")
->>>>>>> e0d1012975309ceebbb1c9c9acc5d6d10bd81911
             self._collision_sensor = None
         try:
             for ctrl in getattr(self, 'npc_walker_controllers', []):

@@ -121,6 +121,33 @@ def load_data(sim_dir: str):
         return None
 
 
+def _speed_state_to_kph_scale(cfg: dict) -> float:
+    dynamics_name = cfg.get("dynamics_class_name", "")
+    controller_type = cfg.get("system_parameters", {}).get("controller_type", "")
+    if dynamics_name == "CarlaMPCDynamics" or controller_type == "CarCarlaMPC":
+        return 3.6
+    return 1.0
+
+
+def _target_speed_kph_from_config(cfg: dict):
+    controller_params = cfg.get("controller_parameters", {})
+    if "TerminalVelocity" in controller_params:
+        target = float(controller_params.get("TerminalVelocity"))
+        units = str(controller_params.get("TerminalVelocityUnits", "mps")).lower()
+        if units in ("mps", "m/s"):
+            return target * 3.6
+        return target
+
+    system_params = cfg.get("system_parameters", {})
+    target = system_params.get("target_speed", None)
+    if target is None:
+        return None
+    units = str(system_params.get("target_speed_units", "kmph")).lower()
+    if units in ("mps", "m/s"):
+        return float(target) * 3.6
+    return float(target)
+
+
 def extract_steps(raw: dict):
     """
     From the raw incremental JSON dict, extract one sample per completed
@@ -466,7 +493,8 @@ class Dashboard:
                 "sample_time": sp.get("sample_time", 0.1),
                 "x_names":     sp.get("x_names", ["x","y","yaw","speed","wp_x","wp_y"]),
                 "u_names":     sp.get("u_names", ["throttle","steer","brake"]),
-                "target_speed":sp.get("target_speed", None),
+                "target_speed":_target_speed_kph_from_config(cfg),
+                "speed_to_kph": _speed_state_to_kph_scale(cfg),
                 "label":       cfg.get("label", ""),
                 "mpc_opts": {
                     "max_accel": lims.get("max_accel",  1.0),
@@ -495,10 +523,11 @@ class Dashboard:
         T         = float(self._config_cache["sample_time"])
         u_names   = self._config_cache["u_names"]
         tgt_spd   = self._config_cache["target_speed"]
+        speed_to_kph = float(self._config_cache.get("speed_to_kph", 1.0))
 
         # State columns: [pos_x, pos_y, yaw, speed, wp_x, wp_y]
         px    = x[:, 0]; py    = x[:, 1]
-        speed = x[:, 3]
+        speed = x[:, 3] * speed_to_kph
         wp_x  = x[:, 4] if x.shape[1] > 4 else None
         wp_y  = x[:, 5] if x.shape[1] > 5 else None
 
