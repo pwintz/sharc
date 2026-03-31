@@ -194,7 +194,7 @@ def compute_metrics(exp_dir):
 
     # ── 6. Speed tracking RMSE ───────────────────────────────────────────
     if target_speed is not None and x_steps.shape[1] >= 4:
-        speed = x_steps[:, 3]  # km/h
+        speed = x_steps[:, 3]  # m/s (body-frame velocity from CARLA)
         speed_errors = speed - target_speed
         metrics["speed_tracking_rmse"] = float(np.sqrt(np.mean(speed_errors**2)))
     else:
@@ -277,7 +277,7 @@ def print_metrics(metrics):
         print(f"    Path RMSE:            {metrics['path_tracking_rmse']:.4f} m")
         print(f"    Path max error:       {metrics['path_tracking_max_error']:.4f} m")
     if metrics["speed_tracking_rmse"] is not None:
-        print(f"    Speed RMSE:           {metrics['speed_tracking_rmse']:.2f} km/h")
+        print(f"    Speed RMSE:           {metrics['speed_tracking_rmse']:.2f} m/s")
     print()
 
     print("  Safety & Dynamics:")
@@ -288,7 +288,7 @@ def print_metrics(metrics):
     if metrics["total_distance"] is not None:
         print(f"    Total distance:       {metrics['total_distance']:.2f} m")
     if metrics["final_speed"] is not None:
-        print(f"    Final speed:          {metrics['final_speed']:.2f} km/h")
+        print(f"    Final speed:          {metrics['final_speed']:.2f} m/s")
 
     print("=" * 60 + "\n")
 

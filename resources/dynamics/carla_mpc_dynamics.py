@@ -662,14 +662,16 @@ class CarlaMPCDynamics(Dynamics):
             obs_data   = self._get_nearby_obstacles()   # already lateral-filtered
 
             if obs_data:
-                last_safe = None
+                # Fallback "safe" position: ego's current location.
+                # Used when the very first waypoint is already blocked.
+                ego_loc = transform.location
+                last_safe = (ego_loc.x, ego_loc.y)
                 truncated = False
                 for i, (wx, wy) in enumerate(waypoints):
                     if truncated:
                         # All waypoints after the first blocked one are
                         # replaced, so MPC sees no path beyond the obstacle.
-                        if last_safe is not None:
-                            waypoints[i] = last_safe
+                        waypoints[i] = last_safe
                         continue
                     blocked = False
                     for ox, oy, _ovx, _ovy, obs_r in obs_data:
@@ -679,8 +681,7 @@ class CarlaMPCDynamics(Dynamics):
                             break
                     if blocked:
                         truncated = True
-                        if last_safe is not None:
-                            waypoints[i] = last_safe
+                        waypoints[i] = last_safe
                     else:
                         last_safe = (wx, wy)
 
@@ -874,13 +875,19 @@ class CarlaMPCDynamics(Dynamics):
         accel  = float(u[0])  # longitudinal acceleration [m/s^2]
         delta  = float(u[1])  # steering angle [rad]  (-1..+1)
 
-        # Convert acceleration → throttle / brake
+        # Convert MPC acceleration → CARLA throttle / brake
+        # Normalise by the MPC input limits so that the full MPC range
+        # maps linearly to CARLA's [0, 1] throttle/brake.
+        mpc_limits = self.config["system_parameters"]["mpc_options"]["input_limits"]
+        max_accel_limit = mpc_limits["max_accel"]
+        min_accel_limit = mpc_limits["min_accel"]
+
         if accel >= 0:
-            throttle = min(accel, 1.0)   # normalise by max_accel
+            throttle = min(accel / max_accel_limit, 1.0) if max_accel_limit > 0 else 0.0
             brake    = 0.0
         else:
             throttle = 0.0
-            brake    = min(-accel, 1.0)  # normalise by |min_accel|
+            brake    = min(-accel / abs(min_accel_limit), 1.0) if min_accel_limit < 0 else 0.0
 
         # Map steering angle → CARLA steer in [-1, 1]
         # CARLA expects steer in [-1, 1]; max physical angle ≈ 0.7 rad

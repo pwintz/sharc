@@ -144,16 +144,16 @@ void CarlaConstraintMPCController::setup(const nlohmann::json& json_data) {
             for (int j = 1; j <= Np; ++j) {
                 double px = X(j, 0);
                 double py = X(j, 1);
-                double dt_pred = j * sample_time;
 
-                // Collision avoidance
+                // Collision avoidance — use current obstacle position
+                // (conservative: assumes obstacles may stop at any time)
                 for (int i = 0; i < n_obstacles; ++i) {
                     if (obstacles[i].x > SENTINEL_THRESHOLD) {
                         c(idx++) = -1e6;  // trivially satisfied
                         continue;
                     }
-                    double ox = obstacles[i].x + dt_pred * obstacles[i].vx;
-                    double oy = obstacles[i].y + dt_pred * obstacles[i].vy;
+                    double ox = obstacles[i].x;
+                    double oy = obstacles[i].y;
                     double r_safe = ego_radius + obstacles[i].radius + safe_margin;
                     double dx = px - ox;
                     double dy = py - oy;
@@ -204,10 +204,28 @@ void CarlaConstraintMPCController::calculateControl(int k, double t,
 
     state = x;
 
-    // Reference speed: always use configured target.
-    // The hard collision-avoidance constraints force the MPC to
-    // decelerate naturally when an obstacle blocks the path.
+    // Adapt target speed based on proximity to closest obstacle.
+    // This gives the MPC a smooth deceleration profile instead of
+    // relying solely on hard constraints (which cause oscillation
+    // when the short prediction horizon can't plan a full stop).
     effective_target_speed = target_speed;
+    double closest_obs_dist = std::numeric_limits<double>::max();
+    for (int i = 0; i < n_obstacles; ++i) {
+        if (obstacles[i].x > SENTINEL_THRESHOLD) continue;
+        double dx = x(0) - obstacles[i].x;
+        double dy = x(1) - obstacles[i].y;
+        double d = std::sqrt(dx * dx + dy * dy);
+        if (d < closest_obs_dist) closest_obs_dist = d;
+    }
+    // Slow-down zone: linearly reduce target speed from full distance
+    // to zero at the safety boundary.
+    double r_safe_approx = ego_radius + 2.5 + safe_margin;  // conservative obs radius estimate
+    double slow_zone_start = r_safe_approx + 20.0;
+    if (closest_obs_dist < slow_zone_start) {
+        double frac = std::max(0.0,
+            (closest_obs_dist - r_safe_approx) / (slow_zone_start - r_safe_approx));
+        effective_target_speed = target_speed * frac;
+    }
 
     mpc_result = nlmpc.optimize(state, control);
 
@@ -216,21 +234,13 @@ void CarlaConstraintMPCController::calculateControl(int k, double t,
     for (int i = 0; i < n_obstacles; ++i)
         if (obstacles[i].x < SENTINEL_THRESHOLD) ++active_obs;
 
-    // On infeasibility → emergency brake (or hold if already stopped)
+    // On infeasibility → emergency brake
     if (!mpc_result.is_feasible) {
-        double v = x(3);
-        if (std::abs(v) < 0.1) {
-            // Already (nearly) stopped — hold position
-            control(0) = 0.0;
-            control(1) = 0.0;
-        } else {
-            // Still moving — hard brake
-            control(0) = min_accel;
-            control(1) = 0.0;
-        }
+        control(0) = min_accel;
+        control(1) = 0.0;
         std::cout << "[CarlaConstraintMPC] k=" << k
-                  << " INFEASIBLE → " << (std::abs(v) < 0.1 ? "HOLD" : "BRAKE")
-                  << " a=" << control(0) << " v=" << v
+                  << " INFEASIBLE → BRAKE"
+                  << " a=" << control(0) << " v=" << x(3)
                   << " obs=" << active_obs << "/" << n_obstacles
                   << std::endl;
     } else {
