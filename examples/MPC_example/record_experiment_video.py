@@ -32,8 +32,6 @@ import random
 
 
 # ── Data loading ──────────────────────────────────────────────────────
-
-
 def load_experiment_data(experiment_list_dir):
     """Load experiment data from a SHARC experiment_list directory."""
     exp_data_files = []
@@ -396,6 +394,51 @@ class VideoRecorder:
         return self._frame_count
 
 
+def destroy_dynamic_actors(client, world, max_passes=5):
+    """Destroy leftover dynamic actors and wait until CARLA reflects it.
+
+    Replay runs in the same CARLA session as the experiment video export. The
+    just-finished experiment can leave vehicles/sensors visible for another
+    tick, which makes the replay look like it has an extra ego vehicle. We
+    retry destruction and verify the world is actually clear before spawning
+    the replay actors.
+    """
+    prefixes = ('vehicle.', 'sensor.', 'walker.', 'controller.')
+    destroyed_total = 0
+
+    for attempt in range(1, max_passes + 1):
+        existing = [
+            a for a in world.get_actors()
+            if a.type_id.startswith(prefixes)
+        ]
+        if not existing:
+            if destroyed_total > 0:
+                print(f"  Cleared stale actors after {attempt - 1} pass(es)")
+            return
+
+        print(f"  Cleanup pass {attempt}: destroying {len(existing)} stale actors")
+        client.apply_batch_sync(
+            [carla.command.DestroyActor(actor.id) for actor in existing], True)
+        destroyed_total += len(existing)
+
+        try:
+            if world.get_settings().synchronous_mode:
+                world.tick()
+            else:
+                world.wait_for_tick(seconds=1.0)
+        except Exception:
+            time.sleep(0.5)
+
+        time.sleep(0.2)
+
+    remaining = [
+        a for a in world.get_actors()
+        if a.type_id.startswith(prefixes)
+    ]
+    if remaining:
+        summary = ", ".join(f"{a.id}:{a.type_id}" for a in remaining[:8])
+        print(f"WARNING: {len(remaining)} stale actors remain after cleanup: {summary}")
+
 # ── Main replay logic ─────────────────────────────────────────────────
 
 
@@ -430,28 +473,24 @@ def record_video(experiment_list_dir, fps=20, width=640, height=360,
     print(f"  Resolution: {width}x{height}")
 
     # ── Connect to CARLA ──────────────────────────────────────────────
-    port = int(os.getenv('_EXP_PORT',  2010))
+    port = int(os.getenv('_EXP_PORT', carla_cfg.get("port", 2400)))
     client = carla.Client('localhost', port)
     client.set_timeout(30.0)
     world = client.get_world()
 
-    # Clean up stale actors
-    existing = world.get_actors()
-    stale_ids = [
-        a.id for a in existing
-        if a.type_id.startswith(
-            ('vehicle.', 'sensor.', 'walker.', 'controller.'))
-    ]
-    if stale_ids:
-        client.apply_batch_sync(
-            [carla.command.DestroyActor(aid) for aid in stale_ids], True)
-    time.sleep(0.5)
+    # Clean up stale actors from the experiment that was just replayed.
+    destroy_dynamic_actors(client, world)
 
     # Synchronous mode
     settings = world.get_settings()
     settings.synchronous_mode = True
     settings.fixed_delta_seconds = sample_time
     world.apply_settings(settings)
+    world.tick()
+
+    # Run one more verified cleanup pass now that the world is ticking under
+    # our control. This flushes actors that survive one async frame.
+    destroy_dynamic_actors(client, world)
 
     # Freeze traffic lights (same as experiment)
     for tl in world.get_actors().filter('traffic.traffic_light'):
@@ -536,6 +575,9 @@ def record_video(experiment_list_dir, fps=20, width=640, height=360,
 
     world.tick()
     world.tick()
+
+    vehicle_actors = list(world.get_actors().filter('vehicle.*'))
+    print(f"  Vehicles visible after replay spawn: {len(vehicle_actors)}")
 
     # ── Build NPC position+yaw lookup ─────────────────────────────────
     # Map each NPC record to step index; estimate yaw from consecutive pos.
