@@ -77,7 +77,7 @@
   },
   "Simulation Options": {
     "in-the-loop_delay_provider": "onestep",
-    "parallel_scarab_simulation": true,
+    "parallel_scarab_simulation": false,
     "max_batches": 99
   },
   "PARAMS_patch_values": {

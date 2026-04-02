@@ -1,10 +1,16 @@
 """
-Record a video from a completed SHARC experiment by replaying the trajectory.
+Record a video from a completed SHARC experiment by replaying the CARLA
+native recording.
 
-Reads the ego trajectory from experiment_data.json and NPC trajectories from
-carla_extra.jsonl (across batch subdirectories), then replays them in CARLA
-using teleportation (set_transform) with the same vehicle blueprint, spawn
-logic, and camera setup as the live experiment (carla_mpc_dynamics.py).
+Uses CARLA's replay_file() API for pixel-perfect actor positioning (no
+teleportation artefacts), with MPC overlay (waypoints, trajectory,
+obstacles) drawn via debug primitives.
+
+Phase 1 (during experiment):  carla_mpc_dynamics.py records the simulation
+                              using client.start_recorder().
+Phase 2 (this script):        replays the recording and captures video
+                              frames with a camera sensor, adding MPC
+                              overlay visualisation.
 
 Usage:
   python3 record_experiment_video.py /path/to/experiment_list_dir
@@ -28,7 +34,6 @@ import time
 
 import carla
 import numpy as np
-import random
 
 
 # ── Data loading ──────────────────────────────────────────────────────
@@ -62,71 +67,56 @@ def load_experiment_data(experiment_list_dir):
     return label, data, os.path.dirname(edata_path)
 
 
-def _batch_sort_key(name):
-    """Numeric sort key for batch directories (batch0, batch1, ..., batch15)."""
-    m = re.search(r'batch(\d+)', name)
-    return int(m.group(1)) if m else -1
+def load_recording_meta(experiment_dir):
+    """Load CARLA native recording metadata.
 
-
-def load_npc_data(experiment_dir):
-    """Load NPC trajectory data from carla_extra.jsonl in batch subdirs.
-
-    Batch directories are sorted numerically (not lexicographically)
-    to avoid the batch0→batch10→batch1 temporal ordering bug.
+    Returns dict with keys: ego_actor_id, recording_file, time_step.
+    The metadata JSON is written by carla_mpc_dynamics.py at experiment
+    start.
     """
-    records = []
-    # Collect all directories containing carla_extra.jsonl
-    extra_files = []
-    for dirpath, _dirnames, filenames in os.walk(experiment_dir):
-        if "carla_extra.jsonl" in filenames:
-            extra_files.append(dirpath)
-    # Sort by batch number (numeric)
-    extra_files.sort(key=lambda p: _batch_sort_key(os.path.basename(p)))
-    for dirpath in extra_files:
-        fpath = os.path.join(dirpath, "carla_extra.jsonl")
-        with open(fpath, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    records.append(json.loads(line))
-    # Records should now be in correct temporal order; sort as safety net
-    records.sort(key=lambda r: r.get("t", 0))
-    return records
+    # experiment_dir is typically .../experiment_list/<config_name>/
+    # The meta file is in the experiment_list directory (one level up).
+    search_dirs = [
+        experiment_dir,
+        os.path.dirname(experiment_dir),
+        os.path.dirname(os.path.dirname(experiment_dir)),
+    ]
+    for d in search_dirs:
+        meta_path = os.path.join(d, 'carla_recording_meta.json')
+        if os.path.exists(meta_path):
+            with open(meta_path, 'r') as f:
+                meta = json.load(f)
+            print(f"  Recording meta: {meta_path}")
+            return meta
+    raise FileNotFoundError(
+        "carla_recording_meta.json not found. "
+        "Re-run the experiment to generate a CARLA native recording.")
 
 
-def extract_trajectory(data):
-    """Extract ego trajectory from experiment data.
+def count_experiment_steps(data):
+    """Count the number of unique post-step states in the experiment.
 
     The x/t arrays have 2 entries per timestep (pre-step, post-step).
-    We take the post-step state (odd indices) and skip the (0,0,0,0)
-    placeholder at index 0.
+    We count unique post-step times, skipping the (0,0,0,0) placeholder.
     """
     x_data = data.get("x", [])
     t_data = data.get("t", [])
-    config = data.get("config", {})
 
-    # Deduplicate: take one state per unique time value.
-    # Pattern: t = [0.0, 0.1, 0.1, 0.2, 0.2, ...]
-    # Take the LAST x entry for each unique t (post-step state).
-    seen_t = {}
+    seen_t = set()
     for i, x in enumerate(x_data):
         if isinstance(x, list) and len(x) >= 3:
             ti = t_data[i] if i < len(t_data) else i * 0.1
             px = x[0][0] if isinstance(x[0], list) else x[0]
             py = x[1][0] if isinstance(x[1], list) else x[1]
-            psi = x[2][0] if isinstance(x[2], list) else x[2]
-            v = 0.0
-            if len(x) >= 4:
-                v = x[3][0] if isinstance(x[3], list) else x[3]
-            seen_t[ti] = {"t": ti, "px": px, "py": py, "psi": psi, "v": v}
+            # Skip (0,0,...) placeholder at t=0
+            if ti == 0 and px == 0 and py == 0:
+                continue
+            seen_t.add(ti)
 
-    trajectory = [seen_t[k] for k in sorted(seen_t.keys())]
+    return len(seen_t)
 
-    # Skip the (0,0,0,0) placeholder at t=0
-    if len(trajectory) > 1 and trajectory[0]["px"] == 0 and trajectory[0]["py"] == 0:
-        trajectory = trajectory[1:]
 
-    return trajectory, config
+# ── MPC overlay ───────────────────────────────────────────────────────
 
 
 def extract_mpc_overlay_data(data):
@@ -196,8 +186,6 @@ def extract_mpc_overlay_data(data):
         tx = md.get("traj_x")
         ty = md.get("traj_y")
         if tx and ty:
-            # Map to step index: pending_computations has 2 entries per step
-            # (pre-step, post-step); take the post-step entry
             ti = t_data[i] if i < len(t_data) else 0
             step_idx = round(ti / sample_time) if sample_time > 0 else i // 2
             entry = overlay.setdefault(step_idx, {})
@@ -223,13 +211,12 @@ def draw_mpc_overlay(debug, overlay_data, step_idx, z, life_time):
             color=carla.Color(0, 128, 255),  # blue
             life_time=life_time,
         )
-    # Connect waypoints with a blue line
     for i in range(len(wps) - 1):
         debug.draw_line(
             carla.Location(x=wps[i][0], y=wps[i][1], z=z),
             carla.Location(x=wps[i+1][0], y=wps[i+1][1], z=z),
             thickness=0.03,
-            color=carla.Color(0, 128, 255),  # blue
+            color=carla.Color(0, 128, 255),
             life_time=life_time,
         )
 
@@ -242,7 +229,7 @@ def draw_mpc_overlay(debug, overlay_data, step_idx, z, life_time):
             debug.draw_point(
                 carla.Location(x=tx[i], y=ty[i], z=z),
                 size=0.12,
-                color=carla.Color(255, 0, 0),  # red
+                color=carla.Color(255, 0, 0),
                 life_time=life_time,
             )
         for i in range(n - 1):
@@ -250,7 +237,7 @@ def draw_mpc_overlay(debug, overlay_data, step_idx, z, life_time):
                 carla.Location(x=tx[i], y=ty[i], z=z),
                 carla.Location(x=tx[i+1], y=ty[i+1], z=z),
                 thickness=0.05,
-                color=carla.Color(255, 0, 0),  # red
+                color=carla.Color(255, 0, 0),
                 life_time=life_time,
             )
 
@@ -259,7 +246,7 @@ def draw_mpc_overlay(debug, overlay_data, step_idx, z, life_time):
         debug.draw_point(
             carla.Location(x=ox, y=oy, z=z),
             size=0.2,
-            color=carla.Color(255, 165, 0),  # orange
+            color=carla.Color(255, 165, 0),
             life_time=life_time,
         )
         for j in range(12):
@@ -271,55 +258,6 @@ def draw_mpc_overlay(debug, overlay_data, step_idx, z, life_time):
                 color=carla.Color(255, 165, 0),
                 life_time=life_time,
             )
-
-
-# ── NPC yaw estimation ────────────────────────────────────────────────
-
-
-def estimate_npc_yaws(npc_records, sample_time):
-    """Compute NPC yaw angles from consecutive positions.
-
-    carla_extra.jsonl stores (x, y) but not yaw.  We estimate yaw from
-    a look-ahead window (not just the next point) for stability.  For
-    near-stationary NPCs the last known heading is held to prevent
-    rapid oscillation.
-
-    NPCs are identified by positional index (sorted by ID within each
-    record) rather than raw CARLA actor IDs, because IDs change across
-    batch resets.
-    """
-    MIN_DIST_FOR_YAW = 0.3  # metres — must move this far to update heading
-
-    # Collect per-NPC position traces ordered by time, keyed by index.
-    # Within each record, NPCs are sorted by their CARLA actor ID so the
-    # 0th NPC is always the same physical vehicle.
-    traces = {}  # npc_index -> [(t, x, y), ...]
-    for rec in npc_records:
-        t = rec.get("t", 0)
-        npcs_sorted = sorted(rec.get("npcs", []), key=lambda n: n["id"])
-        for idx, npc in enumerate(npcs_sorted):
-            traces.setdefault(idx, []).append((t, npc["x"], npc["y"]))
-
-    yaw_lookup = {}  # (npc_index, t) -> yaw_degrees
-    for npc_idx, pts in traces.items():
-        pts.sort()
-        last_yaw = 0.0
-        for i in range(len(pts)):
-            # Look ahead up to 5 steps to find a point with enough displacement
-            yaw = None
-            for j in range(i + 1, min(i + 6, len(pts))):
-                dx = pts[j][1] - pts[i][1]
-                dy = pts[j][2] - pts[i][2]
-                dist = math.sqrt(dx * dx + dy * dy)
-                if dist >= MIN_DIST_FOR_YAW:
-                    # CARLA yaw convention: atan2(y, x) in degrees
-                    yaw = math.degrees(math.atan2(dy, dx))
-                    break
-            if yaw is not None:
-                last_yaw = yaw
-            yaw_lookup[(npc_idx, pts[i][0])] = last_yaw
-
-    return yaw_lookup
 
 
 # ── Video recorder ────────────────────────────────────────────────────
@@ -342,7 +280,6 @@ class VideoRecorder:
         bp = world.get_blueprint_library().find('sensor.camera.rgb')
         bp.set_attribute('image_size_x', str(width))
         bp.set_attribute('image_size_y', str(height))
-        # Match the experiment camera in CarlaMPCDynamics.CameraManager
         bp.set_attribute('fov', '90')
 
         spawn_tf = carla.Transform(
@@ -399,43 +336,105 @@ class VideoRecorder:
 # ── Main replay logic ─────────────────────────────────────────────────
 
 
+def _find_ego_vehicle(world, ego_actor_id, data):
+    """Find the ego vehicle in a CARLA replay using multiple strategies.
+
+    Strategy 1: exact actor-ID match (CARLA replay preserves IDs).
+    Strategy 2: closest vehicle to experiment's initial position.
+    Strategy 3: first vehicle found.
+    """
+    # Strategy 1 — exact ID
+    ego = world.get_actor(ego_actor_id)
+    if ego is not None and ego.type_id.startswith('vehicle.'):
+        return ego
+
+    vehicles = list(world.get_actors().filter('vehicle.*'))
+    if not vehicles:
+        return None
+
+    ids_str = ', '.join(f"{v.id}:{v.type_id}" for v in vehicles)
+    print(f"  WARNING: Ego ID {ego_actor_id} not found. "
+          f"Vehicles present: [{ids_str}]")
+
+    # Strategy 2 — match initial position from experiment data
+    x_data = data.get("x", [])
+    if x_data and len(x_data) > 0:
+        x0 = x_data[0]
+        if isinstance(x0, list) and len(x0) >= 2:
+            sx = x0[0][0] if isinstance(x0[0], list) else x0[0]
+            sy = x0[1][0] if isinstance(x0[1], list) else x0[1]
+            best, best_d = None, float('inf')
+            for v in vehicles:
+                loc = v.get_location()
+                d = (loc.x - sx) ** 2 + (loc.y - sy) ** 2
+                if d < best_d:
+                    best, best_d = v, d
+            if best is not None:
+                print(f"  Using closest vehicle to start pos "
+                      f"({sx:.1f},{sy:.1f}): {best.id} "
+                      f"(dist={best_d**.5:.1f}m)")
+                return best
+
+    # Strategy 3 — first vehicle
+    print(f"  Using first vehicle: {vehicles[0].id}")
+    return vehicles[0]
+
+
 def record_video(experiment_list_dir, fps=20, width=640, height=360,
                  keep_frames=False):
-    """Replay experiment in CARLA and record video.
+    """Replay CARLA native recording and capture video with MPC overlay.
 
-    Matches the experiment dynamics exactly:
-      - Same vehicle blueprint (vehicle.tesla.model3)
-      - Same spawn point (seed % len(spawn_points))
-      - Same NPC spawn logic (nearest spawn points, sorted by distance)
-      - Same camera setup (fov=90, x=-6, z=3, pitch=-15)
-      - Traffic lights all green + frozen (same as experiment)
+    Uses client.replay_file() for pixel-perfect actor positioning,
+    then draws MPC overlay (waypoints, trajectory, obstacles) per-step.
     """
     label, data, experiment_dir = load_experiment_data(experiment_list_dir)
-    trajectory, config = extract_trajectory(data)
-    npc_records = load_npc_data(experiment_dir)
+    n_steps = count_experiment_steps(data)
 
-    if not trajectory:
+    if n_steps == 0:
         print("ERROR: No trajectory data found in experiment")
         return None
 
+    config = data.get("config", {})
     sample_time = config.get("system_parameters", {}).get("sample_time", 0.1)
-    carla_cfg = config.get("carla", {})
-    seed = carla_cfg.get("seed", 0)
-    npc_cfg = carla_cfg.get("npcs", {})
-    n_npc_vehicles = npc_cfg.get("n_vehicles", 0)
 
-    print(f"  Trajectory: {len(trajectory)} steps, sample_time={sample_time}s")
-    print(f"  NPC records: {len(npc_records)} (across batch subdirs)")
-    print(f"  Config: seed={seed}, n_vehicles={n_npc_vehicles}")
+    # Load CARLA native recording metadata
+    meta = load_recording_meta(experiment_dir)
+    ego_actor_id = meta["ego_actor_id"]
+    recording_file = meta["recording_file"]
+    rec_time_step = meta.get("time_step", sample_time)
+
+    if not os.path.exists(recording_file):
+        print(f"ERROR: Recording file not found: {recording_file}")
+        return None
+
+    print(f"  Steps: {n_steps}, sample_time={sample_time}s")
+    print(f"  Recording: {recording_file}")
+    print(f"  Ego actor ID (from recording): {ego_actor_id}")
     print(f"  Resolution: {width}x{height}")
 
     # ── Connect to CARLA ──────────────────────────────────────────────
-    port = int(os.getenv('_EXP_PORT',  2010))
+    port = int(os.getenv('_EXP_PORT', 2000))
     client = carla.Client('localhost', port)
-    client.set_timeout(30.0)
+    client.set_timeout(60.0)
     world = client.get_world()
+    print(f"  Connected to CARLA on port {port}")
 
-    # Clean up stale actors
+    # ── Thorough world cleanup ────────────────────────────────────────
+    # 1. Stop any ongoing replay from a previous run
+    try:
+        client.stop_replayer(keep_actors=False)
+    except Exception:
+        pass
+    time.sleep(0.5)
+
+    # 2. Switch to synchronous mode FIRST — prevents CARLA from
+    #    auto-advancing the replay before we're ready to capture.
+    settings = world.get_settings()
+    settings.synchronous_mode = True
+    settings.fixed_delta_seconds = rec_time_step
+    world.apply_settings(settings)
+
+    # 3. Destroy stale actors (vehicles, sensors, walkers, controllers)
     existing = world.get_actors()
     stale_ids = [
         a.id for a in existing
@@ -445,173 +444,120 @@ def record_video(experiment_list_dir, fps=20, width=640, height=360,
     if stale_ids:
         client.apply_batch_sync(
             [carla.command.DestroyActor(aid) for aid in stale_ids], True)
+        print(f"  Cleaned {len(stale_ids)} stale actors")
+
+    # 4. Tick to flush the destructions
+    world.tick()
     time.sleep(0.5)
 
-    # Synchronous mode
-    settings = world.get_settings()
-    settings.synchronous_mode = True
-    settings.fixed_delta_seconds = sample_time
-    world.apply_settings(settings)
+    # Verify the world is clean
+    remaining = [
+        a for a in world.get_actors()
+        if a.type_id.startswith(
+            ('vehicle.', 'sensor.', 'walker.', 'controller.'))
+    ]
+    if remaining:
+        print(f"  WARNING: {len(remaining)} actors still present after cleanup")
+        for a in remaining:
+            print(f"    - {a.id}: {a.type_id}")
 
-    # Freeze traffic lights (same as experiment)
-    for tl in world.get_actors().filter('traffic.traffic_light'):
-        tl.set_state(carla.TrafficLightState.Green)
-        tl.freeze(True)
-    time.sleep(0.3)
+    # ── Start CARLA native replay (world is already in sync mode) ─────
+    # replay_file() recreates all actors from the recording with their
+    # original IDs and positions.  Because we're in sync mode, the replay
+    # will NOT advance until we call world.tick().
+    print(f"  Starting CARLA replay...")
+    replay_result = client.replay_file(
+        recording_file, 0.0, 0.0, ego_actor_id, False)
+    print(f"  Replay started: {replay_result[:200] if replay_result else '(ok)'}")
 
-    # ── Spawn ego: same logic as CarlaMPCDynamics ─────────────────────
-    bp_lib = world.get_blueprint_library()
-    vehicle_bp = bp_lib.find('vehicle.tesla.model3')
-    spawn_points = world.get_map().get_spawn_points()
+    # Let replay initialise actors.  Each tick in sync mode advances the
+    # recording by fixed_delta_seconds.  We need a minimum number of ticks
+    # for CARLA to create actors from the recording header, but every init
+    # tick consumes a recording frame.  We track the count to offset the
+    # MPC overlay accordingly.
+    INIT_TICKS = 2
+    for _ in range(INIT_TICKS):
+        world.tick()
+    time.sleep(0.5)
 
-    random.seed(seed)
-    np.random.seed(seed)
-    ego_spawn_idx = seed % len(spawn_points)
+    # ── Find the ego vehicle from the replay ──────────────────────────
+    ego = _find_ego_vehicle(world, ego_actor_id, data)
 
-    ego = None
-    actual_ego_idx = None
-    for offset in range(len(spawn_points)):
-        idx = (ego_spawn_idx + offset) % len(spawn_points)
-        ego = world.try_spawn_actor(vehicle_bp, spawn_points[idx])
-        if ego is not None:
-            actual_ego_idx = idx
-            break
     if ego is None:
-        print("ERROR: Failed to spawn ego vehicle")
+        print("ERROR: Could not find ego vehicle in replay")
+        settings = world.get_settings()
+        settings.synchronous_mode = False
+        settings.fixed_delta_seconds = None
+        world.apply_settings(settings)
+        client.stop_replayer(keep_actors=False)
         return None
 
-    print(f"  Ego spawn index: {actual_ego_idx}"
-          f" ({spawn_points[actual_ego_idx].location})")
+    print(f"  Found ego: {ego.type_id} (id={ego.id}) at "
+          f"({ego.get_location().x:.1f}, {ego.get_location().y:.1f})")
 
-    ego.set_simulate_physics(False)
+    # Log all actors for debugging
+    all_actors = world.get_actors()
+    actor_summary = [
+        f"{a.id}:{a.type_id}"
+        for a in all_actors
+        if a.type_id.startswith(('vehicle.', 'walker.'))
+    ]
+    print(f"  Replay actors: [{', '.join(actor_summary)}]")
 
-    # ── Spawn NPCs using initial positions from carla_extra.jsonl ────────
-    # The recorded NPC data uses CARLA actor IDs that change each batch
-    # reset.  We ignore IDs and map NPCs by positional index (sorted by
-    # ID within each record).  This ensures continuity across batches.
-    npc_bps = sorted(bp_lib.filter('vehicle.*'), key=lambda bp: bp.id)
-    carla_map = world.get_map()
-
-    # Determine how many NPCs and their initial positions from first record
-    n_npcs_in_data = 0
-    initial_npc_positions = []
-    if npc_records:
-        first_npcs = sorted(npc_records[0].get("npcs", []),
-                            key=lambda n: n["id"])
-        n_npcs_in_data = len(first_npcs)
-        for npc in first_npcs:
-            initial_npc_positions.append((npc["x"], npc["y"]))
-
-    n_to_spawn = max(n_npc_vehicles, n_npcs_in_data)
-    npc_actors = []
-    for i in range(n_to_spawn):
-        bp = npc_bps[i % len(npc_bps)]
-        if bp.has_attribute('color'):
-            colors = bp.get_attribute('color').recommended_values
-            bp.set_attribute('color', colors[i % len(colors)])
-        # Spawn at the recorded initial position if available
-        if i < len(initial_npc_positions):
-            nx, ny = initial_npc_positions[i]
-            npc_wp = carla_map.get_waypoint(
-                carla.Location(x=nx, y=ny, z=0), project_to_road=True)
-            npc_z = npc_wp.transform.location.z if npc_wp else 0.3
-            spawn_tf = carla.Transform(
-                carla.Location(x=nx, y=ny, z=npc_z + 0.3),
-                npc_wp.transform.rotation if npc_wp else carla.Rotation())
-        else:
-            # Fallback: nearest spawn points
-            ego_loc = spawn_points[actual_ego_idx].location
-            available_sp = [(j, sp) for j, sp in enumerate(spawn_points)
-                           if j != actual_ego_idx]
-            available_sp.sort(
-                key=lambda pair: (pair[1].location.x - ego_loc.x) ** 2
-                               + (pair[1].location.y - ego_loc.y) ** 2)
-            spawn_tf = available_sp[i % len(available_sp)][1]
-        npc = world.try_spawn_actor(bp, spawn_tf)
-        if npc is not None:
-            npc.set_simulate_physics(False)
-            npc_actors.append(npc)
-
-    print(f"  Spawned {len(npc_actors)}/{n_to_spawn} NPC vehicles")
-
-    world.tick()
-    world.tick()
-
-    # ── Build NPC position+yaw lookup ─────────────────────────────────
-    # Map each NPC record to step index; estimate yaw from consecutive pos.
-    # NPCs are keyed by positional index (sorted by ID within each record),
-    # NOT by raw CARLA actor IDs which change across batch resets.
-    yaw_lookup = estimate_npc_yaws(npc_records, sample_time)
-
-    npc_step_data = {}  # step_idx -> [(x, y, yaw), ...]  (by positional index)
-    for rec in npc_records:
-        t = rec.get("t", 0)
-        step_idx = round(t / sample_time)
-        npcs_sorted = sorted(rec.get("npcs", []), key=lambda n: n["id"])
-        positions = []
-        for idx, npc in enumerate(npcs_sorted):
-            nx = npc["x"]
-            ny = npc["y"]
-            yaw = yaw_lookup.get((idx, t), 0.0)
-            positions.append((nx, ny, yaw))
-        npc_step_data[step_idx] = positions
-
-    # ── Extract MPC overlay data (waypoints + predicted trajectory) ───
+    # ── Extract MPC overlay data ──────────────────────────────────────
     overlay_data = extract_mpc_overlay_data(data)
     if overlay_data:
         print(f"  MPC overlay: {len(overlay_data)} steps with data")
 
-    # Cache the CARLA map for road-surface z queries
-    carla_map = world.get_map()
-
     # ── Attach camera and record ──────────────────────────────────────
-    fmt = "jpg"  # JPEG is ~5x faster than PNG for frame capture
+    fmt = "jpg"
     recorder = VideoRecorder(world, ego, experiment_dir,
                              prefix=label, width=width, height=height,
                              fmt=fmt)
     debug = world.debug
-    n_frames = len(trajectory)
-    print(f"  Recording {n_frames} frames ({fmt.upper()})...")
 
-    for step_idx, wp in enumerate(trajectory):
-        # Query road surface z at ego position for correct ground placement
-        ego_wp = carla_map.get_waypoint(
-            carla.Location(x=wp["px"], y=wp["py"], z=0),
-            project_to_road=True)
-        ego_z = ego_wp.transform.location.z if ego_wp else 0.3
+    # Determine z for overlay from ego position
+    ego_loc = ego.get_location()
+    overlay_z = ego_loc.z + 0.5
 
-        # Teleport ego to recorded position at road surface height
-        tf = carla.Transform(
-            carla.Location(x=wp["px"], y=wp["py"], z=ego_z + 0.05),
-            carla.Rotation(yaw=math.degrees(wp["psi"]))
-        )
-        ego.set_transform(tf)
+    # The INIT_TICKS consumed recording frames before the camera was
+    # attached.  After INIT_TICKS, the replay is at recording frame
+    # INIT_TICKS.  Each tick in the main loop advances by one frame.
+    # The camera captures AFTER the tick (actors at the new position),
+    # so the frame captured by tick N in the main loop shows actors at
+    # recording frame (INIT_TICKS + N + 1).
+    #
+    # During the original experiment, recording frame F corresponds to
+    # the state after experiment step (F - 1), because frame 0 is the
+    # initial state (before any evolve_state tick) and frame 1 is after
+    # step 0.  The MPC overlay drawn during step k used the plan
+    # computed at step k, stored in overlay_data[k].
+    #
+    # Therefore: overlay_step = (INIT_TICKS + frame_idx + 1) - 1
+    #                         = INIT_TICKS + frame_idx
+    #
+    # We cap the number of frames to avoid running past the recording end.
+    frames_to_record = min(n_steps, n_steps - INIT_TICKS + 2)
 
-        # Teleport NPCs to recorded positions at road surface height
-        if step_idx in npc_step_data:
-            for actor_idx, pos in enumerate(npc_step_data[step_idx]):
-                if pos is not None and actor_idx < len(npc_actors):
-                    nx, ny, nyaw = pos
-                    # Query road z for this NPC position
-                    npc_wp = carla_map.get_waypoint(
-                        carla.Location(x=nx, y=ny, z=0),
-                        project_to_road=True)
-                    npc_z = npc_wp.transform.location.z if npc_wp else ego_z
-                    npc_tf = carla.Transform(
-                        carla.Location(x=nx, y=ny, z=npc_z + 0.05),
-                        carla.Rotation(yaw=nyaw)
-                    )
-                    npc_actors[actor_idx].set_transform(npc_tf)
+    print(f"  Recording {frames_to_record} frames ({fmt.upper()}, "
+          f"overlay offset={INIT_TICKS})...")
 
-        # Draw MPC overlay (waypoints=blue, trajectory=red, obstacles=orange)
-        overlay_z = ego_z + 0.5  # slightly above road for visibility
-        draw_mpc_overlay(debug, overlay_data, step_idx, overlay_z,
-                         life_time=sample_time + 0.05)
+    for frame_idx in range(frames_to_record):
+        # Update overlay z from current ego position (road may slope)
+        ego_loc = ego.get_location()
+        overlay_z = ego_loc.z + 0.5
 
+        # Overlay step accounts for the INIT_TICKS consumed before camera
+        overlay_step = frame_idx + INIT_TICKS
+        draw_mpc_overlay(debug, overlay_data, overlay_step, overlay_z,
+                         life_time=rec_time_step + 0.05)
+
+        # Advance replay by one frame; camera captures the rendered scene
         world.tick()
 
-        if step_idx % 100 == 0:
-            print(f"    Step {step_idx}/{n_frames}")
+        if frame_idx % 100 == 0:
+            print(f"    Frame {frame_idx}/{frames_to_record} "
+                  f"(overlay step {overlay_step})")
 
     # Wait for final frame callback
     time.sleep(1.0)
@@ -621,22 +567,21 @@ def record_video(experiment_list_dir, fps=20, width=640, height=360,
 
     # ── Cleanup ───────────────────────────────────────────────────────
     recorder.destroy()
-    for npc in npc_actors:
-        npc.destroy()
-    ego.destroy()
 
     settings = world.get_settings()
     settings.synchronous_mode = False
     settings.fixed_delta_seconds = None
     world.apply_settings(settings)
-    time.sleep(0.3)
+
+    client.stop_replayer(keep_actors=False)
+    time.sleep(0.5)
 
     return video_path
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description="Record video from a SHARC experiment")
+        description="Record video from a SHARC experiment (CARLA native replay)")
     parser.add_argument(
         'experiment_dir',
         help="Path to experiment_list dir (or experiment subdir)")
@@ -666,7 +611,7 @@ if __name__ == '__main__':
         w, h = 640, 360
 
     print("=" * 60)
-    print("SHARC Experiment Video Recorder")
+    print("SHARC Experiment Video Recorder (CARLA Native Replay)")
     print("=" * 60)
     video = record_video(args.experiment_dir, args.fps, w, h,
                          keep_frames=args.keep_frames)

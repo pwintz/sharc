@@ -95,6 +95,88 @@ class CarlaMPCDynamics(Dynamics):
     def __init__(self, config):
         super().__init__(config)
 
+    @staticmethod
+    def _wrap_angle(angle_rad):
+        while angle_rad > math.pi:
+            angle_rad -= 2.0 * math.pi
+        while angle_rad < -math.pi:
+            angle_rad += 2.0 * math.pi
+        return angle_rad
+
+    def _choose_reference_successor(self, wp, candidates):
+        """Choose a deterministic successor when CARLA offers multiple branches."""
+        if not candidates:
+            return None
+        if len(candidates) == 1:
+            return candidates[0]
+
+        current_tf = wp.transform
+        current_yaw = math.radians(current_tf.rotation.yaw)
+        current_loc = current_tf.location
+
+        def candidate_key(candidate):
+            tf = candidate.transform
+            yaw = math.radians(tf.rotation.yaw)
+            heading_error = abs(self._wrap_angle(yaw - current_yaw))
+            same_lane_penalty = 0 if candidate.lane_id == wp.lane_id else 1
+            same_road_penalty = 0 if candidate.road_id == wp.road_id else 1
+            lateral_offset = abs(
+                -(tf.location.x - current_loc.x) * math.sin(current_yaw) +
+                (tf.location.y - current_loc.y) * math.cos(current_yaw)
+            )
+            return (
+                same_lane_penalty,
+                same_road_penalty,
+                heading_error,
+                lateral_offset,
+                tf.location.x,
+                tf.location.y,
+            )
+
+        return min(candidates, key=candidate_key)
+
+    def _build_reference_route(self):
+        """Precompute a stable forward route from the ego spawn lane."""
+        start_wp = self._carla_map.get_waypoint(
+            self.vehicle.get_transform().location,
+            project_to_road=True,
+            lane_type=carla.LaneType.Driving,
+        )
+        if start_wp is None:
+            raise RuntimeError("Failed to build reference route: ego vehicle is not on a driving lane.")
+
+        route_len = max(self.n_wp * 25, 1000)
+        route = [(start_wp.transform.location.x, start_wp.transform.location.y)]
+        wp = start_wp
+
+        for _ in range(route_len - 1):
+            nxt = self._choose_reference_successor(wp, wp.next(self.wp_spacing))
+            if nxt is None:
+                route.append(route[-1])
+                continue
+            wp = nxt
+            route.append((wp.transform.location.x, wp.transform.location.y))
+
+        self._reference_route = route
+        self._reference_route_idx = 0
+
+    def _closest_reference_route_index(self, location):
+        if not getattr(self, "_reference_route", None):
+            return 0
+
+        best_idx = 0
+        best_dist_sq = float("inf")
+        for i, (wx, wy) in enumerate(self._reference_route):
+            dx = location.x - wx
+            dy = location.y - wy
+            dist_sq = dx * dx + dy * dy
+            if dist_sq < best_dist_sq:
+                best_dist_sq = dist_sq
+                best_idx = i
+
+        self._reference_route_idx = best_idx
+        return best_idx
+
     # ------------------------------------------------------------------ #
     #  Lifecycle                                                          #
     # ------------------------------------------------------------------ #
@@ -104,8 +186,6 @@ class CarlaMPCDynamics(Dynamics):
 
         carla_cfg     = self.config.get("carla", {})
         self.seed     = carla_cfg.get("seed", 0)
-        self.port     = int(os.getenv('_EXP_PORT', carla_cfg.get("port", 2010)))
-        self.rpc_port = int(os.getenv('_EXP_RPC_PORT', carla_cfg.get("rpc", 8100)))
         mpc_opts      = self.config["system_parameters"].get("mpc_options", {})
         self.n_wp     = mpc_opts.get("n_waypoints", 10)
         self.wp_spacing = mpc_opts.get("waypoint_spacing", 2.0)
@@ -119,7 +199,8 @@ class CarlaMPCDynamics(Dynamics):
 
         # ---- Connect to CARLA ---------------------------------------- #
         print("[CarlaMPCDynamics] Creating CARLA session …")
-        self.client = carla.Client("localhost", self.port)
+        carla_port = int(os.environ.get('_EXP_PORT', 2000))
+        self.client = carla.Client("localhost", carla_port)
         self.client.set_timeout(60.0)   # generous timeout; nullrhi can be slow to settle
         self.world = self.client.get_world()
 
@@ -156,7 +237,7 @@ class CarlaMPCDynamics(Dynamics):
             settings.max_substep_delta_time = 0.01
         self.world.apply_settings(settings)
 
-        self.traffic_manager = self.client.get_trafficmanager(self.rpc_port)
+        self.traffic_manager = self.client.get_trafficmanager(8100)
         self.traffic_manager.set_synchronous_mode(True)
         self.traffic_manager.set_random_device_seed(self.seed)
         self.world.tick()
@@ -250,6 +331,7 @@ class CarlaMPCDynamics(Dynamics):
         # Validated: safety-critical scenarios achieve 0.000 m ego deviation
         # over 512 steps with warmup + replay.
         self._do_warmup_reset()
+        self._build_reference_route()
 
     def _do_warmup_reset(self):
         """Perform one dummy reset cycle to stabilise CARLA's internal state."""
@@ -311,6 +393,39 @@ class CarlaMPCDynamics(Dynamics):
                 os.path.join(self._sim_dir, 'carla_extra.jsonl'), 'w', buffering=1)
         except OSError:
             self._extra_fh = None
+
+        # ---- Start CARLA native recording on the first batch --------- #
+        # The recorder captures all actor positions/controls in a binary
+        # file that can later be replayed via client.replay_file() for
+        # high-fidelity video generation (no teleportation artefacts).
+        if not getattr(self, '_recorder_started', False):
+            # Derive experiment root (the experiment_list directory that
+            # contains this batch/sim sub-directory):
+            #   _sim_dir = .../experiment_list/<config_name>/
+            #   experiment_root = .../experiment_list/
+            experiment_root = os.path.dirname(
+                self._sim_dir.rstrip('/'))
+            self._recording_file = os.path.join(
+                experiment_root, 'carla_recording.log')
+            try:
+                self.client.start_recorder(self._recording_file, True)
+                self._recorder_started = True
+                # Save metadata for the video replay script.
+                meta = {
+                    'ego_actor_id': self.vehicle.id,
+                    'recording_file': self._recording_file,
+                    'time_step': self.time_step,
+                }
+                meta_path = os.path.join(
+                    experiment_root, 'carla_recording_meta.json')
+                with open(meta_path, 'w') as f:
+                    json.dump(meta, f, indent=2)
+                print(f"[CarlaMPCDynamics] Started CARLA recorder → "
+                      f"{self._recording_file}")
+            except Exception as e:
+                print(f"[CarlaMPCDynamics] WARNING: Failed to start "
+                      f"CARLA recorder: {e}")
+                self._recorder_started = False
 
     # ------------------------------------------------------------------ #
     #  Batch replay (reset + fast-forward)                                #
@@ -389,7 +504,8 @@ class CarlaMPCDynamics(Dynamics):
         # ---- Stop walker controllers ---------------------------------- #
         for ctrl in getattr(self, 'npc_walker_controllers', []):
             try:
-                ctrl.stop()
+                if ctrl is not None:
+                    ctrl.stop()
             except Exception:
                 pass
 
@@ -410,7 +526,8 @@ class CarlaMPCDynamics(Dynamics):
         # ---- Batch destroy all managed actors ------------------------- #
         destroy_ids = []
         for ctrl in getattr(self, 'npc_walker_controllers', []):
-            destroy_ids.append(ctrl.id)
+            if ctrl is not None:
+                destroy_ids.append(ctrl.id)
         for walker in getattr(self, 'npc_walkers', []):
             destroy_ids.append(walker.id)
         for npc in getattr(self, 'npc_vehicles', []):
@@ -424,7 +541,7 @@ class CarlaMPCDynamics(Dynamics):
 
         # ---- Reset TM seed ------------------------------------------- #
         self.traffic_manager.set_synchronous_mode(False)
-        self.traffic_manager = self.client.get_trafficmanager(self.rpc_port)
+        self.traffic_manager = self.client.get_trafficmanager(8100)
         self.traffic_manager.set_synchronous_mode(True)
         self.traffic_manager.set_random_device_seed(self.seed)
 
@@ -485,7 +602,8 @@ class CarlaMPCDynamics(Dynamics):
                 pass
         for ctrl in self.npc_walker_controllers:
             try:
-                ctrl.stop()
+                if ctrl is not None:
+                    ctrl.stop()
             except Exception:
                 pass
 
@@ -521,11 +639,12 @@ class CarlaMPCDynamics(Dynamics):
         self._configure_road_npcs_tm()
         for ctrl in self.npc_walker_controllers:
             try:
-                ctrl.start()
-                dest = self.world.get_random_location_from_navigation()
-                if dest is not None:
-                    ctrl.go_to_location(dest)
-                ctrl.set_max_speed(1.4)
+                if ctrl is not None:
+                    ctrl.start()
+                    dest = self.world.get_random_location_from_navigation()
+                    if dest is not None:
+                        ctrl.go_to_location(dest)
+                    ctrl.set_max_speed(1.4)
             except Exception:
                 pass
 
@@ -604,7 +723,20 @@ class CarlaMPCDynamics(Dynamics):
                 loc = npc.get_transform().location
                 npc_data.append({'id': npc.id,
                                  'x': round(loc.x, 2),
-                                 'y': round(loc.y, 2)})
+                                 'y': round(loc.y, 2),
+                                 'type': 'vehicle'})
+            except Exception:
+                pass
+        for walker in sorted(getattr(self, 'npc_walkers', []),
+                             key=lambda a: a.id):
+            try:
+                if not walker.is_alive:
+                    continue
+                loc = walker.get_transform().location
+                npc_data.append({'id': walker.id,
+                                 'x': round(loc.x, 2),
+                                 'y': round(loc.y, 2),
+                                 'type': 'walker'})
             except Exception:
                 pass
         col_events = self._collision_events[:]
@@ -638,23 +770,30 @@ class CarlaMPCDynamics(Dynamics):
         collision-free reference trajectory even when an obstacle blocks the road.
         """
         transform = self.vehicle.get_transform()
-        wp = self._carla_map.get_waypoint(transform.location)
+        route_idx = self._closest_reference_route_index(transform.location)
         waypoints = []
-        for _ in range(self.n_wp):
-            nxt = wp.next(self.wp_spacing)
-            if not nxt:
-                # Road ends — repeat last known waypoint
-                waypoints.append((wp.transform.location.x, wp.transform.location.y))
-                continue
-            wp = nxt[0]
-            waypoints.append((wp.transform.location.x, wp.transform.location.y))
+        for offset in range(1, self.n_wp + 1):
+            idx = min(route_idx + offset, len(self._reference_route) - 1)
+            waypoints.append(self._reference_route[idx])
 
         # ---- Filter blocked waypoints --------------------------------- #
+        # The generic obstacle-avoidance controller benefits from a truncated
+        # path once the lane ahead is blocked. The follow-MPC variant needs
+        # the unmodified centerline so it can still project the lead vehicle
+        # onto the route and regulate following distance instead of treating
+        # the lead as "off path".
+        controller_type = (
+            self.config.get("system_parameters", {}).get("controller_type", "")
+        )
+        should_truncate_waypoints = (
+            self.n_obs > 0 and controller_type != "CarlaNPCFollowMPCController"
+        )
+
         # Fetch in-lane obstacles (same filtering as in _get_nearby_obstacles).
         # Any waypoint whose distance to an obstacle centroid is less than
         # ego_radius + obs_radius + safe_margin is replaced by the last
         # safe waypoint, keeping the reference path out of blocked zones.
-        if self.n_obs > 0:
+        if should_truncate_waypoints:
             mpc_opts   = self.config["system_parameters"]["mpc_options"]
             weights    = mpc_opts.get("cost_weights", {})
             ego_r      = weights.get("ego_radius",  2.5)
@@ -662,16 +801,14 @@ class CarlaMPCDynamics(Dynamics):
             obs_data   = self._get_nearby_obstacles()   # already lateral-filtered
 
             if obs_data:
-                # Fallback "safe" position: ego's current location.
-                # Used when the very first waypoint is already blocked.
-                ego_loc = transform.location
-                last_safe = (ego_loc.x, ego_loc.y)
+                last_safe = None
                 truncated = False
                 for i, (wx, wy) in enumerate(waypoints):
                     if truncated:
                         # All waypoints after the first blocked one are
                         # replaced, so MPC sees no path beyond the obstacle.
-                        waypoints[i] = last_safe
+                        if last_safe is not None:
+                            waypoints[i] = last_safe
                         continue
                     blocked = False
                     for ox, oy, _ovx, _ovy, obs_r in obs_data:
@@ -681,7 +818,8 @@ class CarlaMPCDynamics(Dynamics):
                             break
                     if blocked:
                         truncated = True
-                        waypoints[i] = last_safe
+                        if last_safe is not None:
+                            waypoints[i] = last_safe
                     else:
                         last_safe = (wx, wy)
 
@@ -717,25 +855,28 @@ class CarlaMPCDynamics(Dynamics):
     # ------------------------------------------------------------------ #
 
     def _get_nearby_obstacles(self):
-        """Return up to N_obs closest dynamic actors within detection_radius.
+        """Return up to N_obs nearby actors along the ego reference route.
 
-        Only includes obstacles whose lateral offset from the ego's forward
-        direction is within ~2.5 m (roughly one lane width), so adjacent-lane
-        traffic is filtered out.
+        Vehicles do not need to be moving to count as obstacles. Actors are
+        filtered by distance to the future route corridor instead of only the
+        ego's instantaneous heading, which makes stopped lead vehicles much
+        more stable to detect on curves and during yaw transients.
 
         Returns list of (x, y, vx, vy, bounding_radius) tuples sorted by
-        ascending distance to the ego vehicle.
+        route progress ahead of the ego.
         """
         ego_tf  = self.vehicle.get_transform()
         ego_loc = ego_tf.location
-        ego_yaw = math.radians(ego_tf.rotation.yaw)
         ego_id  = self.vehicle.id
+        route_idx = self._closest_reference_route_index(ego_loc)
+        route_window_end = min(route_idx + max(self.n_wp * 2, 40),
+                               len(self._reference_route) - 1)
+        route_window = self._reference_route[route_idx:route_window_end + 1]
 
-        # Unit vectors: forward and rightward
-        fwd_x =  math.cos(ego_yaw)
-        fwd_y =  math.sin(ego_yaw)
+        if len(route_window) < 2:
+            return []
 
-        LATERAL_FILTER = 2.5  # metres — discard obstacles farther sideways
+        corridor_half_width = 3.5
 
         candidates = []
         for actor in self.world.get_actors():
@@ -752,21 +893,44 @@ class CarlaMPCDynamics(Dynamics):
             if dist > self.detection_radius:
                 continue
 
-            # Lateral offset relative to ego heading (cross-product magnitude)
-            lat_offset = abs(-dx * fwd_y + dy * fwd_x)
-            if lat_offset > LATERAL_FILTER:
-                continue  # skip adjacent-lane traffic
+            best_idx = None
+            best_lat = float("inf")
+            for i in range(len(route_window) - 1):
+                ax, ay = route_window[i]
+                bx, by = route_window[i + 1]
+                abx = bx - ax
+                aby = by - ay
+                ab2 = abx * abx + aby * aby
+                if ab2 < 1e-9:
+                    continue
+                apx = loc.x - ax
+                apy = loc.y - ay
+                tau = max(0.0, min(1.0, (apx * abx + apy * aby) / ab2))
+                proj_x = ax + tau * abx
+                proj_y = ay + tau * aby
+                lat = math.hypot(loc.x - proj_x, loc.y - proj_y)
+                if lat < best_lat:
+                    best_lat = lat
+                    best_idx = i
+
+            if best_idx is None or best_lat > corridor_half_width:
+                continue
+
+            route_progress = route_idx + best_idx
+            if route_progress < route_idx:
+                continue
 
             vel  = actor.get_velocity()
             ext  = actor.bounding_box.extent
             # Top-down bounding circle radius
             radius = math.sqrt(ext.x ** 2 + ext.y ** 2)
 
-            candidates.append((dist, loc.x, loc.y, vel.x, vel.y, radius))
+            candidates.append((route_progress, best_lat, dist, loc.x, loc.y, vel.x, vel.y, radius))
 
-        candidates.sort(key=lambda c: c[0])
+        candidates.sort(key=lambda c: (c[0], c[1], c[2]))
+
         return [(ox, oy, ovx, ovy, r)
-                for (_, ox, oy, ovx, ovy, r) in candidates[:self.n_obs]]
+                for (_, _, _, ox, oy, ovx, ovy, r) in candidates[:self.n_obs]]
 
     # ------------------------------------------------------------------ #
     #  Visualization                                                       #
@@ -875,19 +1039,19 @@ class CarlaMPCDynamics(Dynamics):
         accel  = float(u[0])  # longitudinal acceleration [m/s^2]
         delta  = float(u[1])  # steering angle [rad]  (-1..+1)
 
-        # Convert MPC acceleration → CARLA throttle / brake
-        # Normalise by the MPC input limits so that the full MPC range
-        # maps linearly to CARLA's [0, 1] throttle/brake.
+        # Convert MPC acceleration → CARLA throttle / brake.
+        # Normalize by the MPC input limits so the full solver range maps
+        # linearly onto CARLA's [0, 1] throttle/brake.
         mpc_limits = self.config["system_parameters"]["mpc_options"]["input_limits"]
         max_accel_limit = mpc_limits["max_accel"]
-        min_accel_limit = mpc_limits["min_accel"]
+        min_accel_limit = abs(mpc_limits["min_accel"])
 
         if accel >= 0:
             throttle = min(accel / max_accel_limit, 1.0) if max_accel_limit > 0 else 0.0
             brake    = 0.0
         else:
             throttle = 0.0
-            brake    = min(-accel / abs(min_accel_limit), 1.0) if min_accel_limit < 0 else 0.0
+            brake    = min(-accel / min_accel_limit, 1.0) if min_accel_limit > 0 else 0.0
 
         # Map steering angle → CARLA steer in [-1, 1]
         # CARLA expects steer in [-1, 1]; max physical angle ≈ 0.7 rad
@@ -923,6 +1087,13 @@ class CarlaMPCDynamics(Dynamics):
 
             # Log the tick BEFORE world.tick() so replay reproduces exactly.
             self._log_tick(control)
+            # Apply direct walker control each tick (fixed-route walkers).
+            for wkr, wkr_ctrl in getattr(self, '_direct_walker_controls', []):
+                try:
+                    if wkr.is_alive:
+                        wkr.apply_control(wkr_ctrl)
+                except Exception:
+                    pass
             self.world.tick()
 
         # Register the tick position after this evolve_state completes.
@@ -971,6 +1142,16 @@ class CarlaMPCDynamics(Dynamics):
 
     def teardown(self):
         print("[CarlaMPCDynamics] Tearing down …")
+        # Stop CARLA native recorder (before destroying actors so the final
+        # frames are properly captured).
+        if getattr(self, '_recorder_started', False):
+            try:
+                self.client.stop_recorder()
+                print(f"[CarlaMPCDynamics] Stopped CARLA recorder → "
+                      f"{getattr(self, '_recording_file', '?')}")
+            except Exception as e:
+                print(f"[CarlaMPCDynamics] WARNING: stop_recorder: {e}")
+            self._recorder_started = False
         # Close sidecar file
         if getattr(self, '_extra_fh', None) is not None:
             try:
@@ -989,7 +1170,9 @@ class CarlaMPCDynamics(Dynamics):
             self._collision_sensor = None
         try:
             for ctrl in getattr(self, 'npc_walker_controllers', []):
-                try: ctrl.stop()
+                try:
+                    if ctrl is not None:
+                        ctrl.stop()
                 except Exception: pass
 
             if hasattr(self, 'camera_manager') and self.camera_manager is not None:
@@ -997,7 +1180,8 @@ class CarlaMPCDynamics(Dynamics):
 
             destroy_ids = []
             for ctrl in getattr(self, 'npc_walker_controllers', []):
-                destroy_ids.append(ctrl.id)
+                if ctrl is not None:
+                    destroy_ids.append(ctrl.id)
             for walker in getattr(self, 'npc_walkers', []):
                 destroy_ids.append(walker.id)
             for npc in getattr(self, 'npc_vehicles', []):
@@ -1162,37 +1346,101 @@ class CarlaMPCDynamics(Dynamics):
                 pass
 
     def _spawn_npc_walkers(self, bp_lib, count):
-        if count == 0:
+        npc_cfg = self.config.get("carla", {}).get("npcs", {})
+        walker_routes = npc_cfg.get("walker_routes", [])
+
+        if count == 0 and not walker_routes:
             return [], []
+
         walker_bps = sorted(bp_lib.filter('walker.pedestrian.*'), key=lambda bp: bp.id)
         controller_bp = bp_lib.find('controller.ai.walker')
-        spawn_locations = []
-        for _ in range(count * 3):
-            loc = self.world.get_random_location_from_navigation()
-            if loc is not None:
-                spawn_locations.append(loc)
-            if len(spawn_locations) >= count:
-                break
 
         walkers, controllers = [], []
-        for i, loc in enumerate(spawn_locations[:count]):
+        self._direct_walker_controls = []   # (walker, WalkerControl) for fixed-route
+
+        # --- Fixed-route walkers: direct control (no AI) --- #
+        for i, route in enumerate(walker_routes):
             bp = walker_bps[i % len(walker_bps)]
             if bp.has_attribute('is_invincible'):
                 bp.set_attribute('is_invincible', 'false')
-            walker = self.world.try_spawn_actor(bp, carla.Transform(loc))
+            sx, sy, sz = route["spawn"]
+            spawn_tf = carla.Transform(carla.Location(x=sx, y=sy, z=sz))
+            walker = self.world.try_spawn_actor(bp, spawn_tf)
             if walker is None:
-                continue
-            ctrl = self.world.spawn_actor(controller_bp, carla.Transform(), attach_to=walker)
+                # Fallback: spawn at a random navmesh location, then teleport.
+                print(f"[CarlaMPCDynamics] Direct spawn failed at ({sx},{sy},{sz}), "
+                      f"trying spawn-then-teleport...")
+                fallback_loc = self.world.get_random_location_from_navigation()
+                if fallback_loc is not None:
+                    walker = self.world.try_spawn_actor(
+                        bp, carla.Transform(fallback_loc))
+                if walker is not None:
+                    walker.set_transform(spawn_tf)
+                    self.world.tick()
+                else:
+                    print(f"[CarlaMPCDynamics] WARNING: Could not spawn "
+                          f"walker {i} (all attempts failed)")
+                    continue
+            # Compute walk direction from spawn to destination
+            dx, dy, dz = route["dest"]
+            dir_x, dir_y, dir_z = dx - sx, dy - sy, dz - sz
+            length = math.sqrt(dir_x**2 + dir_y**2 + dir_z**2)
+            if length > 1e-6:
+                dir_x /= length; dir_y /= length; dir_z /= length
+            speed = route.get("speed", 1.4)
+            ctrl_cmd = carla.WalkerControl(
+                direction=carla.Vector3D(x=dir_x, y=dir_y, z=dir_z),
+                speed=speed, jump=False)
+            self._direct_walker_controls.append((walker, ctrl_cmd))
             walkers.append(walker)
-            controllers.append(ctrl)
+            controllers.append(None)  # placeholder — no AI controller
+            loc = walker.get_transform().location
+            print(f"[CarlaMPCDynamics] Fixed-route walker {i} spawned at"
+                  f" ({loc.x:.1f},{loc.y:.1f},{loc.z:.1f}), target dir"
+                  f" ({dir_x:.2f},{dir_y:.2f}), speed={speed}")
+
+        # --- Random walkers (original behaviour) --- #
+        remaining = count - len(walker_routes)
+        if remaining > 0:
+            spawn_locations = []
+            for _ in range(remaining * 3):
+                loc = self.world.get_random_location_from_navigation()
+                if loc is not None:
+                    spawn_locations.append(loc)
+                if len(spawn_locations) >= remaining:
+                    break
+            offset = len(walkers)
+            for j, loc in enumerate(spawn_locations[:remaining]):
+                bp = walker_bps[(offset + j) % len(walker_bps)]
+                if bp.has_attribute('is_invincible'):
+                    bp.set_attribute('is_invincible', 'false')
+                walker = self.world.try_spawn_actor(bp, carla.Transform(loc))
+                if walker is None:
+                    continue
+                ctrl = self.world.spawn_actor(controller_bp, carla.Transform(), attach_to=walker)
+                walkers.append(walker)
+                controllers.append(ctrl)
 
         self.world.tick()
-        for ctrl in controllers:
+
+        # --- Start AI controllers for random walkers only --- #
+        route_count = len(walker_routes)
+        for i, ctrl in enumerate(controllers):
+            if ctrl is None:
+                continue  # fixed-route walker — uses direct control
             ctrl.start()
             dest = self.world.get_random_location_from_navigation()
             if dest is not None:
                 ctrl.go_to_location(dest)
             ctrl.set_max_speed(1.4)
 
-        print(f"[CarlaMPCDynamics] Spawned {len(walkers)}/{count} NPC walkers.")
+        # Apply first direct control tick
+        for walker, ctrl_cmd in self._direct_walker_controls:
+            try:
+                walker.apply_control(ctrl_cmd)
+            except Exception:
+                pass
+
+        print(f"[CarlaMPCDynamics] Spawned {len(walkers)}/{count + len(walker_routes)} NPC walkers"
+              f" ({len(walker_routes)} fixed-route direct-control).")
         return walkers, controllers
