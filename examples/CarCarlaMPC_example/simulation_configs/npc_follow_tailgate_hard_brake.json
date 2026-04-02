@@ -1,10 +1,24 @@
 {
+    "==== Settings ====": "",
+    "skip": false,
+    "Simulation Options": {
+        "in-the-loop_delay_provider": "execution-driven scarab",
+        "parallel_scarab_simulation": false, 
+        "max_batches": 9999999,
+        "max_batch_size": 4
+    },
+    "fake_delays": {
+      "enable": true,
+      "time_steps":[],
+      "sample_time_multipliers": []
+    },
+
   "label": "npc-follow-tailgate-hard-brake",
   "n_time_steps": 100,
   "system_parameters": {
     "controller_type": "CarlaNPCFollowMPCController",
     "exogenous_input_dimension": 95,
-    "target_speed": 18,
+    "target_speed": 18.25,
     "w_names": [
       "wp_x_1","wp_y_1","wp_x_2","wp_y_2","wp_x_3","wp_y_3",
       "wp_x_4","wp_y_4","wp_x_5","wp_y_5","wp_x_6","wp_y_6",
