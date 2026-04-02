@@ -24,7 +24,10 @@
 
 set -euo pipefail
 
-CONTAINER="carla-sharc-yasin5"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HOST_EXAMPLES_DIR="$SCRIPT_DIR/examples"
+
+CONTAINER="Tyler-container"
 CONTAINER_USER="admin"
 EXAMPLE_NAME="CarCarlaMPC_example"
 CONFIG_NAME="base_config.json"
@@ -35,6 +38,77 @@ RECORD_VIDEO=0
 HIGHRES=0
 
 die() { echo "ERROR: $*" >&2; exit 1; }
+
+verify_container_mounts_current_repo() {
+    local container_name="$1"
+    local host_repo="$2"
+
+    local mounted_repo_source
+    mounted_repo_source="$(docker inspect "$container_name" \
+        --format '{{range .Mounts}}{{if eq .Destination "/home/workspace/sharc"}}{{.Source}}{{end}}{{end}}' \
+        2>/dev/null || true)"
+
+    if [[ -n "$mounted_repo_source" ]]; then
+        if [[ "$mounted_repo_source" != "$host_repo" ]]; then
+            die "Container '$container_name' is mounted to '$mounted_repo_source', but this script is running from '$host_repo'. Start/update the container so /home/workspace/sharc points at '$host_repo'."
+        fi
+        return 0
+    fi
+
+    local mounted_examples_source
+    mounted_examples_source="$(docker inspect "$container_name" \
+        --format '{{range .Mounts}}{{if eq .Destination "/home/workspace/sharc/examples"}}{{.Source}}{{end}}{{end}}' \
+        2>/dev/null || true)"
+
+    if [[ -z "$mounted_examples_source" ]]; then
+        echo "WARNING: Could not determine the source mounted at /home/workspace/sharc/examples in $container_name"
+        return 0
+    fi
+
+    local expected_examples_source="$host_repo/examples"
+    if [[ "$mounted_examples_source" != "$expected_examples_source" ]]; then
+        die "Container '$container_name' is mounted to '$mounted_examples_source', but this script is running from '$expected_examples_source'. Start/update the container so /home/workspace/sharc points at '$host_repo'."
+    fi
+}
+
+sync_results_from_container() {
+    local container_name="$1"
+    local example_name="$2"
+    local host_examples_dir="$3"
+
+    local container_latest
+    container_latest="$(docker exec -u "$CONTAINER_USER" "$container_name" \
+        bash -lc "readlink -f /home/workspace/sharc/examples/${example_name}/latest 2>/dev/null || true")"
+    if [[ -z "$container_latest" ]]; then
+        echo "WARNING: Could not locate latest experiment dir in container for ${example_name}"
+        return 0
+    fi
+
+    local result_basename
+    result_basename="$(basename "$container_latest")"
+    local host_example_dir="$host_examples_dir/$example_name"
+    local host_experiments_dir="$host_example_dir/experiments"
+    local host_result_dir="$host_experiments_dir/$result_basename"
+    local mounted_repo_source
+
+    mounted_repo_source="$(docker inspect "$container_name" \
+        --format '{{range .Mounts}}{{if eq .Destination "/home/workspace/sharc"}}{{.Source}}{{end}}{{end}}' \
+        2>/dev/null || true)"
+
+    if [[ -n "$mounted_repo_source" && "$mounted_repo_source" == "$SCRIPT_DIR" ]]; then
+        if [[ ! -d "$host_result_dir" ]]; then
+            echo "WARNING: Expected host result dir to exist via bind mount, but it was not found: $host_result_dir"
+            return 0
+        fi
+    else
+        mkdir -p "$host_experiments_dir"
+        rm -rf "$host_result_dir"
+        docker cp "${container_name}:${container_latest}" "$host_result_dir"
+    fi
+
+    ln -sfn "$host_result_dir" "$host_example_dir/latest"
+    echo "==> Synced results to: $host_result_dir"
+}
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -56,6 +130,8 @@ done
 docker inspect "$CONTAINER" --format '{{.State.Running}}' 2>/dev/null | grep -q true \
     || die "Container '$CONTAINER' is not running. Start it with: docker start $CONTAINER"
 
+verify_container_mounts_current_repo "$CONTAINER" "$SCRIPT_DIR"
+
 [[ -n "$LOG_FILE" ]] && exec > >(tee -a "$LOG_FILE") 2>&1
 
 echo "==> Container: $CONTAINER (user: $CONTAINER_USER)"
@@ -63,6 +139,7 @@ echo "==> Example:   $EXAMPLE_NAME / $CONFIG_NAME"
 echo "==> Video:     $([ $RECORD_VIDEO -eq 1 ] && echo 'ENABLED (GPU)' || echo 'disabled')$([ $HIGHRES -eq 1 ] && echo ' [HIGH-RES 1280x720]' || true)"
 echo ""
 
+set +e
 docker exec -i \
     -u "$CONTAINER_USER" \
     -e DISPLAY= \
@@ -124,7 +201,7 @@ echo ""
 if [ "${_EXP_VIDEO}" = "1" ]; then
     if ! command -v xvfb-run >/dev/null 2>&1; then
         echo "ERROR: --video requires 'xvfb-run', but it is not installed in the container."
-        echo "Install package 'xvfb' inside ${CONTAINER}, then rerun this command."
+            echo "Install package 'xvfb' in this container (e.g. apt-get install -y xvfb), then rerun."
         exit 1
     fi
     echo "=== [2/5] Starting CARLA (GPU via Xvfb — video recording enabled) ==="
@@ -161,7 +238,28 @@ until python3 -c "import socket; s=socket.socket(); s.settimeout(1); s.connect((
     fi
     sleep 3; elapsed=$((elapsed+3)); echo "  ${elapsed}s..."
 done
-echo "CARLA ready (${elapsed}s)"
+echo "CARLA port ready (${elapsed}s)"
+
+rpc_ready=0
+for attempt in $(seq 1 20); do
+    if python3 - <<PY >/dev/null 2>&1
+import carla
+client = carla.Client("localhost", ${_EXP_PORT})
+client.set_timeout(10.0)
+client.get_world()
+PY
+    then
+        rpc_ready=1
+        echo "CARLA RPC ready (attempt ${attempt})"
+        break
+    fi
+    sleep 2
+done
+if [ $rpc_ready -ne 1 ]; then
+    echo "ERROR: CARLA RPC never became ready. Log:"
+    tail -40 "$CARLA_LOG"
+    exit 1
+fi
 
 # GPU warmup: compile shaders + cache textures so first experiment run is deterministic
 if [ "${_EXP_VIDEO}" = "1" ]; then
@@ -229,3 +327,8 @@ if [ -L latest ]; then
     echo "Results: $(readlink -f latest)"
 fi
 CONTAINER_SCRIPT
+docker_status=$?
+set -e
+
+sync_results_from_container "$CONTAINER" "$EXAMPLE_NAME" "$HOST_EXAMPLES_DIR"
+exit "$docker_status"

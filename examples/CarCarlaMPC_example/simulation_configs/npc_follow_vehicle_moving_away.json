@@ -1,9 +1,10 @@
 {
-  "label": "npc-follow-cost-seed42",
+  "label": "npc-follow-vehicle-moving-away",
+  "n_time_steps": 80,
   "system_parameters": {
     "controller_type": "CarlaNPCFollowMPCController",
     "exogenous_input_dimension": 95,
-    "target_speed": 10.0,
+    "target_speed": 5.0,
     "w_names": [
       "wp_x_1","wp_y_1","wp_x_2","wp_y_2","wp_x_3","wp_y_3",
       "wp_x_4","wp_y_4","wp_x_5","wp_y_5","wp_x_6","wp_y_6",
@@ -59,7 +60,7 @@
   },
   "controller_parameters": {
     "cost_function": "npc_follow_constraint",
-    "TerminalVelocity": 10.0,
+    "TerminalVelocity": 5.0,
     "TerminalVelocityUnits": "mps"
   },
   "carla": {
@@ -69,8 +70,8 @@
       "n_walkers": 0,
       "road_vehicles": 1,
       "road_spacing": 25.0,
-      "road_speed_pct": 10,
-      "road_stop_after_s": 3.0
+      "road_speed_pct": -50,
+      "road_stop_after_s": 999.0
     }
   }
 }

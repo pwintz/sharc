@@ -1,0 +1,38 @@
+{
+  "prediction_horizon": 10,
+  "control_horizon": 10,
+  "n_waypoints": 40,
+  "waypoint_spacing": 0.5,
+  "n_obstacles": 5,
+  "detection_radius": 50.0,
+  "target_speed": 15,
+  "sample_time": 0.05,
+  "controller_type": "CarlaConstraintMPCController",
+  "cost_weights": {
+    "q_path": 2.0,
+    "q_speed": 1.0,
+    "r_accel": 1.0,
+    "r_steer": 10.0,
+    "r_jerk_v": 0.0,
+    "r_jerk_yaw": 0.0,
+    "gamma": 0.90,
+    "ego_radius": 2.5,
+    "safe_margin": 2.0,
+    "lane_half_width": 2.0
+  },
+  "input_limits": {
+    "max_accel": 1.0,
+    "min_accel": -5.0,
+    "max_steer": 0.5,
+    "min_steer": -0.5
+  },
+  "vehicle": {
+    "wheelbase": 2.87,
+    "mass": 1845.0,
+    "Iz": 2500.0,
+    "l_f": 1.35,
+    "l_r": 1.52,
+    "C_f": 80000.0,
+    "C_r": 80000.0
+  }
+}

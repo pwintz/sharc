@@ -26,6 +26,7 @@ void CarlaNPCFollowMPCController::setup(const nlohmann::json& json_data) {
     last_effective_target_speed = target_speed;
 
     q_path = cost.at("q_path").get<double>();
+    q_heading = cost.value("q_heading", q_path);
     q_speed = cost.at("q_speed").get<double>();
     q_follow_gap = cost.value("q_follow_gap", 0.0);
     r_accel = cost.at("r_accel").get<double>();
@@ -88,18 +89,35 @@ void CarlaNPCFollowMPCController::setup(const nlohmann::json& json_data) {
                 const double py = X(j, 1);
                 const double v = X(j, 3);
 
-                J += gj * q_path * closestWaypointDistSq(px, py);
-                const double ev = v - effective_target_speed;
+                double path_s = 0.0;
+                double lat_error = 0.0;
+                double path_heading = 0.0;
+                if (projectOntoWaypointPath(px, py, path_s, lat_error, &path_heading)) {
+                    J += gj * q_path * lat_error * lat_error;
+                    const double heading_error = wrapAngle(X(j, 2) - path_heading);
+                    J += gj * q_heading * heading_error * heading_error;
+                } else {
+                    J += gj * q_path * closestWaypointDistSq(px, py);
+                }
+                double speed_reference = effective_target_speed;
+
+                int lead_index = -1;
+                double forward_distance = std::numeric_limits<double>::infinity();
+                double lateral_offset = 0.0;
+                double lead_speed = target_speed;
+                xVec x_pred;
+                x_pred << X(j, 0), X(j, 1), X(j, 2), X(j, 3);
+                const bool lead_found = findLeadObstacle(
+                    x_pred, lead_index, forward_distance, lateral_offset, lead_speed);
+                if (lead_found && forward_distance <= lead_engage_distance) {
+                    speed_reference = std::min(target_speed, lead_speed);
+                }
+
+                const double ev = v - speed_reference;
                 J += gj * q_speed * ev * ev;
 
                 if (q_follow_gap > 0.0) {
-                    int lead_index = -1;
-                    double forward_distance = std::numeric_limits<double>::infinity();
-                    double lateral_offset = 0.0;
-                    double lead_speed = target_speed;
-                    xVec x_pred;
-                    x_pred << X(j, 0), X(j, 1), X(j, 2), X(j, 3);
-                    if (findLeadObstacle(x_pred, lead_index, forward_distance, lateral_offset, lead_speed)) {
+                    if (lead_found) {
                         const double desired_gap = min_follow_distance;
                         const double gap_error = std::max(0.0, desired_gap - forward_distance);
                         J += gj * q_follow_gap * gap_error * gap_error;
@@ -180,6 +198,13 @@ void CarlaNPCFollowMPCController::setup(const nlohmann::json& json_data) {
     }
 }
 
+double CarlaNPCFollowMPCController::limitSteeringStep(double desired_steer) const {
+    const double bounded = std::clamp(desired_steer, min_steer, max_steer);
+    const double lower = std::max(min_steer, prev_steer - max_steer_step);
+    const double upper = std::min(max_steer, prev_steer + max_steer_step);
+    return std::clamp(bounded, lower, upper);
+}
+
 void CarlaNPCFollowMPCController::calculateControl(int k, double t,
                                                    const xVec& x, const wVec& w) {
     for (int i = 0; i < n_waypoints; ++i) {
@@ -235,17 +260,13 @@ void CarlaNPCFollowMPCController::calculateControl(int k, double t,
         const double v = x(3);
         if (active_obs == 0) {
             const double speed_error = target_speed - v;
-            const double desired_heading = pathHeading(x(0), x(1));
-            const double heading_error = wrapAngle(desired_heading - x(2));
-            const double lat_error = lateralDeviation(x(0), x(1));
-            const double lookahead_speed = std::max(1.0, std::abs(v));
-            const double steer_correction =
-                1.2 * heading_error - std::atan2(0.35 * lat_error, lookahead_speed);
-
             control(0) = std::clamp(0.8 * speed_error, min_accel, max_accel);
-            control(1) = std::clamp(steer_correction, min_steer, max_steer);
+            // When the optimizer hits a precision limit on easy, obstacle-free
+            // lane-following, keep the lateral command smooth instead of
+            // recomputing an aggressive tracking correction that can oscillate.
+            control(1) = limitSteeringStep(0.5 * prev_steer);
             std::cout << "[CarlaNPCFollowMPC] k=" << k
-                      << " INFEASIBLE -> TRACK_FALLBACK"
+                      << " INFEASIBLE -> STRAIGHT_FALLBACK"
                       << " a=" << control(0)
                       << " delta=" << control(1)
                       << " v=" << v
@@ -263,6 +284,7 @@ void CarlaNPCFollowMPCController::calculateControl(int k, double t,
         }
     } else {
         control = mpc_result.cmd;
+        control(1) = limitSteeringStep(control(1));
         std::cout << "[CarlaNPCFollowMPC] k=" << k
                   << " a=" << control(0)
                   << " delta=" << control(1)
@@ -280,6 +302,10 @@ void CarlaNPCFollowMPCController::calculateControl(int k, double t,
     latest_metadata["cost"] = mpc_result.cost;
     latest_metadata["cost_function"] = "npc_follow_constraint";
     latest_metadata["effective_target_speed"] = effective_target_speed;
+    latest_metadata["speed_cost_reference"] =
+        (lead_found && lead_forward_distance <= lead_engage_distance)
+            ? std::min(target_speed, lead_speed)
+            : effective_target_speed;
     latest_metadata["lead_obstacle_found"] = lead_found;
     latest_metadata["lead_obstacle_index"] = lead_index;
     latest_metadata["lead_obstacle_distance"] = lead_found ? lead_forward_distance : -1.0;
@@ -500,7 +526,8 @@ bool CarlaNPCFollowMPCController::findLeadObstacle(const xVec& x,
 bool CarlaNPCFollowMPCController::projectOntoWaypointPath(double px,
                                                           double py,
                                                           double& path_s,
-                                                          double& lateral_offset) const {
+                                                          double& lateral_offset,
+                                                          double* heading) const {
     if (n_waypoints < 2) {
         return false;
     }
@@ -508,6 +535,7 @@ bool CarlaNPCFollowMPCController::projectOntoWaypointPath(double px,
     double accumulated_s = 0.0;
     double best_s = 0.0;
     double best_lat = 0.0;
+    double best_heading = 0.0;
     double best_dist_sq = std::numeric_limits<double>::max();
     bool found = false;
 
@@ -537,6 +565,7 @@ bool CarlaNPCFollowMPCController::projectOntoWaypointPath(double px,
             best_s = accumulated_s + tau * seg_len;
             const double cross = abx * (py - ay) - aby * (px - ax);
             best_lat = (cross >= 0.0 ? 1.0 : -1.0) * std::sqrt(dist_sq);
+            best_heading = std::atan2(aby, abx);
             found = true;
         }
 
@@ -549,6 +578,9 @@ bool CarlaNPCFollowMPCController::projectOntoWaypointPath(double px,
 
     path_s = best_s;
     lateral_offset = best_lat;
+    if (heading != nullptr) {
+        *heading = best_heading;
+    }
     return true;
 }
 

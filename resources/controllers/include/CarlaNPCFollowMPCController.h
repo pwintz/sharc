@@ -47,6 +47,7 @@ private:
     double last_effective_target_speed = 20.0;
 
     double q_path = 1.0;
+    double q_heading = 1.0;
     double q_speed = 0.5;
     double q_follow_gap = 1.0;
     double r_accel = 0.0;
@@ -67,6 +68,7 @@ private:
     double min_accel = -5.0;
     double max_steer = 0.7;
     double min_steer = -0.7;
+    double max_steer_step = 0.01;
 
     int n_waypoints = 0;
     int n_obstacles = 0;
@@ -91,12 +93,14 @@ private:
     bool projectOntoWaypointPath(double px,
                                  double py,
                                  double& path_s,
-                                 double& lateral_offset) const;
+                                 double& lateral_offset,
+                                 double* heading = nullptr) const;
     bool findLeadObstacle(const xVec& x,
                           int& lead_index,
                           double& forward_distance,
                           double& lateral_offset,
                           double& lead_speed) const;
+    double limitSteeringStep(double desired_steer) const;
     void save_state() const;
     void load_state();
 

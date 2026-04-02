@@ -1,5 +1,6 @@
 {
-  "label": "npc-follow-cost-seed42",
+  "label": "npc-follow-vehicle-stopped",
+  "n_time_steps": 80,
   "system_parameters": {
     "controller_type": "CarlaNPCFollowMPCController",
     "exogenous_input_dimension": 95,
@@ -68,9 +69,9 @@
       "n_vehicles": 1,
       "n_walkers": 0,
       "road_vehicles": 1,
-      "road_spacing": 25.0,
+      "road_spacing": 40.0,
       "road_speed_pct": 10,
-      "road_stop_after_s": 3.0
+      "road_stop_after_s": 1.0
     }
   }
 }

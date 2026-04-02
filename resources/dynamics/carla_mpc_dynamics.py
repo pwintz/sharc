@@ -95,6 +95,26 @@ class CarlaMPCDynamics(Dynamics):
     def __init__(self, config):
         super().__init__(config)
 
+    def _connect_traffic_manager(self):
+        """Connect to a free CARLA Traffic Manager port, retrying if needed."""
+        max_tries = 20
+        last_error = None
+        for offset in range(max_tries):
+            candidate_port = self.tm_port + offset
+            try:
+                tm = self.client.get_trafficmanager(candidate_port)
+                self.tm_port = candidate_port
+                print(f"[CarlaMPCDynamics] Using Traffic Manager port {self.tm_port}")
+                return tm
+            except RuntimeError as exc:
+                last_error = exc
+                if "bind error" not in str(exc).lower():
+                    raise
+                print(f"[CarlaMPCDynamics] Traffic Manager port {candidate_port} unavailable, trying next port...")
+        raise RuntimeError(
+            f"Failed to acquire a CARLA Traffic Manager port starting at {self.tm_port}"
+        ) from last_error
+
     @staticmethod
     def _wrap_angle(angle_rad):
         while angle_rad > math.pi:
@@ -134,6 +154,34 @@ class CarlaMPCDynamics(Dynamics):
             )
 
         return min(candidates, key=candidate_key)
+
+    def _advance_waypoint_along_lane(self, wp, distance, road_id=None, lane_id=None):
+        """Advance along the lane in small hops to avoid junction jumps on large distances."""
+        if wp is None:
+            return None
+        remaining = max(0.0, float(distance))
+        current = wp
+        hop_size = min(max(self.wp_spacing, 1.0), 5.0)
+
+        while remaining > 1e-6:
+            hop = min(hop_size, remaining)
+            candidates = current.next(hop)
+            if not candidates:
+                return None
+
+            preferred = candidates
+            if road_id is not None and lane_id is not None:
+                same_lane = [cand for cand in candidates
+                             if cand.road_id == road_id and cand.lane_id == lane_id]
+                if same_lane:
+                    preferred = same_lane
+
+            current = self._choose_reference_successor(current, preferred)
+            if current is None:
+                return None
+            remaining -= hop
+
+        return current
 
     def _build_reference_route(self):
         """Precompute a stable forward route from the ego spawn lane."""
@@ -186,6 +234,7 @@ class CarlaMPCDynamics(Dynamics):
 
         carla_cfg     = self.config.get("carla", {})
         self.seed     = carla_cfg.get("seed", 0)
+        self.tm_port  = int(carla_cfg.get("traffic_manager_port", 8100))
         mpc_opts      = self.config["system_parameters"].get("mpc_options", {})
         self.n_wp     = mpc_opts.get("n_waypoints", 10)
         self.wp_spacing = mpc_opts.get("waypoint_spacing", 2.0)
@@ -236,7 +285,7 @@ class CarlaMPCDynamics(Dynamics):
             settings.max_substep_delta_time = 0.01
         self.world.apply_settings(settings)
 
-        self.traffic_manager = self.client.get_trafficmanager(8100)
+        self.traffic_manager = self._connect_traffic_manager()
         self.traffic_manager.set_synchronous_mode(True)
         self.traffic_manager.set_random_device_seed(self.seed)
         self.world.tick()
@@ -505,7 +554,7 @@ class CarlaMPCDynamics(Dynamics):
 
         # ---- Reset TM seed ------------------------------------------- #
         self.traffic_manager.set_synchronous_mode(False)
-        self.traffic_manager = self.client.get_trafficmanager(8100)
+        self.traffic_manager = self._connect_traffic_manager()
         self.traffic_manager.set_synchronous_mode(True)
         self.traffic_manager.set_random_device_seed(self.seed)
 
@@ -526,6 +575,7 @@ class CarlaMPCDynamics(Dynamics):
         self.npc_vehicles = self._spawn_npc_vehicles(
             bp_lib, spawn_points, self._ego_spawn_idx, self._n_npc_vehicles)
         self._npcs_stop_commanded = False
+        self._stopped_npc_ids = set()
         self.npc_walkers, self.npc_walker_controllers = self._spawn_npc_walkers(
             bp_lib, self._n_npc_walkers)
 
@@ -956,23 +1006,39 @@ class CarlaMPCDynamics(Dynamics):
     # ------------------------------------------------------------------ #
 
     def _update_npc_speed(self, t):
-        """Command road NPCs to stop per config schedule."""
+        """Command road NPCs to stop per config schedule and hold them stopped."""
         npc_cfg = self.config.get("carla", {}).get("npcs", {})
         stop_after = npc_cfg.get("road_stop_after_s")
         if stop_after is None or t < stop_after:
             return
         if getattr(self, '_npcs_stop_commanded', False):
+            self._hold_stopped_npcs()
             return
         self._npcs_stop_commanded = True
+        self._stopped_npc_ids = set()
+        tm_port = self.traffic_manager.get_port()
         for npc in getattr(self, 'npc_vehicles', []):
             try:
                 if npc.is_alive:
-                    self.traffic_manager.vehicle_percentage_speed_difference(
-                        npc, 100)
+                    npc.set_autopilot(False, tm_port)
+                    npc.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0, hand_brake=True))
+                    self._stopped_npc_ids.add(npc.id)
             except Exception:
                 pass
         print(f"[CarlaMPCDynamics] t={t:.2f}s: Commanded NPCs to stop "
               f"(road_stop_after_s={stop_after})")
+
+    def _hold_stopped_npcs(self):
+        """Continuously apply full brake to NPCs that were scheduled to stop."""
+        stopped_ids = getattr(self, '_stopped_npc_ids', set())
+        if not stopped_ids:
+            return
+        for npc in getattr(self, 'npc_vehicles', []):
+            try:
+                if npc.is_alive and npc.id in stopped_ids:
+                    npc.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0, hand_brake=True))
+            except Exception:
+                pass
 
     def evolve_state(self, t0, x0, u, w, tf, metadata=None):
         """Apply control u = (a, delta) to CARLA and return x = (px, py, psi, v)."""
@@ -1005,6 +1071,7 @@ class CarlaMPCDynamics(Dynamics):
         steps = max(1, math.floor((tf - t0) / self.time_step))
 
         for step in range(steps):
+            self._hold_stopped_npcs()
             self.vehicle.apply_control(control)
 
             # Render camera view (skip when headless)
@@ -1174,24 +1241,12 @@ class CarlaMPCDynamics(Dynamics):
             ego_lane_id = ego_wp.lane_id
             current_wp = ego_wp
             for i in range(road_count):
-                nxt = current_wp.next(road_spacing)
-                if not nxt:
-                    print(f"[CarlaMPCDynamics] WARNING: next({road_spacing}) "
-                          f"returned empty at step {i}")
+                best = self._advance_waypoint_along_lane(
+                    current_wp, road_spacing, ego_road_id, ego_lane_id)
+                if best is None:
+                    print(f"[CarlaMPCDynamics] WARNING: could not advance {road_spacing}m "
+                          f"along ego lane at step {i}")
                     break
-                # At junctions, prefer the branch that stays on the same
-                # road or at least the same lane direction.
-                best = nxt[0]
-                if len(nxt) > 1:
-                    for w in nxt:
-                        if w.road_id == ego_road_id and w.lane_id == ego_lane_id:
-                            best = w
-                            break
-                    # Fallback: pick the closest one geometrically
-                    else:
-                        best = min(nxt, key=lambda w: (
-                            (w.transform.location.x - current_wp.transform.location.x) ** 2 +
-                            (w.transform.location.y - current_wp.transform.location.y) ** 2))
                 current_wp = best
                 npc_loc = current_wp.transform.location
                 dx = npc_loc.x - ego_spawn_loc.x

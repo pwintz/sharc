@@ -80,6 +80,7 @@
         "warm_start": true,
         "cost_weights": {
           "q_path": 2.0,
+          "q_heading": 2.0,
           "q_speed": 1.0,
           "r_accel": 0.25,
           "r_steer": 0.5,
@@ -119,6 +120,7 @@
   },
   "carla": {
     "seed": 30,
+    "traffic_manager_port": 8100,
     "npcs": {
       "n_vehicles": 0,
       "n_walkers": 0,
