@@ -197,7 +197,8 @@
             "road_vehicles": 0,
             "road_spacing": 25.0,
             "road_speed_pct": 50,
-            "road_stop_after_s": null
+            "road_stop_after_s": null,
+            "walker_routes": []
         }
     },
     "PARAMS_base_file": "PARAMS.base",

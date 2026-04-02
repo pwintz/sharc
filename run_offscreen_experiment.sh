@@ -40,6 +40,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --example)   EXAMPLE_NAME="$2";   shift 2 ;;
         --config)    CONFIG_NAME="$2";    shift 2 ;;
+        --port)      CARLA_PORT="$2";     shift 2 ;;
         --container) CONTAINER="$2";      shift 2 ;;
         --user)      CONTAINER_USER="$2"; shift 2 ;;
         --timeout)   TIMEOUT="$2";        shift 2 ;;
