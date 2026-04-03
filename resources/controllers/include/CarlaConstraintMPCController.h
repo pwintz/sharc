@@ -79,6 +79,7 @@ private:
 
     double prev_accel = 0.0;
     double prev_steer = 0.0;
+    double last_solve_time_ms = 0.0;
 
     std::string experiment_dir;
     std::string state_file;
@@ -94,6 +95,7 @@ public:
     }
 
     void calculateControl(int k, double t, const xVec& x, const wVec& w) override;
+    void postControl(int k, double t, const xVec& x, const wVec& w) override;
 
 protected:
     void setup(const nlohmann::json& json_data) override;

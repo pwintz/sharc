@@ -153,16 +153,23 @@ void CarlaDynamicMPCController::calculateControl(int k, double t,
     state = x;
 
     mpc_result = nlmpc.optimize(state, control);
-    control    = mpc_result.cmd;
+    if (mpc_result.is_feasible)
+        control = mpc_result.cmd;
+    // On failure, control retains the previous step's value.
 
+    prev_accel = control(0);
+    prev_steer = control(1);
+}
+
+void CarlaDynamicMPCController::postControl(int k, double t,
+                                             const xVec& x, const wVec& w) {
     latest_metadata.clear();
-    latest_metadata["k"]                = k;
-    latest_metadata["t"]                = t;
-    latest_metadata["controller"]       = "CarlaDynamicMPCController";
-
-    latest_metadata["solver_status"]    = mpc_result.solver_status;
-    latest_metadata["is_feasible"]      = mpc_result.is_feasible;
-    latest_metadata["cost"]             = mpc_result.cost;
+    latest_metadata["k"]             = k;
+    latest_metadata["t"]             = t;
+    latest_metadata["controller"]    = "CarlaDynamicMPCController";
+    latest_metadata["solver_status"] = mpc_result.solver_status;
+    latest_metadata["is_feasible"]   = mpc_result.is_feasible;
+    latest_metadata["cost"]          = mpc_result.cost;
 
     auto opt_seq = nlmpc.getOptimalSequence();
     std::vector<double> traj_x, traj_y;
@@ -175,10 +182,9 @@ void CarlaDynamicMPCController::calculateControl(int k, double t,
 
     std::cout << "[CarlaDynamicMPC] k=" << k
               << " a=" << control(0) << " delta=" << control(1)
-              << " cost=" << mpc_result.cost << std::endl;
-
-    prev_accel = control(0);
-    prev_steer = control(1);
+              << " cost=" << mpc_result.cost
+              << (mpc_result.is_feasible ? "" : " FALLBACK")
+              << std::endl;
 
     if (!state_file.empty())
         save_state();

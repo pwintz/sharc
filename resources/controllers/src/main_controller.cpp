@@ -564,6 +564,7 @@ int main()
       }
     #endif
 
+    controller->postControl(k, t, x_predict, w);
     u = controller->getLatestControl();
     metadata_json = controller->getLatestMetadata();
     if (global_debug_levels.debug_program_flow_level >= 2){
