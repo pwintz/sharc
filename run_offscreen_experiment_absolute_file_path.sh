@@ -221,24 +221,44 @@ fi
 echo "Experiment result dir: $RESULT_DIR"
 echo "result_dir=${RESULT_DIR}" >> "$RUN_INFO_FILE"
 
-echo ""
-echo "=== Saving dashboard image ==="
-python3 -m sharc.dashboard --save "$EXAMPLE_DIR" </dev/null
+# echo ""
+# echo "=== Saving dashboard image ==="
+# python3 -m sharc.dashboard --save "$EXAMPLE_DIR" </dev/null
 
-# ═══════════════════════════════════════════════════════════════════════
-# [4b] Compute experiment metrics
-#   Uses RESULT_DIR directly, never EXAMPLE_DIR/latest
-# ═══════════════════════════════════════════════════════════════════════
-echo ""
-echo "=== Computing experiment metrics ==="
+# # ═══════════════════════════════════════════════════════════════════════
+# # [4b] Compute experiment metrics
+# #   Uses RESULT_DIR directly, never EXAMPLE_DIR/latest
+# # ═══════════════════════════════════════════════════════════════════════
+# echo ""
+# echo "=== Computing experiment metrics ==="
+# METRICS_RESULT_DIR="$RESULT_DIR"
+# METRICS_SIM_DIR="$(find "$METRICS_RESULT_DIR" -name 'experiment_data.json' -printf '%h\n' 2>/dev/null | head -1)"
+
+# if [ -n "$METRICS_SIM_DIR" ]; then
+#     echo "Metrics simulation dir: $METRICS_SIM_DIR"
+#     python3 "$EXAMPLE_DIR/compute_metrics.py" "$METRICS_SIM_DIR" </dev/null
+# else
+#     echo "WARNING: No experiment_data.json found for metrics"
+# fi
+
+echo "=== Computing experiment metrics & Dashboard ==="
 METRICS_RESULT_DIR="$RESULT_DIR"
-METRICS_SIM_DIR="$(find "$METRICS_RESULT_DIR" -name 'experiment_data.json' -printf '%h\n' 2>/dev/null | head -1)"
+
+# Identify the exact folder for this specific run
+METRICS_SIM_DIR="$(find "$METRICS_RESULT_DIR" -name 'experiment_data*.json' -printf '%h\n' 2>/dev/null | head -1)"
 
 if [ -n "$METRICS_SIM_DIR" ]; then
-    echo "Metrics simulation dir: $METRICS_SIM_DIR"
+    echo "Simulation dir: $METRICS_SIM_DIR"
+    
+    # 1. Compute metrics for this specific run
     python3 "$EXAMPLE_DIR/compute_metrics.py" "$METRICS_SIM_DIR" </dev/null
+    
+    # 2. Save the UNIQUE dashboard image for this run
+    # Passing --sim_dir prevents it from looking at the "latest" symlink
+    echo "=== Saving dashboard image ==="
+    python3 -m sharc.dashboard --save "$EXAMPLE_DIR" --sim_dir "$METRICS_SIM_DIR" </dev/null
 else
-    echo "WARNING: No experiment_data.json found for metrics"
+    echo "WARNING: No experiment data found; skipping metrics and dashboard."
 fi
 
 # ═══════════════════════════════════════════════════════════════════════

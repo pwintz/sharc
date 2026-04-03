@@ -37,6 +37,8 @@ import numpy as np
 
 
 # ── Data loading ──────────────────────────────────────────────────────
+
+
 def load_experiment_data(experiment_list_dir):
     """Load experiment data from a SHARC experiment_list directory."""
     exp_data_files = []
@@ -331,51 +333,6 @@ class VideoRecorder:
         return self._frame_count
 
 
-def destroy_dynamic_actors(client, world, max_passes=5):
-    """Destroy leftover dynamic actors and wait until CARLA reflects it.
-
-    Replay runs in the same CARLA session as the experiment video export. The
-    just-finished experiment can leave vehicles/sensors visible for another
-    tick, which makes the replay look like it has an extra ego vehicle. We
-    retry destruction and verify the world is actually clear before spawning
-    the replay actors.
-    """
-    prefixes = ('vehicle.', 'sensor.', 'walker.', 'controller.')
-    destroyed_total = 0
-
-    for attempt in range(1, max_passes + 1):
-        existing = [
-            a for a in world.get_actors()
-            if a.type_id.startswith(prefixes)
-        ]
-        if not existing:
-            if destroyed_total > 0:
-                print(f"  Cleared stale actors after {attempt - 1} pass(es)")
-            return
-
-        print(f"  Cleanup pass {attempt}: destroying {len(existing)} stale actors")
-        client.apply_batch_sync(
-            [carla.command.DestroyActor(actor.id) for actor in existing], True)
-        destroyed_total += len(existing)
-
-        try:
-            if world.get_settings().synchronous_mode:
-                world.tick()
-            else:
-                world.wait_for_tick(seconds=1.0)
-        except Exception:
-            time.sleep(0.5)
-
-        time.sleep(0.2)
-
-    remaining = [
-        a for a in world.get_actors()
-        if a.type_id.startswith(prefixes)
-    ]
-    if remaining:
-        summary = ", ".join(f"{a.id}:{a.type_id}" for a in remaining[:8])
-        print(f"WARNING: {len(remaining)} stale actors remain after cleanup: {summary}")
-
 # ── Main replay logic ─────────────────────────────────────────────────
 
 
@@ -456,31 +413,12 @@ def record_video(experiment_list_dir, fps=20, width=640, height=360,
     print(f"  Resolution: {width}x{height}")
 
     # ── Connect to CARLA ──────────────────────────────────────────────
-<<<<<<< HEAD
-    port = int(os.getenv('_EXP_PORT', carla_cfg.get("port", 2400)))
-=======
     port = int(os.getenv('_EXP_PORT', 2000))
->>>>>>> 146c177 (Video generation via CARLA native replay)
     client = carla.Client('localhost', port)
     client.set_timeout(60.0)
     world = client.get_world()
     print(f"  Connected to CARLA on port {port}")
 
-<<<<<<< HEAD
-    # Clean up stale actors from the experiment that was just replayed.
-    destroy_dynamic_actors(client, world)
-
-    # Synchronous mode
-    settings = world.get_settings()
-    settings.synchronous_mode = True
-    settings.fixed_delta_seconds = sample_time
-    world.apply_settings(settings)
-    world.tick()
-
-    # Run one more verified cleanup pass now that the world is ticking under
-    # our control. This flushes actors that survive one async frame.
-    destroy_dynamic_actors(client, world)
-=======
     # ── Thorough world cleanup ────────────────────────────────────────
     # 1. Stop any ongoing replay from a previous run
     try:
@@ -522,7 +460,6 @@ def record_video(experiment_list_dir, fps=20, width=640, height=360,
         print(f"  WARNING: {len(remaining)} actors still present after cleanup")
         for a in remaining:
             print(f"    - {a.id}: {a.type_id}")
->>>>>>> 146c177 (Video generation via CARLA native replay)
 
     # ── Start CARLA native replay (world is already in sync mode) ─────
     # replay_file() recreates all actors from the recording with their
@@ -567,85 +504,7 @@ def record_video(experiment_list_dir, fps=20, width=640, height=360,
     ]
     print(f"  Replay actors: [{', '.join(actor_summary)}]")
 
-<<<<<<< HEAD
-    # ── Spawn NPCs using initial positions from carla_extra.jsonl ────────
-    # The recorded NPC data uses CARLA actor IDs that change each batch
-    # reset.  We ignore IDs and map NPCs by positional index (sorted by
-    # ID within each record).  This ensures continuity across batches.
-    npc_bps = sorted(bp_lib.filter('vehicle.*'), key=lambda bp: bp.id)
-    carla_map = world.get_map()
-
-    # Determine how many NPCs and their initial positions from first record
-    n_npcs_in_data = 0
-    initial_npc_positions = []
-    if npc_records:
-        first_npcs = sorted(npc_records[0].get("npcs", []),
-                            key=lambda n: n["id"])
-        n_npcs_in_data = len(first_npcs)
-        for npc in first_npcs:
-            initial_npc_positions.append((npc["x"], npc["y"]))
-
-    n_to_spawn = max(n_npc_vehicles, n_npcs_in_data)
-    npc_actors = []
-    for i in range(n_to_spawn):
-        bp = npc_bps[i % len(npc_bps)]
-        if bp.has_attribute('color'):
-            colors = bp.get_attribute('color').recommended_values
-            bp.set_attribute('color', colors[i % len(colors)])
-        # Spawn at the recorded initial position if available
-        if i < len(initial_npc_positions):
-            nx, ny = initial_npc_positions[i]
-            npc_wp = carla_map.get_waypoint(
-                carla.Location(x=nx, y=ny, z=0), project_to_road=True)
-            npc_z = npc_wp.transform.location.z if npc_wp else 0.3
-            spawn_tf = carla.Transform(
-                carla.Location(x=nx, y=ny, z=npc_z + 0.3),
-                npc_wp.transform.rotation if npc_wp else carla.Rotation())
-        else:
-            # Fallback: nearest spawn points
-            ego_loc = spawn_points[actual_ego_idx].location
-            available_sp = [(j, sp) for j, sp in enumerate(spawn_points)
-                           if j != actual_ego_idx]
-            available_sp.sort(
-                key=lambda pair: (pair[1].location.x - ego_loc.x) ** 2
-                               + (pair[1].location.y - ego_loc.y) ** 2)
-            spawn_tf = available_sp[i % len(available_sp)][1]
-        npc = world.try_spawn_actor(bp, spawn_tf)
-        if npc is not None:
-            npc.set_simulate_physics(False)
-            npc_actors.append(npc)
-
-    print(f"  Spawned {len(npc_actors)}/{n_to_spawn} NPC vehicles")
-
-    world.tick()
-    world.tick()
-
-    vehicle_actors = list(world.get_actors().filter('vehicle.*'))
-    print(f"  Vehicles visible after replay spawn: {len(vehicle_actors)}")
-
-    # ── Build NPC position+yaw lookup ─────────────────────────────────
-    # Map each NPC record to step index; estimate yaw from consecutive pos.
-    # NPCs are keyed by positional index (sorted by ID within each record),
-    # NOT by raw CARLA actor IDs which change across batch resets.
-    yaw_lookup = estimate_npc_yaws(npc_records, sample_time)
-
-    npc_step_data = {}  # step_idx -> [(x, y, yaw), ...]  (by positional index)
-    for rec in npc_records:
-        t = rec.get("t", 0)
-        step_idx = round(t / sample_time)
-        npcs_sorted = sorted(rec.get("npcs", []), key=lambda n: n["id"])
-        positions = []
-        for idx, npc in enumerate(npcs_sorted):
-            nx = npc["x"]
-            ny = npc["y"]
-            yaw = yaw_lookup.get((idx, t), 0.0)
-            positions.append((nx, ny, yaw))
-        npc_step_data[step_idx] = positions
-
-    # ── Extract MPC overlay data (waypoints + predicted trajectory) ───
-=======
     # ── Extract MPC overlay data ──────────────────────────────────────
->>>>>>> 146c177 (Video generation via CARLA native replay)
     overlay_data = extract_mpc_overlay_data(data)
     if overlay_data:
         print(f"  MPC overlay: {len(overlay_data)} steps with data")

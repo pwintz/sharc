@@ -95,30 +95,19 @@ def find_sim_dir(example_dir: str):
 
 
 def load_data(sim_dir: str):
-    """
-    Load experiment_data_incremental.json from *sim_dir*.
-
-    Both serial and parallel modes write this file:
-      - plant_runner writes it per-step (live progress)
-      - run_experiment_sequential / run_experiment_parallelized overwrite it
-        at the end with the full experiment data (includes config, etc.)
-
-    Returns a dict on success, None on failure.
-    """
-    path = os.path.join(sim_dir, "experiment_data_incremental.json")
-    if not os.path.exists(path):
-        return None
-    try:
-        with open(path, "r") as fh:
-            raw = json.load(fh)
-        # Normalise the key: plant_runner's TimeStepSeries serialises as
-        # "pending_computation" (singular) while the experiment-level code
-        # uses "pending_computations" (plural).  Dashboard expects plural.
-        if "pending_computation" in raw and "pending_computations" not in raw:
-            raw["pending_computations"] = raw.pop("pending_computation")
-        return raw
-    except (json.JSONDecodeError, OSError, ValueError):
-        return None
+    """Checks for both the final and incremental experiment data files."""
+    for target in ["experiment_data.json", "experiment_data_incremental.json"]:
+        path = os.path.join(sim_dir, target)
+        if os.path.exists(path):
+            try:
+                with open(path, "r") as fh:
+                    raw = json.load(fh)
+                if "pending_computation" in raw and "pending_computations" not in raw:
+                    raw["pending_computations"] = raw.pop("pending_computation")
+                return raw
+            except:
+                continue
+    return None
 
 
 def extract_steps(raw: dict):
@@ -380,35 +369,25 @@ class Dashboard:
     # ── save / close ─────────────────────────────────────────────────────
 
     def save_final_image(self):
-        """
-        Save the current dashboard figure to the experiment directory.
-
-        For serial mode the experiment directory is ``sim_dir`` itself.
-        For parallel mode it is the *parent* of ``sim_dir`` (one level up,
-        because ``sim_dir`` is a batch sub-directory of the experiment dir).
-        """
-        sim_dir = self._current_sim_dir
+        # Use the explicit sim_dir passed from the bash script
+        sim_dir = self.sim_dir_override or find_sim_dir(self.example_dir)
         if sim_dir is None:
-            sim_dir = self.sim_dir_override or find_sim_dir(self.example_dir)
-        if sim_dir is None:
-            print("[dashboard] No simulation data found; skipping final image save.")
+            print("[dashboard] No simulation data found; skipping save.")
             return
 
-        # Determine experiment-level directory:
-        #   serial  → sim_dir is directly under experiments/ → save there
-        #   parallel→ sim_dir is a subdir of the experiment dir → save to parent
-        exps_path = os.path.join(self.example_dir, "experiments")
-        parent    = os.path.dirname(sim_dir)
-        if os.path.abspath(parent) == os.path.abspath(exps_path):
-            save_dir = sim_dir   # serial
-        else:
-            save_dir = parent    # parallel
-
-        save_path = os.path.join(save_dir, "dashboard_final.png")
+        # Force axis scaling so the data is actually visible in the PNG
+        for ax in self.axes.values():
+            if hasattr(ax, 'relim'):
+                ax.relim()
+                ax.autoscale_view()
+        
+        # Save directly in the unique simulation directory to avoid conflicts
+        save_path = os.path.join(sim_dir, "dashboard_final.png")
         try:
+            self.fig.canvas.draw()
             self.fig.savefig(save_path, dpi=150, bbox_inches="tight",
                              facecolor=self.fig.get_facecolor())
-            print(f"[dashboard] Final image saved \u2192 {save_path}")
+            print(f"[dashboard] Final image saved → {save_path}")
         except Exception as exc:
             print(f"[dashboard] WARNING: could not save final image: {exc}")
 

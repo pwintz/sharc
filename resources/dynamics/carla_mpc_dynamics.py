@@ -200,6 +200,7 @@ class CarlaMPCDynamics(Dynamics):
         # ---- Connect to CARLA ---------------------------------------- #
         print("[CarlaMPCDynamics] Creating CARLA session …")
         carla_port = int(os.environ.get('_EXP_PORT', 2000))
+        rpc_port = int(os.environ.get('_EXP_RPC_PORT', 8000))
         self.client = carla.Client("localhost", carla_port)
         self.client.set_timeout(60.0)   # generous timeout; nullrhi can be slow to settle
         self.world = self.client.get_world()
@@ -237,7 +238,7 @@ class CarlaMPCDynamics(Dynamics):
             settings.max_substep_delta_time = 0.01
         self.world.apply_settings(settings)
 
-        self.traffic_manager = self.client.get_trafficmanager(8100)
+        self.traffic_manager = self.client.get_trafficmanager(rpc_port)
         self.traffic_manager.set_synchronous_mode(True)
         self.traffic_manager.set_random_device_seed(self.seed)
         self.world.tick()
@@ -540,8 +541,9 @@ class CarlaMPCDynamics(Dynamics):
         _time.sleep(0.5)
 
         # ---- Reset TM seed ------------------------------------------- #
+        rpc_port = int(os.environ.get('_EXP_RPC_PORT', 8000))
         self.traffic_manager.set_synchronous_mode(False)
-        self.traffic_manager = self.client.get_trafficmanager(8100)
+        self.traffic_manager = self.client.get_trafficmanager(rpc_port)
         self.traffic_manager.set_synchronous_mode(True)
         self.traffic_manager.set_random_device_seed(self.seed)
 
