@@ -137,7 +137,11 @@ def compute_metrics(exp_dir):
     feasible_count = 0
     total_solves = 0
     delays = []
+    solve_times = []
     seen_k = set()
+    first_infeasible_step = None
+    infeasible_steps = 0
+    feasible_costs = []
 
     for pc in pc_steps:
         if not isinstance(pc, dict):
@@ -158,22 +162,43 @@ def compute_metrics(exp_dir):
             total_solves += 1
             if meta["is_feasible"]:
                 feasible_count += 1
+                if cost is not None:
+                    feasible_costs.append(cost)
+            else:
+                infeasible_steps += 1
+                if first_infeasible_step is None:
+                    first_infeasible_step = k
         delay = pc.get("delay")
         if delay is not None:
             delays.append(delay)
+        solve_ms = meta.get("solve_time_ms")
+        if solve_ms is not None:
+            solve_times.append(solve_ms)
 
     metrics["avg_mpc_cost"] = float(np.mean(costs)) if costs else None
     metrics["min_mpc_cost"] = float(np.min(costs)) if costs else None
     metrics["max_mpc_cost"] = float(np.max(costs)) if costs else None
     metrics["std_mpc_cost"] = float(np.std(costs)) if costs else None
+    metrics["avg_feasible_cost"] = float(np.mean(feasible_costs)) if feasible_costs else None
 
-    # ── 3. Feasibility rate ──────────────────────────────────────────────
+    # ── 3. Feasibility & control authority ────────────────────────────────
     metrics["feasibility_rate"] = feasible_count / total_solves if total_solves > 0 else None
     metrics["total_solves"] = total_solves
+    metrics["missed_control_updates"] = n_steps - total_solves
+    metrics["infeasible_steps"] = infeasible_steps
+    metrics["emergency_brake_count"] = infeasible_steps
+    metrics["first_infeasible_step"] = first_infeasible_step
+    metrics["control_degradation_ratio"] = (n_steps - total_solves) / n_steps if n_steps > 0 else None
 
     # ── 4. Computation delay stats ───────────────────────────────────────
     metrics["avg_computation_time"] = float(np.mean(delays)) if delays else None
     metrics["max_computation_time"] = float(np.max(delays)) if delays else None
+
+    # ── 4b. Actual MPC solve time (CPU) ──────────────────────────────────
+    metrics["avg_solve_time_ms"] = float(np.mean(solve_times)) if solve_times else None
+    metrics["max_solve_time_ms"] = float(np.max(solve_times)) if solve_times else None
+    metrics["median_solve_time_ms"] = float(np.median(solve_times)) if solve_times else None
+    metrics["total_solve_time_ms"] = float(np.sum(solve_times)) if solve_times else None
 
     # ── 5. Path tracking RMSE ────────────────────────────────────────────
     # Compare ego position (x[0], x[1]) to the nearest waypoint at each step
@@ -262,14 +287,34 @@ def print_metrics(metrics):
     print("  MPC Performance:")
     if metrics["avg_mpc_cost"] is not None:
         print(f"    Avg cost / step:      {metrics['avg_mpc_cost']:.2f}")
+        if metrics["avg_feasible_cost"] is not None:
+            print(f"    Avg feasible cost:    {metrics['avg_feasible_cost']:.2f}")
         print(f"    Min / Max cost:       {metrics['min_mpc_cost']:.2f} / {metrics['max_mpc_cost']:.2f}")
         print(f"    Std cost:             {metrics['std_mpc_cost']:.2f}")
     if metrics["feasibility_rate"] is not None:
         pct = metrics["feasibility_rate"] * 100
         print(f"    Feasibility rate:     {pct:.1f}% ({metrics['total_solves']} solves)")
+    print()
+
+    print("  Control Authority:")
+    print(f"    MPC solves:           {metrics['total_solves']} / {metrics['n_steps']} steps")
+    if metrics["missed_control_updates"] > 0:
+        deg = metrics["control_degradation_ratio"] * 100
+        print(f"    Missed updates:       {metrics['missed_control_updates']} ({deg:.1f}% degraded)")
+    print(f"    Emergency brakes:     {metrics['emergency_brake_count']}")
+    if metrics["first_infeasible_step"] is not None:
+        print(f"    First infeasible:     step {metrics['first_infeasible_step']}")
+    print()
+
+    print("  Solver Timing:")
+    if metrics.get("avg_solve_time_ms") is not None:
+        print(f"    Avg solve time:       {metrics['avg_solve_time_ms']:.2f} ms")
+        print(f"    Median solve time:    {metrics['median_solve_time_ms']:.2f} ms")
+        print(f"    Max solve time:       {metrics['max_solve_time_ms']:.2f} ms")
+        print(f"    Total solve time:     {metrics['total_solve_time_ms']:.1f} ms")
     if metrics["avg_computation_time"] is not None:
-        print(f"    Avg compute time:     {metrics['avg_computation_time']*1000:.1f} ms")
-        print(f"    Max compute time:     {metrics['max_computation_time']*1000:.1f} ms")
+        print(f"    Avg simulated delay:  {metrics['avg_computation_time']*1000:.1f} ms")
+        print(f"    Max simulated delay:  {metrics['max_computation_time']*1000:.1f} ms")
     print()
 
     print("  Tracking:")
