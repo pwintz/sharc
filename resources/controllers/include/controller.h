@@ -75,6 +75,7 @@ public:
 
     // Controller-specific functions
     virtual void calculateControl(int k, double t, const xVec &x, const wVec &w) = 0;
+    virtual void postControl(int k, double t, const xVec &x, const wVec &w) {}
 
 protected:
     // Controller-specific functions

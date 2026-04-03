@@ -225,9 +225,20 @@ void CarlaObstacleMPCController::calculateControl(int k, double t,
     state = x;
 
     mpc_result = nlmpc.optimize(state, control);
-    control    = mpc_result.cmd;
+    if (mpc_result.is_feasible)
+        control = mpc_result.cmd;
 
-    // Metadata for logging / plotting
+    prev_accel = control(0);
+    prev_steer = control(1);
+}
+
+void CarlaObstacleMPCController::postControl(int k, double t,
+                                              const xVec& x, const wVec& w) {
+    // Count active obstacles for console log
+    int active_obs = 0;
+    for (int i = 0; i < n_obstacles; ++i)
+        if (obstacles[i].x < SENTINEL_THRESHOLD) ++active_obs;
+
     latest_metadata.clear();
     latest_metadata["k"]             = k;
     latest_metadata["t"]             = t;
@@ -245,19 +256,12 @@ void CarlaObstacleMPCController::calculateControl(int k, double t,
     latest_metadata["traj_x"] = traj_x;
     latest_metadata["traj_y"] = traj_y;
 
-    // Count active obstacles for console log
-    int active_obs = 0;
-    for (int i = 0; i < n_obstacles; ++i)
-        if (obstacles[i].x < SENTINEL_THRESHOLD) ++active_obs;
-
     std::cout << "[CarlaObstacleMPC] k=" << k
               << " a=" << control(0) << " delta=" << control(1)
               << " cost=" << mpc_result.cost
               << " obs=" << active_obs << "/" << n_obstacles
+              << (mpc_result.is_feasible ? "" : " FALLBACK")
               << std::endl;
-
-    prev_accel = control(0);
-    prev_steer = control(1);
 
     if (!state_file.empty())
         save_state();

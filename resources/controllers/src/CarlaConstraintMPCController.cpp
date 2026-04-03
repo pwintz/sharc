@@ -21,6 +21,7 @@
 #include "debug_levels.hpp"
 
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <iostream>
@@ -174,6 +175,24 @@ void CarlaConstraintMPCController::setup(const nlohmann::json& json_data) {
 
     control.setZero();
 
+    // Solver parameters (from config or defaults)
+    if (sp.contains("mpc_options") && sp["mpc_options"].contains("solver_params")) {
+        const auto& solver = sp["mpc_options"]["solver_params"];
+        NLParameters params;
+        params.maximum_iteration = solver.value("max_iterations", 100);
+        params.relative_ftol     = solver.value("relative_ftol", -1.0);
+        params.relative_xtol     = solver.value("relative_xtol", -1.0);
+        params.absolute_ftol     = solver.value("absolute_ftol", -1.0);
+        params.absolute_xtol     = solver.value("absolute_xtol", -1.0);
+        params.hard_constraints  = solver.value("hard_constraints", true);
+        params.enable_warm_start = solver.value("enable_warm_start", false);
+        nlmpc.setOptimizerParameters(params);
+        std::cout << "[CarlaConstraintMPC] Solver params: max_iter=" << params.maximum_iteration
+                  << " ftol_rel=" << params.relative_ftol
+                  << " xtol_rel=" << params.relative_xtol
+                  << " warm_start=" << params.enable_warm_start << std::endl;
+    }
+
     // State persistence
     experiment_dir = json_data.value("experiment_dir", "");
     state_file = experiment_dir.empty() ? "" : experiment_dir + "/mpc_state.json";
@@ -205,9 +224,6 @@ void CarlaConstraintMPCController::calculateControl(int k, double t,
     state = x;
 
     // Adapt target speed based on proximity to closest obstacle.
-    // This gives the MPC a smooth deceleration profile instead of
-    // relying solely on hard constraints (which cause oscillation
-    // when the short prediction horizon can't plan a full stop).
     effective_target_speed = target_speed;
     double closest_obs_dist = std::numeric_limits<double>::max();
     for (int i = 0; i < n_obstacles; ++i) {
@@ -217,9 +233,7 @@ void CarlaConstraintMPCController::calculateControl(int k, double t,
         double d = std::sqrt(dx * dx + dy * dy);
         if (d < closest_obs_dist) closest_obs_dist = d;
     }
-    // Slow-down zone: linearly reduce target speed from full distance
-    // to zero at the safety boundary.
-    double r_safe_approx = ego_radius + 2.5 + safe_margin;  // conservative obs radius estimate
+    double r_safe_approx = ego_radius + 2.5 + safe_margin;
     double slow_zone_start = r_safe_approx + 20.0;
     if (closest_obs_dist < slow_zone_start) {
         double frac = std::max(0.0,
@@ -227,27 +241,42 @@ void CarlaConstraintMPCController::calculateControl(int k, double t,
         effective_target_speed = target_speed * frac;
     }
 
+    auto t_start = std::chrono::high_resolution_clock::now();
     mpc_result = nlmpc.optimize(state, control);
-
-    // Count active obstacles
-    int active_obs = 0;
-    for (int i = 0; i < n_obstacles; ++i)
-        if (obstacles[i].x < SENTINEL_THRESHOLD) ++active_obs;
+    auto t_end = std::chrono::high_resolution_clock::now();
+    last_solve_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
 
     // On infeasibility → emergency brake
     if (!mpc_result.is_feasible) {
         control(0) = min_accel;
         control(1) = 0.0;
+    } else {
+        control = mpc_result.cmd;
+    }
+
+    prev_accel = control(0);
+    prev_steer = control(1);
+}
+
+void CarlaConstraintMPCController::postControl(int k, double t,
+                                                const xVec& x, const wVec& w) {
+    // Count active obstacles
+    int active_obs = 0;
+    for (int i = 0; i < n_obstacles; ++i)
+        if (obstacles[i].x < SENTINEL_THRESHOLD) ++active_obs;
+
+    if (!mpc_result.is_feasible) {
         std::cout << "[CarlaConstraintMPC] k=" << k
                   << " INFEASIBLE → BRAKE"
-                  << " a=" << control(0) << " v=" << x(3)
+                  << " a=" << control(0) << " v=" << state(3)
+                  << " solve=" << last_solve_time_ms << "ms"
                   << " obs=" << active_obs << "/" << n_obstacles
                   << std::endl;
     } else {
-        control = mpc_result.cmd;
         std::cout << "[CarlaConstraintMPC] k=" << k
                   << " a=" << control(0) << " delta=" << control(1)
                   << " cost=" << mpc_result.cost
+                  << " solve=" << last_solve_time_ms << "ms"
                   << " obs=" << active_obs << "/" << n_obstacles
                   << std::endl;
     }
@@ -260,6 +289,7 @@ void CarlaConstraintMPCController::calculateControl(int k, double t,
     latest_metadata["solver_status"] = mpc_result.solver_status;
     latest_metadata["is_feasible"]   = mpc_result.is_feasible;
     latest_metadata["cost"]          = mpc_result.cost;
+    latest_metadata["solve_time_ms"]  = last_solve_time_ms;
 
     auto opt_seq = nlmpc.getOptimalSequence();
     std::vector<double> traj_x, traj_y;
@@ -269,9 +299,6 @@ void CarlaConstraintMPCController::calculateControl(int k, double t,
     }
     latest_metadata["traj_x"] = traj_x;
     latest_metadata["traj_y"] = traj_y;
-
-    prev_accel = control(0);
-    prev_steer = control(1);
 
     if (!state_file.empty()) save_state();
 }

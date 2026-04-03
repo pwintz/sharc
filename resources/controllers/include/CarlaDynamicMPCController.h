@@ -76,6 +76,7 @@ public:
     }
 
     void calculateControl(int k, double t, const xVec& x, const wVec& w) override;
+    void postControl(int k, double t, const xVec& x, const wVec& w) override;
 
 protected:
     void setup(const nlohmann::json& json_data) override;
