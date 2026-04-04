@@ -24,6 +24,13 @@
 mkdir -p logs
 set -euo pipefail
 
+# Parse KEY=VALUE arguments (e.g., ./submit_carla_job.sh VIDEO=1 CONFIG=foo.json)
+for arg in "$@"; do
+    if [[ "$arg" =~ ^([A-Z_]+)=(.*)$ ]]; then
+        export "${BASH_REMATCH[1]}=${BASH_REMATCH[2]}"
+    fi
+done
+
 # ── Configuration ─────────────────────────────────────────────────────────────
 SIF_FILE="${SIF_FILE:-carla-sharc.sif}"
 EXAMPLE="${EXAMPLE:-MPC_example}"
