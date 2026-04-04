@@ -83,8 +83,8 @@ private:
 
     std::string experiment_dir;
     std::string state_file;
-    void save_state() const;
-    void load_state();
+    void save_state(int k) const;
+    void load_state(int first_time_index = -1);
 
     double closestWaypointDistSq(double px, double py) const;
     double lateralDeviation(double px, double py) const;

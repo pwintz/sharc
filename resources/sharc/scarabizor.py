@@ -573,30 +573,34 @@ class MockTracesToComputationTimesProcessor(TracesToComputationTimesProcessor):
         
     super().__init__(*args, **kwargs)
 
+  def get_all_computation_times(self):
+    """
+    Override the superclass method to return mock delays directly from
+    self.delay_list without scanning the filesystem for DynamoRIO trace
+    directories.  This allows parallel mode with fake delays to work even
+    when the controller was not run under DynamoRIO.
+    """
+    # self.delay_list is a dict {k: delay} passed in at construction time.
+    return dict(self.delay_list)
+
   def get_computation_time_from_trace(self, k):
     """
     Override the superclass' simulate trace to not use Scarab to get the computation times.
+    When DynamoRIO trace directories exist we copy PARAMS.in as a sanity
+    check; otherwise we just return the mock delay directly.
     """
-    trace_dir = self._get_trace_directory_from_index(k)
-      
-    # We don't need PARAMS.in in the trace directory for the sake of the
-    # Mock delays, but it is usful to have it here to check that copying it works
-    # as expected.
-    shutil.copyfile(os.path.join(trace_dir, '..', 'PARAMS.generated'), os.path.join(trace_dir, 'PARAMS.in'))
-    assertFileExists(os.path.join(trace_dir, 'PARAMS.in'))
+    trace_dir = os.path.join(self.sim_dir, f'dynamorio_trace_{k}')
+
+    if os.path.isdir(trace_dir):
+      # We don't need PARAMS.in in the trace directory for the sake of the
+      # Mock delays, but it is useful to have it here to check that copying it works
+      # as expected.
+      params_src = os.path.join(trace_dir, '..', 'PARAMS.generated')
+      if os.path.isfile(params_src):
+        shutil.copyfile(params_src, os.path.join(trace_dir, 'PARAMS.in'))
 
     # Read the fake delay data.
     delay = self.delay_list[k]
-    # if delay == None:
-    #   raise ValueError(f'The delay at index {k} has already been read!')
-    # self.delay_list[k] = None
-
-    # data = {
-    #         "index": dir_index, 
-    #         "trace_dir": self._get_trace_directory_from_index(dir_index), 
-    #         "computation_time": delay
-    #         }
-    # return data
     return delay
 
 # class Scarab:

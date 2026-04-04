@@ -186,7 +186,16 @@
                 "min_steer": -0.5
             },
             "n_obstacles": 0,
-            "detection_radius": 30.0
+            "detection_radius": 30.0,
+            "solver_params": {
+                "max_iterations": 30,
+                "relative_ftol": 0.01,
+                "relative_xtol": 0.01,
+                "absolute_ftol": -1,
+                "absolute_xtol": -1,
+                "hard_constraints": true,
+                "enable_warm_start": true
+            }
         }
     },
     "carla": {

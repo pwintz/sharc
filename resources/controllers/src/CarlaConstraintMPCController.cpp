@@ -196,7 +196,12 @@ void CarlaConstraintMPCController::setup(const nlohmann::json& json_data) {
     // State persistence
     experiment_dir = json_data.value("experiment_dir", "");
     state_file = experiment_dir.empty() ? "" : experiment_dir + "/mpc_state.json";
-    if (!state_file.empty()) load_state();
+    if (!state_file.empty()) {
+        int fti = -1;
+        if (json_data.contains("first_time_index") && !json_data["first_time_index"].is_null())
+            fti = json_data["first_time_index"].get<int>();
+        load_state(fti);
+    }
 }
 
 // ------------------------------------------------------------------ //
@@ -300,31 +305,69 @@ void CarlaConstraintMPCController::postControl(int k, double t,
     latest_metadata["traj_x"] = traj_x;
     latest_metadata["traj_y"] = traj_y;
 
-    if (!state_file.empty()) save_state();
+    if (!state_file.empty()) save_state(k);
 }
 
 // ------------------------------------------------------------------ //
 //  State persistence                                                  //
 // ------------------------------------------------------------------ //
 
-void CarlaConstraintMPCController::save_state() const {
+void CarlaConstraintMPCController::save_state(int k) const {
     nlohmann::json s;
     s["prev_accel"]  = prev_accel;
     s["prev_steer"]  = prev_steer;
+    s["opt_vector"]  = nlmpc.getOptVector();
 
+    std::string payload = s.dump(2);
+
+    // Write generic latest-state file
     std::ofstream f(state_file);
-    if (f.is_open()) f << s.dump(2);
+    if (f.is_open()) f << payload;
+
+    // Write per-step snapshot so the correct warm-start can be loaded
+    // at batch boundaries.
+    if (!experiment_dir.empty()) {
+        std::string step_file = experiment_dir + "/mpc_state_k"
+                                + std::to_string(k) + ".json";
+        std::ofstream sf(step_file);
+        if (sf.is_open()) sf << payload;
+    }
 }
 
-void CarlaConstraintMPCController::load_state() {
-    std::ifstream f(state_file);
+void CarlaConstraintMPCController::load_state(int first_time_index) {
+    // When resuming at a batch boundary, load the per-step snapshot from
+    // the step just before first_time_index so that the warm-start matches
+    // what the solver had at that exact point in the serial run.
+    std::string target_file = state_file;  // fallback
+    if (first_time_index > 0 && !experiment_dir.empty()) {
+        // Try the step right before the batch start, then walk backwards
+        for (int k = first_time_index - 1; k >= 0; --k) {
+            std::string step_file = experiment_dir + "/mpc_state_k"
+                                    + std::to_string(k) + ".json";
+            std::ifstream test(step_file);
+            if (test.is_open()) {
+                target_file = step_file;
+                std::cout << "[CarlaConstraintMPC] Loading warm-start from "
+                          << step_file << std::endl;
+                break;
+            }
+        }
+    }
+
+    std::ifstream f(target_file);
     if (!f.is_open()) return;
     try {
         nlohmann::json s;
         f >> s;
         prev_accel   = s.value("prev_accel", 0.0);
         prev_steer   = s.value("prev_steer", 0.0);
+        control(0) = prev_accel;
+        control(1) = prev_steer;
 
+        if (s.contains("opt_vector")) {
+            std::vector<double> vec = s["opt_vector"].get<std::vector<double>>();
+            nlmpc.setOptVector(vec);
+        }
     } catch (...) {}
 }
 

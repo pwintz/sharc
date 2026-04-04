@@ -35,16 +35,6 @@ def run(sim_dir: str, config_data: dict, dynamics: Dynamics, controller_interfac
   x0 = list_to_column_vec(config_data['x0'])
   u0 = list_to_column_vec(config_data['u0'])
 
-  # If the dynamics provides its own initial state (e.g. a simulator spawn
-  # position), prefer that over the config value.  Uses duck-typing so
-  # non-simulator dynamics are unaffected.
-  if hasattr(dynamics, 'get_initial_state'):
-      x0_from_dynamics = dynamics.get_initial_state()
-      if x0_from_dynamics is not None:
-          print(f"[plant_runner] Overriding config x0 with dynamics initial state: "
-                f"{x0_from_dynamics.flatten()}")
-          x0 = x0_from_dynamics
-  
   assert x0.shape == (n, 1), f'x0={x0} must have the shape: {(n, 1)}'
   assert u0.shape == (m, 1), f'u0={u0} must have the shape: {(m, 1)}'
 
@@ -52,6 +42,30 @@ def run(sim_dir: str, config_data: dict, dynamics: Dynamics, controller_interfac
   pending_computation0 = config_data["pending_computation"]
 
   try:
+    # Notify dynamics of the current simulation directory so it can write
+    # sidecar files (e.g. NPC trajectories, collision events) alongside the
+    # experiment data.  Uses duck-typing so non-CARLA dynamics are unaffected.
+    if hasattr(dynamics, 'set_sim_dir'):
+        dynamics.set_sim_dir(sim_dir)
+
+    # Give simulator-backed dynamics (e.g. CARLA) a chance to reset/fast-forward
+    # when a batch starts at a time-step earlier than the dynamics' current
+    # position (after a rollback due to a missed computation deadline).
+    # This MUST happen before get_initial_state() so that the simulator is
+    # at the correct tick when we read the ego vehicle's state.
+    if hasattr(dynamics, 'prepare_for_batch'):
+        dynamics.prepare_for_batch(first_time_index, config_data)
+
+    # If the dynamics provides its own initial state (e.g. a simulator spawn
+    # position), prefer that over the config value.  Uses duck-typing so
+    # non-simulator dynamics are unaffected.
+    if hasattr(dynamics, 'get_initial_state'):
+        x0_from_dynamics = dynamics.get_initial_state()
+        if x0_from_dynamics is not None:
+            print(f"[plant_runner] Overriding config x0 with dynamics initial state: "
+                  f"{x0_from_dynamics.flatten()}")
+            x0 = x0_from_dynamics
+
     x_start = x0
     u_before = u0
     pending_computation_before = pending_computation0
@@ -63,18 +77,6 @@ def run(sim_dir: str, config_data: dict, dynamics: Dynamics, controller_interfac
                                       t0=first_time_index * sample_time, 
                                       x0=x0, 
                                       pending_computation_prior=pending_computation0)
-    
-    # Notify dynamics of the current simulation directory so it can write
-    # sidecar files (e.g. NPC trajectories, collision events) alongside the
-    # experiment data.  Uses duck-typing so non-CARLA dynamics are unaffected.
-    if hasattr(dynamics, 'set_sim_dir'):
-        dynamics.set_sim_dir(sim_dir)
-
-    # Give simulator-backed dynamics (e.g. CARLA) a chance to reset/fast-forward
-    # when a batch starts at a time-step earlier than the dynamics' current
-    # position (after a rollback due to a missed computation deadline).
-    if hasattr(dynamics, 'prepare_for_batch'):
-        dynamics.prepare_for_batch(first_time_index, config_data)
 
     controller_interface.post_simulator_running() # Post the simulator status for the controller to access.
 

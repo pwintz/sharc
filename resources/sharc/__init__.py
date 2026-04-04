@@ -491,9 +491,33 @@ class Simulation:
       fake_delays = None
 
     in_the_loop_delay_provider =  self.sim_config["Simulation Options"]["in-the-loop_delay_provider"]
-    computation_delay_provider = computation_delay_provider_factory(
-                                            in_the_loop_delay_provider, self.simulation_dir, 
-                                            sample_time, use_fake_delays)
+    use_parallel = self.sim_config["Simulation Options"]["parallel_scarab_simulation"]
+
+    # When fake delays are enabled, use FakeDelayProvider instead of
+    # ScarabDelayProvider.  In serial mode this avoids stat-file index
+    # misalignment.  In parallel mode it prevents a deadlock: the plant
+    # still sends t_delay to the controller via pipe, and
+    # ScarabDelayProvider.get_delay() would block forever waiting for
+    # stat files that Scarab never creates.  The delay values are
+    # overwritten by postprocess_simulation_data() anyway.
+    if fake_delays is not None:
+      print(f"[delay] Using FakeDelayProvider ({'parallel' if use_parallel else 'serial'} mode with fake delays)")
+      computation_delay_provider = FakeDelayProvider(fake_delays)
+    elif use_parallel:
+      # In parallel mode without fake delays, the real computation delays
+      # are computed in post-processing (Scarab on DynamoRIO traces).
+      # During the simulation phase we use a small placeholder delay to
+      # avoid deadlocking on ScarabDelayProvider.waitForStatsFile().
+      # These placeholder values are overwritten by
+      # ParallelSimulationExecutor.postprocess_simulation_data().
+      placeholder_delay = 0.1 * sample_time
+      placeholder_delays = {k: placeholder_delay for k in range(self.first_time_index, self.first_time_index + self.n_time_steps)}
+      print(f"[delay] Using placeholder delays ({placeholder_delay:.4f}s) for parallel mode simulation phase")
+      computation_delay_provider = FakeDelayProvider(placeholder_delays)
+    else:
+      computation_delay_provider = computation_delay_provider_factory(
+                                              in_the_loop_delay_provider, self.simulation_dir, 
+                                              sample_time, use_fake_delays)
 
     # In serial (non-parallel) mode the delay comes live from
     # ScarabDelayProvider.get_delay(), so we apply delay_multiplier here
@@ -944,6 +968,31 @@ def run_experiment_parallelized(experiment_config, params_base: list):
       # which overlaps with the last index of the previous batch.
       actual_time_series.printTimingData(f'Actual time series before appending batch #{batch.batch_init.i_batch}')
       batch.valid_simulation_data.printTimingData(f'Batch #{batch.batch_init.i_batch}')
+
+      # After a batch rollback, CARLA is reset and replayed.  Tiny
+      # floating-point differences (< 1e-3 m) may occur.  Log any
+      # deviation and patch x0 for concatenation continuity.
+      if not actual_time_series.is_empty:
+          prev_x = actual_time_series.x[-1]
+          next_x0 = batch.valid_simulation_data.x0
+          if prev_x != next_x0:
+              import math as _math
+              deviation = []
+              for i_comp, (a, b) in enumerate(zip(prev_x, next_x0)):
+                  d = abs(a - b)
+                  # Handle angular wrap-around for heading component (index 2)
+                  if i_comp == 2 and d > _math.pi:
+                      d = 2 * _math.pi - d
+                  deviation.append(d)
+              max_dev = max(deviation)
+              print(f"[batch handoff] State deviation at k={batch.batch_init.k0}: "
+                    f"max={max_dev:.2e}, per-component={[f'{d:.2e}' for d in deviation]}")
+              if max_dev > 5.0:
+                  print(f"[batch handoff] WARNING: Batch handoff state deviation "
+                        f"large ({max_dev:.6f} m) at k={batch.batch_init.k0}. "
+                        f"prev_x={prev_x}, next_x0={next_x0}")
+              batch.valid_simulation_data.x0 = prev_x
+
       actual_time_series += batch.valid_simulation_data
       pending_computation = batch.batch_init.pending_computation
       if pending_computation and pending_computation.t_end < batch.batch_init.t0:
@@ -1335,6 +1384,25 @@ class OneTimeStepDelayProvider(DelayProvider):
       # self.trace_dir_index += 1
 
     return t_delay, metadata
+
+class FakeDelayProvider(DelayProvider):
+  """Return pre-specified fake delays keyed by time-step index k.
+
+  Unlike ScarabDelayProvider (which reads stat files by a sequential counter),
+  this provider indexes delays by the actual time-step index k.  This avoids
+  index misalignment when some steps are skipped due to delay > sample_time.
+  """
+
+  def __init__(self, fake_delays: dict):
+    assert isinstance(fake_delays, dict)
+    self._fake_delays = fake_delays
+
+  def get_delay(self, k: int):
+    if k not in self._fake_delays:
+      raise KeyError(f'FakeDelayProvider has no delay for k={k}. '
+                     f'Available keys: {sorted(self._fake_delays.keys())}')
+    t_delay = self._fake_delays[k]
+    return t_delay, {}
 
 class NoneDelayProvider(DelayProvider):
 

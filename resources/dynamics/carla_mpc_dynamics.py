@@ -307,6 +307,9 @@ class CarlaMPCDynamics(Dynamics):
         self._tick_log = []          # list of carla.VehicleControl per tick
         self._npc_tick_log = []      # list of [carla.VehicleControl, ...] per tick (one per NPC)
         self._walker_tick_log = []   # list of [carla.WalkerControl, ...] per tick
+        # Transform + velocity snapshots AFTER each tick for deterministic replay.
+        # Each entry is (ego_tf, ego_vel, [(npc_tf, npc_vel), ...], [(w_tf, w_vel), ...])
+        self._transform_log = []     # list of tuples per tick
         self._tick_count = 0         # total CARLA ticks driven so far
         # Map time-step index → tick index at the START of that step.
         # Used to find how far to fast-forward after a rollback.
@@ -475,10 +478,30 @@ class CarlaMPCDynamics(Dynamics):
         self._reset_world()
         self._fast_forward(target_tick)
 
+        # If any time-triggered NPC commands (e.g. road_stop_after_s) should
+        # have fired during the replayed interval, apply them now BEFORE
+        # TM autopilot is re-enabled so NPCs resume with the correct
+        # behaviour from the very first tick after fast-forward.
+        t_after_ff = first_time_index * sim_config["system_parameters"]["sample_time"]
+        npc_cfg = self.config.get("carla", {}).get("npcs", {})
+        stop_after = npc_cfg.get("road_stop_after_s")
+        if stop_after is not None and t_after_ff >= stop_after:
+            self._npcs_stop_commanded = True
+            for npc in getattr(self, 'npc_vehicles', []):
+                try:
+                    if npc.is_alive:
+                        self.traffic_manager.vehicle_percentage_speed_difference(
+                            npc, 100)
+                except Exception:
+                    pass
+            print(f"[CarlaMPCDynamics] Re-applied NPC stop command after FF "
+                  f"(road_stop_after_s={stop_after}, t_after_ff={t_after_ff:.1f})")
+
         # Trim the tick log and step map to discard the invalidated future.
         self._tick_log = self._tick_log[:target_tick]
         self._npc_tick_log = self._npc_tick_log[:target_tick]
         self._walker_tick_log = self._walker_tick_log[:target_tick]
+        self._transform_log = self._transform_log[:target_tick]
         self._tick_count = target_tick
         invalidated = [k for k in self._step_to_tick if k > first_time_index]
         for k in invalidated:
@@ -582,15 +605,60 @@ class CarlaMPCDynamics(Dynamics):
             self.camera_manager = CameraManager(self.world, self.vehicle)
 
         # ---- Settle ticks -------------------------------------------- #
+        # Disable NPC autopilot during the settle tick so the Traffic
+        # Manager's internal state (which may differ across resets) does
+        # not affect the settled physics state.  This ensures the post-
+        # settle state is deterministic regardless of prior TM history.
+        tm_port = self.traffic_manager.get_port()
+        for npc in self.npc_vehicles:
+            try:
+                if npc.is_alive:
+                    npc.set_autopilot(False, tm_port)
+            except Exception:
+                pass
+        for ctrl in self.npc_walker_controllers:
+            try:
+                if ctrl is not None:
+                    ctrl.stop()
+            except Exception:
+                pass
+
         for _ in range(self._n_settle_ticks):
             self.world.tick()
 
+        # Re-enable autopilot after settle so TM controls NPCs from the
+        # first simulation tick onward.
+        for npc in self.npc_vehicles:
+            try:
+                if npc.is_alive:
+                    npc.set_autopilot(True, tm_port)
+            except Exception:
+                pass
+        self._configure_road_npcs_tm()
+        for ctrl in self.npc_walker_controllers:
+            try:
+                if ctrl is not None:
+                    ctrl.start()
+                    dest = self.world.get_random_location_from_navigation()
+                    if dest is not None:
+                        ctrl.go_to_location(dest)
+                    ctrl.set_max_speed(1.4)
+            except Exception:
+                pass
+
     def _fast_forward(self, target_tick):
-        """Replay logged ego + NPC controls from tick 0 to *target_tick*."""
+        """Replay logged ego + NPC controls from tick 0 to *target_tick*.
+
+        After each physics tick, all actors are teleported to their exact
+        logged transforms/velocities so that physics drift cannot
+        accumulate over the fast-forward sequence.
+        """
         n = min(target_tick, len(self._tick_log))
         if n == 0:
             return
-        print(f"[CarlaMPCDynamics] Fast-forwarding {n} ticks …")
+        has_transforms = len(self._transform_log) >= n
+        print(f"[CarlaMPCDynamics] Fast-forwarding {n} ticks "
+              f"(transform-corrected={has_transforms}) …")
 
         # Disable TM autopilot and walker AI so we can apply logged controls
         tm_port = self.traffic_manager.get_port()
@@ -608,7 +676,8 @@ class CarlaMPCDynamics(Dynamics):
                 pass
 
         for i in range(n):
-            self.vehicle.apply_control(self._tick_log[i])
+            ctrl = self._tick_log[i]
+            self.vehicle.apply_control(ctrl)
             # Apply logged NPC vehicle controls
             if i < len(self._npc_tick_log):
                 for j, npc in enumerate(self.npc_vehicles):
@@ -627,7 +696,51 @@ class CarlaMPCDynamics(Dynamics):
                                 walker.apply_control(self._walker_tick_log[i][j])
                         except Exception:
                             pass
+            # Apply direct walker controls (fixed-route walkers).
+            for wkr, wkr_ctrl in getattr(self, '_direct_walker_controls', []):
+                try:
+                    if wkr.is_alive:
+                        wkr.apply_control(wkr_ctrl)
+                except Exception:
+                    pass
             self.world.tick()
+
+            # ── Transform correction ──────────────────────────────────
+            # After the physics tick, teleport every actor to its exact
+            # logged position/velocity.  This eliminates cumulative drift
+            # from PhysX non-determinism across resets.
+            if has_transforms and i < len(self._transform_log):
+                snap = self._transform_log[i]
+                ego_snap, npc_snaps, walker_snaps = snap
+
+                # Ego vehicle
+                ego_tf, ego_vel, ego_angvel = ego_snap
+                self.vehicle.set_transform(ego_tf)
+                self.vehicle.set_target_velocity(ego_vel)
+                self.vehicle.set_target_angular_velocity(ego_angvel)
+
+                # NPC vehicles
+                for j, npc in enumerate(self.npc_vehicles):
+                    if j < len(npc_snaps) and npc_snaps[j] is not None:
+                        try:
+                            if npc.is_alive:
+                                ntf, nvel, nangvel = npc_snaps[j]
+                                npc.set_transform(ntf)
+                                npc.set_target_velocity(nvel)
+                                npc.set_target_angular_velocity(nangvel)
+                        except Exception:
+                            pass
+
+                # Walkers
+                for j, walker in enumerate(self.npc_walkers):
+                    if j < len(walker_snaps) and walker_snaps[j] is not None:
+                        try:
+                            if walker.is_alive:
+                                wtf, wvel = walker_snaps[j]
+                                walker.set_transform(wtf)
+                                walker.set_target_velocity(wvel)
+                        except Exception:
+                            pass
 
         # Re-enable TM autopilot and walker AI for ongoing simulation
         for npc in self.npc_vehicles:
@@ -691,6 +804,35 @@ class CarlaMPCDynamics(Dynamics):
             except Exception:
                 walker_ctrls.append(None)
         self._walker_tick_log.append(walker_ctrls)
+        # Log transforms + velocities for deterministic FF teleportation.
+        ego_tf = self.vehicle.get_transform()
+        ego_vel = self.vehicle.get_velocity()
+        ego_angvel = self.vehicle.get_angular_velocity()
+        npc_transforms = []
+        for npc in getattr(self, 'npc_vehicles', []):
+            try:
+                if npc.is_alive:
+                    npc_transforms.append((
+                        npc.get_transform(), npc.get_velocity(),
+                        npc.get_angular_velocity()))
+                else:
+                    npc_transforms.append(None)
+            except Exception:
+                npc_transforms.append(None)
+        walker_transforms = []
+        for walker in getattr(self, 'npc_walkers', []):
+            try:
+                if walker.is_alive:
+                    walker_transforms.append((
+                        walker.get_transform(), walker.get_velocity()))
+                else:
+                    walker_transforms.append(None)
+            except Exception:
+                walker_transforms.append(None)
+        self._transform_log.append((
+            (ego_tf, ego_vel, ego_angvel),
+            npc_transforms,
+            walker_transforms))
         self._tick_count += 1
 
     def _register_step_start(self, time_step_index: int):
@@ -1085,8 +1227,6 @@ class CarlaMPCDynamics(Dynamics):
             sys.__stdout__.write(log_msg)
             sys.__stdout__.flush()
 
-            # Log the tick BEFORE world.tick() so replay reproduces exactly.
-            self._log_tick(control)
             # Apply direct walker control each tick (fixed-route walkers).
             for wkr, wkr_ctrl in getattr(self, '_direct_walker_controls', []):
                 try:
@@ -1095,6 +1235,11 @@ class CarlaMPCDynamics(Dynamics):
                 except Exception:
                     pass
             self.world.tick()
+
+            # Log the tick AFTER world.tick() so that npc.get_control()
+            # captures the control the TM actually applied during this
+            # tick — not the stale control from the previous tick.
+            self._log_tick(control)
 
         # Register the tick position after this evolve_state completes.
         # If tf lands on a full step boundary, this records the start tick

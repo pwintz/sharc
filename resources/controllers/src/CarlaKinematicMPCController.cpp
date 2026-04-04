@@ -177,6 +177,7 @@ void CarlaKinematicMPCController::save_state() const {
     nlohmann::json s;
     s["prev_accel"] = prev_accel;
     s["prev_steer"] = prev_steer;
+    s["opt_vector"] = nlmpc.getOptVector();
     std::ofstream f(state_file);
     if (f.is_open()) f << s.dump(2);
 }
@@ -189,6 +190,12 @@ void CarlaKinematicMPCController::load_state() {
         f >> s;
         prev_accel  = s.value("prev_accel", 0.0);
         prev_steer  = s.value("prev_steer", 0.0);
+        control(0) = prev_accel;
+        control(1) = prev_steer;
+        if (s.contains("opt_vector")) {
+            std::vector<double> vec = s["opt_vector"].get<std::vector<double>>();
+            nlmpc.setOptVector(vec);
+        }
     } catch (...) {}
 }
 
