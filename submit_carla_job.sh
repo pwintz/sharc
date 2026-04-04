@@ -15,6 +15,7 @@
 #   sbatch submit_carla_job.sh                          # Run default config
 #   sbatch --array=0-4 submit_carla_job.sh              # Run all 5 test scenarios
 #   CONFIG=my_config.json sbatch submit_carla_job.sh    # Custom config
+#   VIDEO=1 sbatch submit_carla_job.sh                  # Enable video recording
 #
 # Prerequisites:
 #   1. Build SIF:  apptainer build carla-sharc.sif docker-daemon://carla-sharc
@@ -29,11 +30,11 @@ EXAMPLE="${EXAMPLE:-MPC_example}"
 
 # Config files for array jobs (edit as needed)
 CONFIG_FILES=(
+    "lead_vehicle_safe.json"
     "test_lead_vehicle_serial.json"
     "test_lead_vehicle_parallel.json"
     "test_obstacle_serial.json"
     "test_obstacle_parallel.json"
-    "obstacle_constraint.json"
 )
 
 # Select config: array job uses SLURM_ARRAY_TASK_ID, single job uses CONFIG or first entry
@@ -71,11 +72,17 @@ if [[ ! -f "$SIF_FILE" ]]; then
 fi
 
 # ── Run ───────────────────────────────────────────────────────────────────────
+VIDEO_FLAG=""
+if [[ "${VIDEO:-0}" == "1" ]]; then
+    VIDEO_FLAG="--video"
+fi
+
 ./run_experiment_apptainer.sh \
     --sif "$SIF_FILE" \
     --example "$EXAMPLE" \
     --config "$CONFIG" \
-    --timeout 600
+    --timeout 600 \
+    $VIDEO_FLAG
 
 EXIT_CODE=$?
 

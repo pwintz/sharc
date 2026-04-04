@@ -65,16 +65,53 @@ echo "==> Example:  $EXAMPLE_NAME / $CONFIG_NAME"
 echo "==> Video:    $([ $RECORD_VIDEO -eq 1 ] && echo 'ENABLED' || echo 'disabled')"
 echo ""
 
+# ── Detect host Vulkan ICD files ─────────────────────────────────────────────
+# CARLA uses Vulkan for GPU rendering. Apptainer --nv handles CUDA/GLX but NOT
+# the Vulkan ICD loader config. We must bind them from the host.
+VULKAN_BINDS=""
+VULKAN_ICD=""
+for icd_dir in /usr/share/vulkan/icd.d /etc/vulkan/icd.d /usr/share/glvnd/egl_vendor.d; do
+    if [[ -d "$icd_dir" ]]; then
+        VULKAN_BINDS="$VULKAN_BINDS --bind $icd_dir:$icd_dir"
+    fi
+done
+# Find the NVIDIA Vulkan ICD file
+for icd_file in /usr/share/vulkan/icd.d/nvidia_icd.json \
+                /etc/vulkan/icd.d/nvidia_icd.json \
+                /usr/share/vulkan/icd.d/nvidia_icd.x86_64.json; do
+    if [[ -f "$icd_file" ]]; then
+        VULKAN_ICD="$icd_file"
+        break
+    fi
+done
+
+# Also bind EGL vendor files if present (for headless rendering)
+EGL_BINDS=""
+for egl_dir in /usr/share/glvnd/egl_vendor.d /usr/share/egl/egl_external_platform.d; do
+    if [[ -d "$egl_dir" ]]; then
+        EGL_BINDS="$EGL_BINDS --bind $egl_dir:$egl_dir"
+    fi
+done
+
 # ── Run inside Apptainer ─────────────────────────────────────────────────────
-# --nv        : NVIDIA GPU pass-through
-# --writable-tmpfs : allow writes to /tmp etc. without needing a writable overlay
-# --bind      : mount local resources/examples so edits persist on the host
+# --nv               : NVIDIA GPU pass-through (CUDA + GLX libs)
+# --writable-tmpfs   : allow writes to /tmp etc. without needing a writable overlay
+# --bind             : mount local resources/examples so edits persist on the host
+# --env              : set NVIDIA env vars for full GPU rendering (graphics + video)
 #
 # The inner script is identical to the CONTAINER_SCRIPT heredoc in
 # run_offscreen_experiment.sh, ensuring functional equivalence.
+# shellcheck disable=SC2086
 apptainer exec \
     --nv \
     --writable-tmpfs \
+    --env "NVIDIA_DRIVER_CAPABILITIES=all" \
+    --env "NVIDIA_VISIBLE_DEVICES=all" \
+    --env "__NV_PRIME_RENDER_OFFLOAD=1" \
+    --env "__GLX_VENDOR_LIBRARY_NAME=nvidia" \
+    ${VULKAN_ICD:+--env "VK_ICD_FILENAMES=$VULKAN_ICD"} \
+    $VULKAN_BINDS \
+    $EGL_BINDS \
     --bind "$SCRIPT_DIR/resources:/home/workspace/sharc/resources" \
     --bind "$SCRIPT_DIR/examples:/home/workspace/sharc/examples" \
     "$SIF_FILE" \
@@ -102,6 +139,31 @@ conda activate carla 2>/dev/null || true
 echo "Running as: \$(whoami)"
 
 # ═══════════════════════════════════════════════════════════════════════
+# [0/5] GPU diagnostics
+# ═══════════════════════════════════════════════════════════════════════
+echo ""
+echo "=== GPU Diagnostics ==="
+if command -v nvidia-smi &>/dev/null; then
+    nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader 2>/dev/null \
+        || echo "  nvidia-smi failed (GPU may not be accessible)"
+else
+    echo "  WARNING: nvidia-smi not found"
+fi
+# Check Vulkan availability
+if command -v vulkaninfo &>/dev/null; then
+    echo "  Vulkan: \$(vulkaninfo --summary 2>/dev/null | grep -i 'gpu' | head -1 || echo 'not available')"
+else
+    echo "  vulkaninfo not found (Vulkan may still work via ICD)"
+fi
+# Check if NVIDIA libraries are loadable
+if ldconfig -p 2>/dev/null | grep -q libEGL_nvidia; then
+    echo "  libEGL_nvidia: found"
+else
+    echo "  WARNING: libEGL_nvidia not in ldconfig"
+fi
+echo ""
+
+# ═══════════════════════════════════════════════════════════════════════
 # [1/5] Kill stale CARLA
 # ═══════════════════════════════════════════════════════════════════════
 echo ""
@@ -116,6 +178,8 @@ sleep 3
 echo ""
 if [ "\${_EXP_VIDEO}" = "1" ]; then
     echo "=== [2/5] Starting CARLA (GPU via Xvfb — video recording enabled) ==="
+    # Ensure Vulkan ICD is set for the CARLA process
+    export VK_ICD_FILENAMES="\${VK_ICD_FILENAMES:-}"
     xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24 +extension GLX" \\
         "\$CARLA_ROOT/CarlaUE4.sh" -RenderOffScreen -nosound \\
         -carla-rpc-port="\${_EXP_PORT}" > "\$CARLA_LOG" 2>&1 &
@@ -130,29 +194,54 @@ echo "CARLA PID: \$CARLA_PID | log: \$CARLA_LOG"
 trap 'echo "Stopping CARLA..."; kill "\$CARLA_PID" 2>/dev/null; pkill -f CarlaUE4 2>/dev/null; pkill -f Xvfb 2>/dev/null; wait "\$CARLA_PID" 2>/dev/null' EXIT INT TERM
 
 # ═══════════════════════════════════════════════════════════════════════
-# [3/5] Wait for CARLA
+# [3/5] Wait for CARLA RPC (port open + client connection)
 # ═══════════════════════════════════════════════════════════════════════
 echo ""
 echo "=== [3/5] Waiting for CARLA on port \${_EXP_PORT} (timeout \${_EXP_TIMEOUT}s) ==="
 elapsed=0
 until python3 -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('localhost',\${_EXP_PORT})); s.close()" 2>/dev/null; do
     if ! kill -0 "\$CARLA_PID" 2>/dev/null && ! pgrep -f CarlaUE4 >/dev/null 2>&1; then
-        echo "ERROR: CARLA died. Log:"
+        echo "ERROR: CARLA process died. Last 40 lines of log:"
         tail -40 "\$CARLA_LOG"
         exit 1
     fi
     if [ \$elapsed -ge \$_EXP_TIMEOUT ]; then
-        echo "ERROR: Timeout after \${_EXP_TIMEOUT}s. Log:"
+        echo "ERROR: Timeout waiting for port after \${_EXP_TIMEOUT}s. Log:"
         tail -40 "\$CARLA_LOG"
         exit 1
     fi
     sleep 3; elapsed=\$((elapsed+3)); echo "  \${elapsed}s..."
 done
-echo "CARLA ready (\${elapsed}s)"
+echo "Port open (\${elapsed}s). Waiting for CARLA RPC to be fully ready..."
+
+# Port open ≠ RPC ready. Wait for the CARLA Python client to connect.
+# This is critical: CARLA opens the TCP port before the world is loaded.
+rpc_ready=0
+for i in \$(seq 1 60); do
+    if python3 -c "
+import carla, os
+port = int(os.getenv('_EXP_PORT', 2000))
+c = carla.Client('localhost', port)
+c.set_timeout(5.0)
+w = c.get_world()
+print('  RPC ready: ' + w.get_map().name)
+" </dev/null 2>/dev/null; then
+        rpc_ready=1
+        break
+    fi
+    sleep 3
+    echo "  RPC not ready yet (\$((elapsed + i*3))s)..."
+done
+
+if [ \$rpc_ready -eq 0 ]; then
+    echo "ERROR: CARLA port is open but RPC never became ready. Log:"
+    tail -40 "\$CARLA_LOG"
+    exit 1
+fi
 
 if [ "\${_EXP_VIDEO}" = "1" ]; then
     echo "  Running GPU warmup..."
-    python3 "\${EXAMPLE_DIR}/warmup_carla.py" </dev/null 2>&1 || echo "  (warmup skipped)"
+    python3 "\${EXAMPLE_DIR}/warmup_carla.py" --wait </dev/null 2>&1 || echo "  (warmup skipped)"
 fi
 
 # ═══════════════════════════════════════════════════════════════════════
