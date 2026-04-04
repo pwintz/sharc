@@ -305,6 +305,11 @@ RUN wget -q https://github.com/Kitware/CMake/releases/download/v3.28.6/cmake-3.2
 WORKDIR $TOOLS_DIR
 ADD https://github.com/nicolapiccinelli/libmpc.git#1.0.0 $LIBMPC_DIR
 RUN $LIBMPC_DIR/configure.sh --disable-test
+
+# Patch libmpc: add getOptVector/setOptVector for MPC warm-start persistence
+COPY libmpc_warm_start.patch /tmp/libmpc_warm_start.patch
+RUN cd $LIBMPC_DIR && patch -p1 < /tmp/libmpc_warm_start.patch && rm /tmp/libmpc_warm_start.patch
+
 RUN mkdir $LIBMPC_DIR/build && cd $LIBMPC_DIR/build && cmake .. && cmake --install .
 
 #═══════════════════════════════════════════════════════════════════════════════
@@ -343,9 +348,19 @@ RUN if [ -f "$RESOURCES_DIR/sharc/requirements.txt" ]; then \
 
 # Copy runner scripts to a well-known location
 COPY --chown=$USERNAME:$USERNAME run_offscreen_experiment.sh $WORKSPACE_ROOT/sharc/run_offscreen_experiment.sh
-COPY --chown=$USERNAME:$USERNAME run_scenario_leaderboard.sh $WORKSPACE_ROOT/sharc/run_scenario_leaderboard.sh
-RUN chmod +x $WORKSPACE_ROOT/sharc/run_offscreen_experiment.sh \
-             $WORKSPACE_ROOT/sharc/run_scenario_leaderboard.sh
+RUN chmod +x $WORKSPACE_ROOT/sharc/run_offscreen_experiment.sh
+
+#═══════════════════════════════════════════════════════════════════════════════
+#  STAGE 6b: Build MPC Example Controller
+#  Build the C++ MPC controller so experiments work out of the box.
+#═══════════════════════════════════════════════════════════════════════════════
+RUN if [ -f "$EXAMPLES_DIR/MPC_example/CMakeLists.txt" ]; then \
+        mkdir -p $EXAMPLES_DIR/MPC_example/build && \
+        cd $EXAMPLES_DIR/MPC_example/build && \
+        cmake .. && \
+        make -j$(nproc) && \
+        echo "✓ MPC example controller built"; \
+    fi
 
 #═══════════════════════════════════════════════════════════════════════════════
 #  STAGE 7: Final Configuration

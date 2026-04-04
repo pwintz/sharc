@@ -1,0 +1,71 @@
+--- a/include/mpc/NLMPC/NLOptimizer.hpp
++++ b/include/mpc/NLMPC/NLOptimizer.hpp
+@@ -12,6 +12,8 @@
+ #include <mpc/Types.hpp>
+ 
+ #include <nlopt.hpp>
++#include <vector>
++#include <cassert>
+ 
+ namespace mpc
+ {
+@@ -632,6 +634,32 @@
+             return ub;
+         }
+ 
++        /**
++         * @brief Get the optimizer's warm-start vector for state persistence
++         * @return warm-start vector as std::vector<double>
++         */
++        std::vector<double> getOptVector() const
++        {
++            return std::vector<double>(opt_vector.data(), opt_vector.data() + opt_vector.size());
++        }
++
++        /**
++         * @brief Restore the warm-start vector from persisted state
++         * @param vec previously saved warm-start vector (must match size)
++         */
++        void setOptVector(const std::vector<double>& vec)
++        {
++            assert(static_cast<int>(vec.size()) == opt_vector.size());
++            for (size_t i = 0; i < vec.size(); ++i)
++                opt_vector(i) = vec[i];
++            is_first_iteration = false;
++        }
++
++        /**
++         * @brief Check whether the optimizer has run at least once
++         */
++        bool isFirstIteration() const { return is_first_iteration; }
++
+     private:
+         /**
+          * @brief Update the bounds for the internal solver
+--- a/include/mpc/NLMPC.hpp
++++ b/include/mpc/NLMPC.hpp
+@@ -463,6 +463,24 @@
+             throw std::runtime_error("Output constraints cannot be set for this type of MPC");
+         }
+ 
++        /**
++         * @brief Get the optimizer's warm-start vector for state persistence across batches.
++         * @return warm-start vector as std::vector<double>
++         */
++        std::vector<double> getOptVector() const
++        {
++            return ((const NLOptimizer<MPCSize(Tnx, Tnu, 0, Tny, Tph, Tch, Tineq, Teq)> *)optPtr)->getOptVector();
++        }
++
++        /**
++         * @brief Restore the optimizer's warm-start vector from persisted state.
++         * @param vec previously saved warm-start vector (must match size)
++         */
++        void setOptVector(const std::vector<double>& vec)
++        {
++            ((NLOptimizer<MPCSize(Tnx, Tnu, 0, Tny, Tph, Tch, Tineq, Teq)> *)optPtr)->setOptVector(vec);
++        }
++
+     protected:
+         /**
+          * @brief Initilization hook for the interface
