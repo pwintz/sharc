@@ -28,6 +28,10 @@ import carla
 import random
 import pygame
 import sys
+try:
+    from dynamics.scenario_runner_adapter import ScenarioRunnerAdapter
+except Exception:
+    ScenarioRunnerAdapter = None
 
 
 def _has_display():
@@ -137,6 +141,18 @@ class CarlaMPCDynamics(Dynamics):
 
     def _build_reference_route(self):
         """Precompute a stable forward route from the ego spawn lane."""
+        external_route = []
+        if getattr(self, "_scenario_adapter", None) is not None:
+            external_route = self._scenario_adapter.get_route_waypoints()
+        if external_route:
+            self._reference_route = [(float(x), float(y)) for x, y in external_route]
+            self._reference_route_idx = 0
+            print(
+                f"[CarlaMPCDynamics] Loaded external reference route with "
+                f"{len(self._reference_route)} waypoint(s)."
+            )
+            return
+
         start_wp = self._carla_map.get_waypoint(
             self.vehicle.get_transform().location,
             project_to_road=True,
@@ -268,6 +284,18 @@ class CarlaMPCDynamics(Dynamics):
 
         # Cache the CARLA map for waypoint queries (needed by NPC road spawning)
         self._carla_map = self.world.get_map()
+        self._scenario_cfg = carla_cfg.get("scenario_runner", {})
+        self._scenario_adapter = None
+        if self._scenario_cfg.get("enabled", False):
+            if ScenarioRunnerAdapter is None:
+                print("[CarlaMPCDynamics] WARNING: scenario_runner adapter import failed; running without adapter.")
+            else:
+                self._scenario_adapter = ScenarioRunnerAdapter(
+                    world=self.world,
+                    traffic_manager=self.traffic_manager,
+                    cfg=self._scenario_cfg,
+                    seed=self.seed,
+                )
 
         # ---- NPC spawning -------------------------------------------- #
         npc_cfg = carla_cfg.get("npcs", {})
@@ -275,6 +303,8 @@ class CarlaMPCDynamics(Dynamics):
         n_walkers  = npc_cfg.get("n_walkers", 0)
         self.npc_vehicles = self._spawn_npc_vehicles(bp_lib, spawn_points, actual_ego_idx, n_vehicles)
         self.npc_walkers, self.npc_walker_controllers = self._spawn_npc_walkers(bp_lib, n_walkers)
+        if self._scenario_adapter is not None:
+            self._scenario_adapter.setup(self.vehicle, self._carla_map, bp_lib)
 
         # ---- Force all traffic lights to stay green ------------------- #
         for tl in self.world.get_actors().filter('traffic.traffic_light'):
@@ -587,6 +617,8 @@ class CarlaMPCDynamics(Dynamics):
         self._npcs_stop_commanded = False
         self.npc_walkers, self.npc_walker_controllers = self._spawn_npc_walkers(
             bp_lib, self._n_npc_walkers)
+        if getattr(self, '_scenario_adapter', None) is not None:
+            self._scenario_adapter.on_world_reset(self.vehicle, self._carla_map, bp_lib)
 
         # ---- Freeze traffic lights ----------------------------------- #
         for tl in self.world.get_actors().filter('traffic.traffic_light'):
@@ -1069,6 +1101,25 @@ class CarlaMPCDynamics(Dynamics):
 
             candidates.append((route_progress, best_lat, dist, loc.x, loc.y, vel.x, vel.y, radius))
 
+        scenario_candidates = []
+        if getattr(self, "_scenario_adapter", None) is not None:
+            scenario_candidates = self._scenario_adapter.get_obstacles(
+                detection_radius=self.detection_radius,
+                ego_loc=ego_loc,
+            )
+            for ox, oy, ovx, ovy, radius in scenario_candidates:
+                dist = math.hypot(ox - ego_loc.x, oy - ego_loc.y)
+                candidates.append((route_idx, 0.0, dist, ox, oy, ovx, ovy, radius))
+
+        if (
+            getattr(self, "_scenario_adapter", None) is not None
+            and self._scenario_adapter.use_scenario_obstacles_only
+        ):
+            candidates = []
+            for ox, oy, ovx, ovy, radius in scenario_candidates:
+                dist = math.hypot(ox - ego_loc.x, oy - ego_loc.y)
+                candidates.append((route_idx, 0.0, dist, ox, oy, ovx, ovy, radius))
+
         candidates.sort(key=lambda c: (c[0], c[1], c[2]))
 
         return [(ox, oy, ovx, ovy, r)
@@ -1177,6 +1228,8 @@ class CarlaMPCDynamics(Dynamics):
 
         # Update NPC behavior (e.g., scheduled stop)
         self._update_npc_speed(t0)
+        if getattr(self, "_scenario_adapter", None) is not None:
+            self._scenario_adapter.tick(t0)
 
         accel  = float(u[0])  # longitudinal acceleration [m/s^2]
         delta  = float(u[1])  # steering angle [rad]  (-1..+1)
@@ -1304,6 +1357,11 @@ class CarlaMPCDynamics(Dynamics):
             except Exception:
                 pass
             self._extra_fh = None
+        if getattr(self, "_scenario_adapter", None) is not None:
+            try:
+                self._scenario_adapter.teardown()
+            except Exception as e:
+                print(f"[CarlaMPCDynamics] Warning: scenario adapter teardown: {e}")
         # Stop and destroy collision sensor first (stops the sensor stream)
         if getattr(self, '_collision_sensor', None) is not None:
             try:

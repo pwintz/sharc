@@ -322,7 +322,7 @@ RUN git clone --depth 1 --branch v0.9.16 \
     https://github.com/carla-simulator/scenario_runner.git \
     $SCENARIO_RUNNER_ROOT && \
     cd $SCENARIO_RUNNER_ROOT && \
-    $CONDA_DIR/envs/carla/bin/pip install -r requirements.txt || true
+    $CONDA_DIR/envs/carla/bin/pip install -r requirements.txt
 
 #═══════════════════════════════════════════════════════════════════════════════
 #  STAGE 6: Copy SHARC Source Code (Optional)
@@ -391,6 +391,7 @@ RUN echo "═══════════════════════�
     test -e $RESOURCES_DIR && echo "✓ SHARC Resources" && \
     test -e $EXAMPLES_DIR && echo "✓ SHARC Examples" && \
     test -e $SCENARIO_RUNNER_ROOT && echo "✓ Scenario Runner" && \
+    $CONDA_DIR/envs/carla/bin/python -c "import srunner; print('✓ Scenario Runner Python package')" && \
     which xvfb-run && echo "✓ Xvfb (headless GPU rendering)" && \
     which ffmpeg && echo "✓ FFmpeg (video recording)" && \
     $CONDA_DIR/envs/carla/bin/python -c "import carla; print('✓ CARLA Python API')" && \

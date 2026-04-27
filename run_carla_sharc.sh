@@ -5,6 +5,40 @@
 
 set -e
 
+# Run a quick scenario_runner preflight inside the container using the
+# shared CARLA conda environment. If dependencies are missing, attempt
+# an in-place install from requirements.txt.
+scenario_runner_preflight() {
+    local container_name="$1"
+    echo -e "${BLUE}==> Scenario Runner preflight${NC}"
+    docker exec -u admin "$container_name" bash -lc '
+set -e
+source /opt/conda/etc/profile.d/conda.sh 2>/dev/null || true
+conda activate carla 2>/dev/null || true
+SR_ROOT="/home/workspace/scenario_runner"
+if [ ! -d "$SR_ROOT" ]; then
+    echo "[preflight] scenario_runner directory not found at $SR_ROOT"
+    exit 1
+fi
+if ! python -c "import srunner" >/dev/null 2>&1; then
+    echo "[preflight] srunner import failed; installing requirements..."
+    if [ -f "$SR_ROOT/requirements.txt" ]; then
+        pip install -r "$SR_ROOT/requirements.txt"
+    fi
+fi
+python - <<'"'"'PY'"'"'
+import os
+import srunner
+print(f"[preflight] srunner import OK: {os.path.dirname(srunner.__file__)}")
+PY
+'
+}
+
+attach_shell() {
+    local container_name="$1"
+    docker exec -it -u "$(id -u):$(id -g)" "$container_name" /bin/bash
+}
+
 # Activate docker group to avoid sudo
 # If docker doesn't work, run: newgrp docker
 # Then run this script again
@@ -54,7 +88,8 @@ fi
 if docker ps -q -f name="$CONTAINER_NAME" | grep -q .; then
     echo -e "${YELLOW}Container '$CONTAINER_NAME' is already running. Attaching to it...${NC}"
     echo ""
-    docker exec -it -u "$(id -u):$(id -g)" "$CONTAINER_NAME" /bin/bash
+    scenario_runner_preflight "$CONTAINER_NAME"
+    attach_shell "$CONTAINER_NAME"
     exit 0
 fi
 
@@ -62,10 +97,11 @@ fi
 if docker ps -aq -f name="$CONTAINER_NAME" | grep -q .; then
     echo -e "${YELLOW}Container '$CONTAINER_NAME' exists but is stopped. Starting it...${NC}"
     docker start "$CONTAINER_NAME" > /dev/null
+    scenario_runner_preflight "$CONTAINER_NAME"
     echo -e "${GREEN}✓${NC} Container started."
     echo -e "${GREEN}✓${NC} Attaching to it..."
     echo ""
-    docker exec -it -u "$(id -u):$(id -g)" "$CONTAINER_NAME" /bin/bash
+    attach_shell "$CONTAINER_NAME"
     exit 0
 fi
 
@@ -85,7 +121,7 @@ fi
 
 # Run container with NVIDIA GPU support (without --rm so it persists)
 # HOST_UID/HOST_GID tell the entrypoint to realign the container user
-docker run -it \
+docker run -d \
     --gpus all \
     --runtime=nvidia \
     -e NVIDIA_VISIBLE_DEVICES=all \
@@ -109,5 +145,11 @@ docker run -it \
     -v "$SCRIPT_DIR/examples":/home/workspace/sharc/examples \
     -v "$SCRIPT_DIR/run_offscreen_experiment.sh":/home/workspace/sharc/run_offscreen_experiment.sh \
     -v "$SCRIPT_DIR/experiment_run.json":/home/workspace/sharc/experiment_run.json \
-    "$IMAGE_NAME" 
+    "$IMAGE_NAME" > /dev/null
+
+echo -e "${GREEN}✓${NC} Container created and started."
+scenario_runner_preflight "$CONTAINER_NAME"
+echo -e "${GREEN}✓${NC} Attaching to container shell..."
+echo ""
+attach_shell "$CONTAINER_NAME"
 

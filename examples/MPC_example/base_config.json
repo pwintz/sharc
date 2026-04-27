@@ -208,6 +208,21 @@
             "road_speed_pct": 50,
             "road_stop_after_s": null,
             "walker_routes": []
+        },
+        "scenario_runner": {
+            "enabled": false,
+            "scenario_id": null,
+            "scenario_config_path": null,
+            "scenario_index": 0,
+            "route_file": null,
+            "route_id": null,
+            "town": null,
+            "seed": null,
+            "oncoming_actor_count": 1,
+            "oncoming_source_dist": 30.0,
+            "oncoming_speed_mps": 10.0,
+            "use_scenario_obstacles_only": false,
+            "route_waypoints": []
         }
     },
     "PARAMS_base_file": "PARAMS.base",
