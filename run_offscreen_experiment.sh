@@ -76,6 +76,10 @@ docker exec -i \
     "$CONTAINER" bash -s <<'CONTAINER_SCRIPT'
 set -euo pipefail
 
+# Prevent Python from using stale bytecache (.pyc files) when source
+# files are updated on the host but the container has old caches.
+export PYTHONDONTWRITEBYTECODE=1
+
 CARLA_ROOT=/home/workspace/carla_0.9.16
 if [ ! -f "$CARLA_ROOT/CarlaUE4.sh" ]; then
     CARLA_ROOT=/workspace
@@ -86,6 +90,9 @@ CARLA_LOG="${EXAMPLE_DIR}/carla_server.log"
 
 source /opt/conda/etc/profile.d/conda.sh 2>/dev/null || true
 conda activate carla 2>/dev/null || true
+
+# Clear stale Python bytecache
+find "${SHARC_ROOT}/resources" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
 
 echo "Running as: $(whoami)"
 

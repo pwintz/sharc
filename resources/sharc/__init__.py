@@ -971,7 +971,7 @@ def run_experiment_parallelized(experiment_config, params_base: list):
 
       # After a batch rollback, CARLA is reset and replayed.  Tiny
       # floating-point differences (< 1e-3 m) may occur.  Log any
-      # deviation and patch x0 for concatenation continuity.
+      # deviation and patch x0 + x[0] for concatenation continuity.
       if not actual_time_series.is_empty:
           prev_x = actual_time_series.x[-1]
           next_x0 = batch.valid_simulation_data.x0
@@ -991,7 +991,14 @@ def run_experiment_parallelized(experiment_config, params_base: list):
                   print(f"[batch handoff] WARNING: Batch handoff state deviation "
                         f"large ({max_dev:.6f} m) at k={batch.batch_init.k0}. "
                         f"prev_x={prev_x}, next_x0={next_x0}")
+              # Patch x0 so TimeStepSeries.__add__ doesn't raise ValueError.
               batch.valid_simulation_data.x0 = prev_x
+              # Also patch x[0] (the start-of-first-step state stored
+              # in the x list) so the concatenated trajectory is
+              # continuous — otherwise there's a tiny discontinuity at
+              # every batch boundary.
+              if batch.valid_simulation_data.x:
+                  batch.valid_simulation_data.x[0] = prev_x
 
       actual_time_series += batch.valid_simulation_data
       pending_computation = batch.batch_init.pending_computation
