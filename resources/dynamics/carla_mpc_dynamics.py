@@ -253,7 +253,8 @@ class CarlaMPCDynamics(Dynamics):
             settings.max_substep_delta_time = 0.01
         self.world.apply_settings(settings)
 
-        self.traffic_manager = self.client.get_trafficmanager(8100)
+        rpc_port = int(os.environ.get('_EXP_RPC_PORT', 8000))
+        self.traffic_manager = self.client.get_trafficmanager(rpc_port)
         self.traffic_manager.set_synchronous_mode(True)
         self.traffic_manager.set_random_device_seed(self.seed)
         self.world.tick()
@@ -440,6 +441,8 @@ class CarlaMPCDynamics(Dynamics):
                 self._sim_dir.rstrip('/'))
             self._recording_file = os.path.join(
                 experiment_root, 'carla_recording.log')
+            self._recording_meta_path = os.path.join(
+                experiment_root, 'carla_recording_meta.json')
             try:
                 self.client.start_recorder(self._recording_file, True)
                 self._recorder_started = True
@@ -448,10 +451,9 @@ class CarlaMPCDynamics(Dynamics):
                     'ego_actor_id': self.vehicle.id,
                     'recording_file': self._recording_file,
                     'time_step': self.time_step,
+                    'had_batch_rollbacks': getattr(self, '_had_batch_rollbacks', False),
                 }
-                meta_path = os.path.join(
-                    experiment_root, 'carla_recording_meta.json')
-                with open(meta_path, 'w') as f:
+                with open(self._recording_meta_path, 'w') as f:
                     json.dump(meta, f, indent=2)
                 print(f"[CarlaMPCDynamics] Started CARLA recorder → "
                       f"{self._recording_file}")
@@ -505,7 +507,42 @@ class CarlaMPCDynamics(Dynamics):
               f"{first_time_index} (tick {target_tick}).  "
               f"Resetting and fast-forwarding …")
 
+        # Stop the CARLA recorder before reset so the recording does
+        # not capture actor destroy/respawn.  Restart AFTER reset but
+        # BEFORE fast-forward so the FF ticks are recorded.  Since
+        # start_recorder() overwrites the file, the final recording
+        # contains FF ticks (steps 0..target_tick) followed by all real
+        # simulation ticks — a clean, continuous trajectory.
+        self._had_batch_rollbacks = True
+        was_recording = getattr(self, '_recorder_started', False)
+        if was_recording:
+            try:
+                self.client.stop_recorder()
+                self._recorder_started = False
+                print("[CarlaMPCDynamics] Stopped CARLA recorder for rollback.")
+            except Exception as e:
+                print(f"[CarlaMPCDynamics] WARNING: stop_recorder: {e}")
+
         self._reset_world()
+
+        # Restart recorder BEFORE fast-forward so FF ticks are captured.
+        if was_recording and hasattr(self, '_recording_file'):
+            try:
+                self.client.start_recorder(self._recording_file, True)
+                self._recorder_started = True
+                print("[CarlaMPCDynamics] Restarted CARLA recorder (pre-FF).")
+                # Update metadata: respawn assigns a new ego actor ID.
+                if hasattr(self, '_recording_meta_path'):
+                    meta = {
+                        'ego_actor_id': self.vehicle.id,
+                        'recording_file': self._recording_file,
+                        'time_step': self.time_step,
+                    }
+                    with open(self._recording_meta_path, 'w') as f:
+                        json.dump(meta, f, indent=2)
+            except Exception as e:
+                print(f"[CarlaMPCDynamics] WARNING: start_recorder: {e}")
+
         self._fast_forward(target_tick)
 
         # If any time-triggered NPC commands (e.g. road_stop_after_s) should
@@ -593,8 +630,9 @@ class CarlaMPCDynamics(Dynamics):
         _time.sleep(0.5)
 
         # ---- Reset TM seed ------------------------------------------- #
+        rpc_port = int(os.environ.get('_EXP_RPC_PORT', 8000))
         self.traffic_manager.set_synchronous_mode(False)
-        self.traffic_manager = self.client.get_trafficmanager(8100)
+        self.traffic_manager = self.client.get_trafficmanager(rpc_port)
         self.traffic_manager.set_synchronous_mode(True)
         self.traffic_manager.set_random_device_seed(self.seed)
 
@@ -1350,6 +1388,18 @@ class CarlaMPCDynamics(Dynamics):
             except Exception as e:
                 print(f"[CarlaMPCDynamics] WARNING: stop_recorder: {e}")
             self._recorder_started = False
+        # Update recording metadata with final rollback flag (diagnostic).
+        meta_path = getattr(self, '_recording_meta_path', None)
+        if meta_path and os.path.exists(meta_path):
+            try:
+                with open(meta_path, 'r') as f:
+                    meta = json.load(f)
+                meta['had_batch_rollbacks'] = getattr(
+                    self, '_had_batch_rollbacks', False)
+                with open(meta_path, 'w') as f:
+                    json.dump(meta, f, indent=2)
+            except Exception:
+                pass
         # Close sidecar file
         if getattr(self, '_extra_fh', None) is not None:
             try:
