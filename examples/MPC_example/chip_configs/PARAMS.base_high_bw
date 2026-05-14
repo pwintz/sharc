@@ -167,13 +167,11 @@
 --va_page_size_bytes      4096
 --bus_width_in_bytes            8
 
-### DRAM
-# Low-bandwidth DDR4
-
+### DDR4
+# high bandwidth
 --ramulator_standard              DDR4
---ramulator_speed                 DDR4_1600K
+--ramulator_speed                 DDR4_3200
 --ramulator_org                   DDR4_8Gb_x8
-
 --ramulator_channels              1
 --ramulator_ranks                 1
 --ramulator_bankgroups            4
@@ -189,20 +187,25 @@
 --ramulator_record_cmd_trace      FALSE
 --ramulator_print_cmd_trace       FALSE
 
---ramulator_tCK                   1250000
---ramulator_tCL                   11
+--ramulator_tCK                   625000
+--ramulator_tCL                   22
+--ramulator_tCCD                  8
 --ramulator_tCCDS                 4
---ramulator_tCCDL                 5
---ramulator_tCWL                  9
+--ramulator_tCCDL                 10
+--ramulator_tCWL                  16
 --ramulator_tBL                   4
---ramulator_tWTRS                 2
---ramulator_tWTRL                 6
---ramulator_tRP                   11
---ramulator_tRCD                  11
---ramulator_tRAS                  28
+--ramulator_tWTR                  12
+--ramulator_tWTRS                 4
+--ramulator_tWTRL                 12
+--ramulator_tRP                   22
+--ramulator_tRPpb                 22
+--ramulator_tRPab                 22
+--ramulator_tRCD                  22
+--ramulator_tRCDR                 22
+--ramulator_tRCDW                 22
+--ramulator_tRAS                  56
 
 --dram_tech_in_nm                 32
-
 
 ## Other
 

@@ -95,7 +95,7 @@
 --dcache_read_ports             2
 --dcache_write_ports            1
 --dcache_banks                  1
---dcache_assoc		              4
+--dcache_assoc		            4
 --dcache_line_size              64
 
 ### Reorder/Retire Stage
@@ -168,41 +168,40 @@
 --bus_width_in_bytes            8
 
 ### DRAM
-# Low-bandwidth DDR4
+# HBM
+--ramulator_standard              HBM
+--ramulator_speed                 HBM_1Gbps
+--ramulator_org                   HBM_4Gb
 
---ramulator_standard              DDR4
---ramulator_speed                 DDR4_1600K
---ramulator_org                   DDR4_8Gb_x8
-
---ramulator_channels              1
+--ramulator_channels              4
 --ramulator_ranks                 1
 --ramulator_bankgroups            4
 --ramulator_banks                 4
---ramulator_chip_width            8
---ramulator_rows                  65536
---ramulator_cols                  1024
+--ramulator_chip_width            128
+--ramulator_rows                  16384
+--ramulator_cols                  128
 
 --ramulator_scheduling_policy     FRFCFS_Cap
---ramulator_readq_entries         32
---ramulator_writeq_entries        32
+--ramulator_readq_entries         64
+--ramulator_writeq_entries        64
 
 --ramulator_record_cmd_trace      FALSE
 --ramulator_print_cmd_trace       FALSE
 
---ramulator_tCK                   1250000
---ramulator_tCL                   11
---ramulator_tCCDS                 4
---ramulator_tCCDL                 5
---ramulator_tCWL                  9
---ramulator_tBL                   4
---ramulator_tWTRS                 2
---ramulator_tWTRL                 6
---ramulator_tRP                   11
---ramulator_tRCD                  11
---ramulator_tRAS                  28
+--ramulator_tCK                   2000000
+--ramulator_tCL                   7
+--ramulator_tCCDS                 2
+--ramulator_tCCDL                 3
+--ramulator_tCWL                  4
+--ramulator_tBL                   2
+--ramulator_tWTRS                 4
+--ramulator_tWTRL                 8
+--ramulator_tRP                   7
+--ramulator_tRCDR                 7
+--ramulator_tRCDW                 6
+--ramulator_tRAS                  17
 
---dram_tech_in_nm                 32
-
+--dram_tech_in_nm                 28
 
 ## Other
 
